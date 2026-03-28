@@ -12,9 +12,7 @@ const C = {
 };
 
 const KemenagLogo = () => (
-  <div style={{ width: 36, height: 36, borderRadius: '50%', background: C.bg, border: `1.5px solid #cdd4cd`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-    <img src="/kemenag.png" alt="Kemenag" width={28} height={28} style={{ objectFit: 'contain' }} />
-  </div>
+  <img src="/kemenag.png" alt="Kemenag" width={36} height={36} style={{ objectFit: 'contain', flexShrink: 0 }} />
 );
 
 function ProctorContent() {

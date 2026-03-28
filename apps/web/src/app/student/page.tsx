@@ -14,10 +14,7 @@ interface Exam {
 }
 
 const KemenagLogo = () => (
-  <div className="shrink-0 flex items-center justify-center rounded-full"
-    style={{ width: '36px', height: '36px', background: '#f4f6f4', border: '1.5px solid #cdd4cd' }}>
-    <img src="/kemenag.png" alt="Kemenag" width={28} height={28} style={{ objectFit: 'contain' }} />
-  </div>
+  <img src="/kemenag.png" alt="Kemenag" width={36} height={36} style={{ objectFit: 'contain', flexShrink: 0 }} />
 );
 
 const BadgeStatus = ({ status }: { status: string | null }) => {

@@ -32,12 +32,10 @@ const C = {
 };
 
 // Jalur yang wajib ikut tes — filter langsung via API query param
-const JALUR_TES = 'REGULER MURNI';
+const JALUR_TES = 'REGULER';
 
 const KemenagLogo = ({ size = 32 }: { size?: number }) => (
-  <div style={{ width: size, height: size, borderRadius: '50%', background: '#fff', border: '1.5px solid #cdd4cd', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-    <img src="/kemenag.png" alt="Kemenag" width={size * 0.75} height={size * 0.75} style={{ objectFit: 'contain' }} />
-  </div>
+  <img src="/kemenag.png" alt="Kemenag" width={size} height={size} style={{ objectFit: 'contain', flexShrink: 0 }} />
 );
 
 const StatusBadge = ({ status }: { status: string }) => {
@@ -71,7 +69,12 @@ function TableHead({ cols }: { cols: { label: string; center?: boolean }[] }) {
 // ── MAIN ADMIN CONTENT ────────────────────────────────────────
 function AdminContent() {
   const { user, loading: authLoading, logout } = useAuth('admin');
-  const [page, setPage] = useState<Page>('exams');
+  const [page, setPage] = useState<Page>(() => {
+    if (typeof window !== 'undefined') {
+      return (localStorage.getItem('admin_page') as Page) || 'exams';
+    }
+    return 'exams';
+  });
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   if (authLoading) return <LoadingScreen />;
@@ -83,7 +86,7 @@ function AdminContent() {
     { key: 'rooms',     label: 'Ruangan & Proktor', icon: <School size={14} strokeWidth={2} /> },
     { key: 'pelaksana', label: 'Pelaksana Tes',     icon: <Shield size={14} strokeWidth={2} /> },
   ];
-  const nav = (p: Page) => { setPage(p); setSidebarOpen(false); };
+  const nav = (p: Page) => { setPage(p); setSidebarOpen(false); localStorage.setItem('admin_page', p); };
 
   return (
     <div style={{ minHeight: '100vh', background: C.bg, display: 'flex', fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}>
@@ -646,8 +649,26 @@ function PesertaPage() {
   };
 
   const fetchPeserta = useCallback(async () => {
-    const r = await GET<Pendaftar[]>('/api/admin/pendaftar?jalur=' + encodeURIComponent(JALUR_TES));
-    if (r.success) setData(r.data || []);
+    // Ambil dari dua sumber: pendaftar PMB (jalur REGULER) + cbt_users (role student)
+    const [pmb, manual] = await Promise.all([
+      GET<Pendaftar[]>('/api/admin/pendaftar?jalur=' + encodeURIComponent(JALUR_TES)),
+      GET<any[]>('/api/admin/users?role=student'),
+    ]);
+    const pmbData: Pendaftar[] = pmb.success ? (pmb.data || []) : [];
+    // Map cbt_users student ke format Pendaftar
+    const manualData: Pendaftar[] = (manual.success ? (manual.data || []) : []).map((u: any) => ({
+      id: u.id, nisn: u.nisn || u.username, nama_lengkap: u.full_name,
+      no_pendaftaran: '—', ruang_tes: u.room_id || '',
+      jalur: 'REGULER', asal_sekolah: '', jenis_kelamin: '',
+      tanggal_lahir: '', tanggal_tes: '', sesi_tes: '',
+      _sumber: 'manual' as const,
+    }));
+    // Tag PMB data with source
+    const taggedPmb = pmbData.map(p => ({ ...p, _sumber: 'pmb' as const }));
+    // Hindari duplikat berdasarkan NISN
+    const allNisn = new Set(taggedPmb.map(p => p.nisn));
+    const uniqueManual = manualData.filter(p => p.nisn && !allNisn.has(p.nisn));
+    setData([...taggedPmb, ...uniqueManual] as any);
     setLoading(false);
   }, []);
   useEffect(() => { fetchPeserta(); }, [fetchPeserta]);
@@ -693,7 +714,7 @@ function PesertaPage() {
               {/* DESKTOP: table */}
               <div className="hidden md:block" style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '12px', overflow: 'hidden' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                  <TableHead cols={[{label:'#'},{label:'Nama'},{label:'NISN'},{label:'No. Daftar'},{label:'Ruang'},{label:'Sesi'},{label:'Tgl Tes'}]} />
+                  <TableHead cols={[{label:'#'},{label:'Nama'},{label:'NISN'},{label:'No. Daftar'},{label:'Ruang'},{label:'Sesi'},{label:'Tgl Tes'},{label:'Sumber'}]} />
                   <tbody>
                     {filtered.map((p, i) => (
                       <tr key={p.id} style={{ borderBottom: i < filtered.length - 1 ? `1px solid ${C.borderLight}` : 'none' }}>
@@ -725,10 +746,13 @@ function PesertaPage() {
                       </div>
                       {p.ruang_tes && <span style={{ background: '#e0f0ff', color: '#1a5fa8', fontSize: '10px', fontWeight: 700, padding: '3px 9px', borderRadius: '999px', whiteSpace: 'nowrap', flexShrink: 0 }}>{p.ruang_tes}</span>}
                     </div>
-                    <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-                      {p.no_pendaftaran && <span style={{ color: C.textMuted, fontSize: '11px' }}>No. {p.no_pendaftaran}</span>}
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                      {p.no_pendaftaran && p.no_pendaftaran !== '—' && <span style={{ color: C.textMuted, fontSize: '11px' }}>No. {p.no_pendaftaran}</span>}
                       {p.sesi_tes && <span style={{ color: C.textMuted, fontSize: '11px' }}>Sesi {p.sesi_tes}</span>}
                       {p.tanggal_tes && <span style={{ color: C.textMuted, fontSize: '11px' }}>{p.tanggal_tes}</span>}
+                      {(p as any)._sumber === 'manual'
+                        ? <span style={{ background:'#fffbeb',color:'#b45309',fontSize:'10px',fontWeight:700,padding:'2px 9px',borderRadius:'999px' }}>Manual</span>
+                        : <span style={{ background:'#e0f0ff',color:'#1a5fa8',fontSize:'10px',fontWeight:700,padding:'2px 9px',borderRadius:'999px' }}>PMB</span>}
                     </div>
                   </div>
                 ))}
