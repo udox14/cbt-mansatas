@@ -1,6 +1,5 @@
 // ============================================================
-// Admin Routes — semua tabel pakai prefix cbt_
-// Admin bisa lihat data pendaftar PMB juga
+// Admin Routes — prefix cbt_, bind ke DB PMB existing
 // ============================================================
 
 import { Hono } from 'hono';
@@ -11,11 +10,40 @@ import { hashPassword, generateToken, newId, ok, err, now } from '../utils/helpe
 const admin = new Hono<{ Bindings: Env }>();
 admin.use('*', authMiddleware, requireRole('admin'));
 
-// ── ROOMS ────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
+// ROOMS — auto-sync dari pendaftar.ruang_tes
+// ══════════════════════════════════════════════════════════════
 
 admin.get('/rooms', async (c) => {
-  const { results } = await c.env.DB.prepare('SELECT * FROM cbt_rooms ORDER BY room_name').all();
+  // Rooms + jumlah pendaftar + proktor yang di-assign
+  const { results } = await c.env.DB.prepare(
+    `SELECT r.*,
+       (SELECT COUNT(*) FROM pendaftar p WHERE p.ruang_tes = r.room_name) as jumlah_peserta,
+       (SELECT GROUP_CONCAT(cu.nama_lengkap, ', ') FROM cbt_users cu WHERE cu.room_id = r.id AND cu.role = 'proctor') as proctor_names
+     FROM cbt_rooms r ORDER BY r.room_name`
+  ).all();
   return c.json(ok(results));
+});
+
+// Sync ruangan dari data pendaftar — buat otomatis dari ruang_tes
+admin.post('/rooms/sync', async (c) => {
+  // Ambil semua ruang_tes unik dari pendaftar
+  const { results: rooms } = await c.env.DB.prepare(
+    `SELECT DISTINCT ruang_tes FROM pendaftar WHERE ruang_tes IS NOT NULL AND ruang_tes != '' ORDER BY ruang_tes`
+  ).all();
+
+  let created = 0;
+  for (const r of rooms as any[]) {
+    const exists = await c.env.DB.prepare(
+      'SELECT id FROM cbt_rooms WHERE room_name = ?'
+    ).bind(r.ruang_tes).first();
+    if (!exists) {
+      await c.env.DB.prepare('INSERT INTO cbt_rooms (id, room_name, capacity) VALUES (?,?,40)')
+        .bind(newId(), r.ruang_tes).run();
+      created++;
+    }
+  }
+  return c.json(ok({ synced: rooms.length, created }, `${created} ruangan baru ditambahkan`));
 });
 
 admin.post('/rooms', async (c) => {
@@ -38,11 +66,38 @@ admin.delete('/rooms/:id', async (c) => {
   return c.json(ok(null, 'Ruangan dihapus'));
 });
 
-// ── CBT USERS (proktor + student non-PMB) ────────────────────
+// ══════════════════════════════════════════════════════════════
+// PROCTOR ASSIGNMENT — assign proktor ke ruangan
+// ══════════════════════════════════════════════════════════════
+
+// Get all proctors
+admin.get('/proctors', async (c) => {
+  const { results } = await c.env.DB.prepare(
+    `SELECT cu.id, cu.username, cu.nama_lengkap as full_name, cu.room_id,
+       r.room_name
+     FROM cbt_users cu
+     LEFT JOIN cbt_rooms r ON r.id = cu.room_id
+     WHERE cu.role = 'proctor' AND cu.is_active = 1
+     ORDER BY cu.nama_lengkap`
+  ).all();
+  return c.json(ok(results));
+});
+
+// Assign proctor to room
+admin.put('/proctors/:id/assign', async (c) => {
+  const { room_id } = await c.req.json();
+  await c.env.DB.prepare('UPDATE cbt_users SET room_id=?, updated_at=? WHERE id=? AND role=?')
+    .bind(room_id || null, now(), c.req.param('id'), 'proctor').run();
+  return c.json(ok(null, 'Proktor berhasil di-assign'));
+});
+
+// ══════════════════════════════════════════════════════════════
+// USERS — cbt_users (proktor + student non-PMB)
+// ══════════════════════════════════════════════════════════════
 
 admin.get('/users', async (c) => {
   const role = c.req.query('role');
-  let sql = `SELECT id, username, nama_lengkap as full_name, role, room_id, nisn, is_active, created_at FROM cbt_users`;
+  let sql = `SELECT id, username, nama_lengkap as full_name, role, room_id, nisn, is_active, created_at, 'cbt_user' as source FROM cbt_users`;
   const params: string[] = [];
   if (role) { sql += ' WHERE role = ?'; params.push(role); }
   sql += ' ORDER BY nama_lengkap';
@@ -79,9 +134,7 @@ admin.post('/users/bulk', async (c) => {
     const hash = await hashPassword(u.password || u.username);
     batch.push(stmt.bind(newId(), u.username, hash, u.full_name || u.nama_lengkap, u.role || 'student', u.room_id || null, u.nisn || null));
   }
-  for (let i = 0; i < batch.length; i += 100) {
-    await c.env.DB.batch(batch.slice(i, i + 100));
-  }
+  for (let i = 0; i < batch.length; i += 100) { await c.env.DB.batch(batch.slice(i, i + 100)); }
   return c.json(ok({ imported: users.length }, 'Import user berhasil'));
 });
 
@@ -101,18 +154,39 @@ admin.delete('/users/:id', async (c) => {
   return c.json(ok(null, 'User dihapus'));
 });
 
-// ── PENDAFTAR PMB (read-only, dari tabel existing) ───────────
+// ══════════════════════════════════════════════════════════════
+// PENDAFTAR PMB (read-only dari tabel existing)
+// ══════════════════════════════════════════════════════════════
 
 admin.get('/pendaftar', async (c) => {
-  const { results } = await c.env.DB.prepare(
-    `SELECT id, nisn, nama_lengkap, no_pendaftaran, ruang_tes, jalur, asal_sekolah,
-            jenis_kelamin, status_verifikasi, status_kelulusan
-     FROM pendaftar ORDER BY nama_lengkap`
-  ).all();
+  const room = c.req.query('ruang_tes');
+  let sql = `SELECT id, nisn, nama_lengkap, no_pendaftaran, ruang_tes, jalur, asal_sekolah,
+            jenis_kelamin, tanggal_lahir, tanggal_tes, sesi_tes,
+            status_verifikasi, status_kelulusan
+     FROM pendaftar`;
+  const params: string[] = [];
+  if (room) { sql += ' WHERE ruang_tes = ?'; params.push(room); }
+  sql += ' ORDER BY ruang_tes, nama_lengkap';
+  const { results } = await c.env.DB.prepare(sql).bind(...params).all();
   return c.json(ok(results));
 });
 
-// ── EXAMS ────────────────────────────────────────────────────
+// Statistik pendaftar
+admin.get('/pendaftar/stats', async (c) => {
+  const { results } = await c.env.DB.prepare(
+    `SELECT
+       COUNT(*) as total,
+       COUNT(ruang_tes) as assigned_room,
+       COUNT(DISTINCT ruang_tes) as total_rooms,
+       COUNT(tanggal_tes) as has_schedule
+     FROM pendaftar`
+  ).first<any>();
+  return c.json(ok(results));
+});
+
+// ══════════════════════════════════════════════════════════════
+// EXAMS
+// ══════════════════════════════════════════════════════════════
 
 admin.get('/exams', async (c) => {
   const { results } = await c.env.DB.prepare(
@@ -163,7 +237,9 @@ admin.delete('/exams/:id', async (c) => {
   return c.json(ok(null, 'Ujian dihapus'));
 });
 
-// ── QUESTIONS ────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
+// QUESTIONS
+// ══════════════════════════════════════════════════════════════
 
 admin.get('/exams/:examId/questions', async (c) => {
   const examId = c.req.param('examId');
@@ -238,7 +314,9 @@ admin.delete('/questions/:id', async (c) => {
   return c.json(ok(null, 'Soal dihapus'));
 });
 
-// ── EXAM TOKENS ──────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
+// EXAM TOKENS
+// ══════════════════════════════════════════════════════════════
 
 admin.get('/exams/:examId/tokens', async (c) => {
   const { results } = await c.env.DB.prepare(
@@ -261,22 +339,26 @@ admin.post('/exams/:examId/tokens/generate', async (c) => {
   return c.json(ok({ generated: targetRooms.length }, 'Token berhasil digenerate'));
 });
 
-// ── R2 UPLOAD ────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
+// R2 UPLOAD
+// ══════════════════════════════════════════════════════════════
 
 admin.post('/upload', async (c) => {
   const formData = await c.req.formData();
-  const file = formData.get('file') as File;
-  if (!file) return c.json(err('File tidak ditemukan'), 400);
+  const file = formData.get('file') as unknown as File;
+  if (!file || typeof file === 'string') return c.json(err('File tidak ditemukan'), 400);
   const ext = file.name.split('.').pop() || 'bin';
   const key = `media/${Date.now()}-${newId().slice(0, 8)}.${ext}`;
   await c.env.R2.put(key, await file.arrayBuffer(), { httpMetadata: { contentType: file.type } });
+  // Return full R2 path
   return c.json(ok({ key, url: `/r2/${key}` }, 'Upload berhasil'));
 });
 
-// ── RESULTS ──────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
+// RESULTS & MONITORING
+// ══════════════════════════════════════════════════════════════
 
 admin.get('/exams/:examId/results', async (c) => {
-  // Join ke pendaftar ATAU cbt_users tergantung user_type
   const { results } = await c.env.DB.prepare(
     `SELECT er.*,
        COALESCE(p.nama_lengkap, cu.nama_lengkap) as full_name,
@@ -293,8 +375,6 @@ admin.get('/exams/:examId/results', async (c) => {
   ).bind(c.req.param('examId')).all();
   return c.json(ok(results));
 });
-
-// ── LIVE MONITORING ──────────────────────────────────────────
 
 admin.get('/exams/:examId/sessions', async (c) => {
   const { results } = await c.env.DB.prepare(

@@ -54,7 +54,7 @@ interface ParsedUser {
 
 interface BulkImportProps {
   type: 'questions' | 'users';
-  examId?: number;           // required for questions
+  examId?: string;           // required for questions
   onSuccess: () => void;
   onClose: () => void;
   open: boolean;

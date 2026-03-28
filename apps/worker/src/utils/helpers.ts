@@ -67,7 +67,7 @@ export function buildRandomMaps(
 }
 
 export function now(): string {
-  return new Date().toISOString().replace('T', ' ').substring(0, 19);
+  return new Date().toISOString();
 }
 
 export function ok<T>(data: T, message?: string) {
