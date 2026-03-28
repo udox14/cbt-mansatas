@@ -159,13 +159,17 @@ admin.delete('/users/:id', async (c) => {
 // ══════════════════════════════════════════════════════════════
 
 admin.get('/pendaftar', async (c) => {
-  const room = c.req.query('ruang_tes');
+  const room  = c.req.query('ruang_tes');
+  const jalur = c.req.query('jalur'); // e.g. jalur=REGULER+MURNI
   let sql = `SELECT id, nisn, nama_lengkap, no_pendaftaran, ruang_tes, jalur, asal_sekolah,
             jenis_kelamin, tanggal_lahir, tanggal_tes, sesi_tes,
             status_verifikasi, status_kelulusan
      FROM pendaftar`;
+  const conditions: string[] = [];
   const params: string[] = [];
-  if (room) { sql += ' WHERE ruang_tes = ?'; params.push(room); }
+  if (room)  { conditions.push('ruang_tes = ?'); params.push(room); }
+  if (jalur) { conditions.push('LOWER(jalur) = LOWER(?)'); params.push(jalur); }
+  if (conditions.length) sql += ' WHERE ' + conditions.join(' AND ');
   sql += ' ORDER BY ruang_tes, nama_lengkap';
   const { results } = await c.env.DB.prepare(sql).bind(...params).all();
   return c.json(ok(results));

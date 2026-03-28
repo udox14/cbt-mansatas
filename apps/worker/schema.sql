@@ -103,6 +103,7 @@ CREATE TABLE IF NOT EXISTS cbt_exam_sessions (
   started_at TEXT DEFAULT (datetime('now')),
   finished_at TEXT,
   last_heartbeat TEXT DEFAULT (datetime('now')),
+  is_time_locked INTEGER DEFAULT 0,
   ip_address TEXT,
   user_agent TEXT,
   UNIQUE(exam_id, user_id, user_type)

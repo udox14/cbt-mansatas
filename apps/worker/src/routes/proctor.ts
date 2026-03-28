@@ -30,9 +30,10 @@ proctor.get('/sessions', async (c) => {
   const examId = c.req.query('exam_id');
   let sql = `
     SELECT es.id, es.exam_id, es.user_id, es.user_type, es.status, es.cheat_warnings,
-           es.started_at, es.finished_at, es.last_heartbeat, es.device_id,
+           es.started_at, es.finished_at, es.last_heartbeat, es.device_id, es.is_time_locked,
            COALESCE(p.nama_lengkap, cu.nama_lengkap) as full_name,
            COALESCE(p.nisn, cu.nisn) as nisn,
+           COALESCE(p.sesi_tes, '') as sesi_tes,
            e.title as exam_title,
            (SELECT COUNT(*) FROM cbt_student_answers sa WHERE sa.session_id = es.id) as answered_count,
            (SELECT COUNT(*) FROM cbt_questions q WHERE q.exam_id = es.exam_id) as total_questions
@@ -49,12 +50,14 @@ proctor.get('/sessions', async (c) => {
     const diff = Date.now() - new Date(s.last_heartbeat).getTime();
     let live_status = 'offline';
     if (s.status === 'submitted' || s.status === 'force_submitted') live_status = 'selesai';
+    else if (s.is_time_locked) live_status = 'dikunci';
     else if (diff < 30000) live_status = 'online';
     return { ...s, live_status };
   });
   return c.json(ok(enriched));
 });
 
+// Reset device lock
 proctor.post('/sessions/:id/reset', async (c) => {
   const user = c.get('user');
   const session = await c.env.DB.prepare(
@@ -65,6 +68,21 @@ proctor.post('/sessions/:id/reset', async (c) => {
     `UPDATE cbt_exam_sessions SET device_id = NULL, status = 'active', last_heartbeat = ? WHERE id = ?`
   ).bind(now(), c.req.param('id')).run();
   return c.json(ok(null, 'Sesi berhasil direset'));
+});
+
+// Unlock time lock — buka kembali sesi yang dikunci karena waktu habis
+proctor.post('/sessions/:id/unlock', async (c) => {
+  const user = c.get('user');
+  const session = await c.env.DB.prepare(
+    'SELECT * FROM cbt_exam_sessions WHERE id = ? AND room_id = ?'
+  ).bind(c.req.param('id'), user.room_id).first<any>();
+  if (!session) return c.json(err('Sesi tidak ditemukan di ruangan Anda'), 404);
+  if (session.status === 'submitted' || session.status === 'force_submitted')
+    return c.json(err('Ujian sudah selesai, tidak bisa dibuka'), 400);
+  await c.env.DB.prepare(
+    `UPDATE cbt_exam_sessions SET is_time_locked = 0, last_heartbeat = ? WHERE id = ?`
+  ).bind(now(), c.req.param('id')).run();
+  return c.json(ok(null, 'Sesi berhasil dibuka'));
 });
 
 export default proctor;
