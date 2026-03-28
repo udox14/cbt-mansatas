@@ -175,6 +175,15 @@ admin.get('/pendaftar', async (c) => {
   return c.json(ok(results));
 });
 
+// Update ruang_tes peserta pendaftar PMB
+admin.put('/pendaftar/:id/ruang', async (c) => {
+  const { ruang_tes } = await c.req.json<{ ruang_tes: string | null }>();
+  await c.env.DB.prepare(
+    'UPDATE pendaftar SET ruang_tes = ? WHERE id = ?'
+  ).bind(ruang_tes || null, c.req.param('id')).run();
+  return c.json(ok(null, 'Ruangan berhasil diperbarui'));
+});
+
 // Statistik pendaftar
 admin.get('/pendaftar/stats', async (c) => {
   const { results } = await c.env.DB.prepare(

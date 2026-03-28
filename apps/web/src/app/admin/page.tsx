@@ -66,6 +66,19 @@ function TableHead({ cols }: { cols: { label: string; center?: boolean }[] }) {
   );
 }
 
+// ── TANGGAL & HARI ───────────────────────────────────────────
+function TanggalHari() {
+  const now = new Date();
+  const hari = now.toLocaleDateString('id-ID', { weekday: 'long' });
+  const tanggal = now.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+  return (
+    <div>
+      <p style={{ color: C.text, fontSize: '13px', fontWeight: 800, lineHeight: 1.2 }}>{hari}</p>
+      <p style={{ color: C.textMuted, fontSize: '11px', fontWeight: 500, marginTop: '1px' }}>{tanggal}</p>
+    </div>
+  );
+}
+
 // ── MAIN ADMIN CONTENT ────────────────────────────────────────
 function AdminContent() {
   const { user, loading: authLoading, logout } = useAuth('admin');
@@ -147,15 +160,12 @@ function AdminContent() {
       {/* ── MAIN ── */}
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', position: 'relative', zIndex: 1 }}>
 
-        {/* mobile header */}
-        <header className="lg:hidden" style={{ background: C.white, borderBottom: `1.5px solid ${C.border}`, padding: '0 16px', height: '57px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <button onClick={() => setSidebarOpen(true)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px' }}>
+        {/* header — mobile: hamburger + tanggal, desktop: tanggal saja */}
+        <header style={{ background: C.white, borderBottom: `1.5px solid ${C.border}`, padding: '0 20px', height: '57px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <button className="lg:hidden" onClick={() => setSidebarOpen(true)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', marginRight: '8px' }}>
             <Menu size={20} color="#6b7c6e" />
           </button>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <KemenagLogo size={28} />
-            <p style={{ fontSize: '13px', fontWeight: 800, color: C.text }}>MAN 1 TASIKMALAYA</p>
-          </div>
+          <TanggalHari />
         </header>
 
         <main style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
@@ -631,6 +641,10 @@ function PesertaPage() {
   const [showImport, setShowImport] = useState(false);
   const [editPeserta, setEditPeserta] = useState<any | null>(null);
   const [savingPeserta, setSavingPeserta] = useState(false);
+  const [assignTarget, setAssignTarget] = useState<any | null>(null);
+  const [assignRoom, setAssignRoom] = useState('');
+  const [savingAssign, setSavingAssign] = useState(false);
+  const [allRooms, setAllRooms] = useState<Room[]>([]);
 
   const savePeserta = async () => {
     if (!editPeserta?.nisn || !editPeserta?.nama_lengkap) { toast('error', 'NISN dan nama wajib diisi'); return; }
@@ -639,7 +653,10 @@ function PesertaPage() {
     const r = await POST('/api/admin/users', {
       username: editPeserta.nisn,
       full_name: editPeserta.nama_lengkap,
-      password: editPeserta.tanggal_lahir?.replace(/-/g, '').split('').reverse().join('') || editPeserta.nisn,
+      // Password: tanggal lahir format DDMMYYYY (misal: 2005-03-22 → 22032005)
+      password: editPeserta.tanggal_lahir
+        ? (() => { const [y,m,d] = editPeserta.tanggal_lahir.split('-'); return `${d}${m}${y}`; })()
+        : editPeserta.nisn,
       role: 'student',
       nisn: editPeserta.nisn,
     });
@@ -648,13 +665,38 @@ function PesertaPage() {
     else toast('error', r.error || 'Gagal');
   };
 
+  const saveAssignRoom = async () => {
+    if (!assignTarget) return;
+    setSavingAssign(true);
+    const sumber = (assignTarget as any)._sumber;
+    let r;
+    if (sumber === 'manual') {
+      // cbt_users: update room_id via PUT /api/admin/users/:id
+      r = await PUT(`/api/admin/users/${assignTarget.id}`, {
+        full_name: assignTarget.nama_lengkap,
+        role: 'student',
+        room_id: assignRoom || null,
+      });
+    } else {
+      // pendaftar PMB: update ruang_tes via PUT /api/admin/pendaftar/:id/ruang
+      r = await PUT(`/api/admin/pendaftar/${assignTarget.id}/ruang`, {
+        ruang_tes: assignRoom || null,
+      });
+    }
+    setSavingAssign(false);
+    if (r.success) { toast('success', 'Ruangan berhasil diubah'); setAssignTarget(null); fetchPeserta(); }
+    else toast('error', r.error || 'Gagal');
+  };
+
   const fetchPeserta = useCallback(async () => {
     // Ambil dari dua sumber: pendaftar PMB (jalur REGULER) + cbt_users (role student)
-    const [pmb, manual] = await Promise.all([
+    const [pmb, manual, rooms] = await Promise.all([
       GET<Pendaftar[]>('/api/admin/pendaftar?jalur=' + encodeURIComponent(JALUR_TES)),
       GET<any[]>('/api/admin/users?role=student'),
+      GET<Room[]>('/api/admin/rooms'),
     ]);
     const pmbData: Pendaftar[] = pmb.success ? (pmb.data || []) : [];
+    if (rooms.success) setAllRooms(rooms.data || []);
     // Map cbt_users student ke format Pendaftar
     const manualData: Pendaftar[] = (manual.success ? (manual.data || []) : []).map((u: any) => ({
       id: u.id, nisn: u.nisn || u.username, nama_lengkap: u.full_name,
@@ -714,7 +756,7 @@ function PesertaPage() {
               {/* DESKTOP: table */}
               <div className="hidden md:block" style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '12px', overflow: 'hidden' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                  <TableHead cols={[{label:'#'},{label:'Nama'},{label:'NISN'},{label:'No. Daftar'},{label:'Ruang'},{label:'Sesi'},{label:'Tgl Tes'},{label:'Sumber'}]} />
+                  <TableHead cols={[{label:'#'},{label:'Nama'},{label:'NISN'},{label:'No. Daftar'},{label:'Ruang'},{label:'Sesi'},{label:'Tgl Tes'},{label:'Sumber'},{label:'Aksi',center:true}]} />
                   <tbody>
                     {filtered.map((p, i) => (
                       <tr key={p.id} style={{ borderBottom: i < filtered.length - 1 ? `1px solid ${C.borderLight}` : 'none' }}>
@@ -746,13 +788,19 @@ function PesertaPage() {
                       </div>
                       {p.ruang_tes && <span style={{ background: '#e0f0ff', color: '#1a5fa8', fontSize: '10px', fontWeight: 700, padding: '3px 9px', borderRadius: '999px', whiteSpace: 'nowrap', flexShrink: 0 }}>{p.ruang_tes}</span>}
                     </div>
-                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-                      {p.no_pendaftaran && p.no_pendaftaran !== '—' && <span style={{ color: C.textMuted, fontSize: '11px' }}>No. {p.no_pendaftaran}</span>}
-                      {p.sesi_tes && <span style={{ color: C.textMuted, fontSize: '11px' }}>Sesi {p.sesi_tes}</span>}
-                      {p.tanggal_tes && <span style={{ color: C.textMuted, fontSize: '11px' }}>{p.tanggal_tes}</span>}
-                      {(p as any)._sumber === 'manual'
-                        ? <span style={{ background:'#fffbeb',color:'#b45309',fontSize:'10px',fontWeight:700,padding:'2px 9px',borderRadius:'999px' }}>Manual</span>
-                        : <span style={{ background:'#e0f0ff',color:'#1a5fa8',fontSize:'10px',fontWeight:700,padding:'2px 9px',borderRadius:'999px' }}>PMB</span>}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                        {p.no_pendaftaran && p.no_pendaftaran !== '—' && <span style={{ color: C.textMuted, fontSize: '11px' }}>No. {p.no_pendaftaran}</span>}
+                        {p.sesi_tes && <span style={{ color: C.textMuted, fontSize: '11px' }}>Sesi {p.sesi_tes}</span>}
+                        {p.tanggal_tes && <span style={{ color: C.textMuted, fontSize: '11px' }}>{p.tanggal_tes}</span>}
+                        {(p as any)._sumber === 'manual'
+                          ? <span style={{ background:'#fffbeb',color:'#b45309',fontSize:'10px',fontWeight:700,padding:'2px 9px',borderRadius:'999px' }}>Manual</span>
+                          : <span style={{ background:'#e0f0ff',color:'#1a5fa8',fontSize:'10px',fontWeight:700,padding:'2px 9px',borderRadius:'999px' }}>PMB</span>}
+                      </div>
+                      <button onClick={() => { setAssignTarget(p); setAssignRoom((p as any).ruang_tes || ''); }}
+                        style={{ display:'inline-flex',alignItems:'center',gap:'4px',color:C.green,background:C.greenLight,border:`1.5px solid ${C.greenBorder}`,borderRadius:'8px',padding:'5px 10px',fontSize:'11.5px',fontWeight:700,cursor:'pointer',flexShrink:0 }}>
+                        <UserPlus size={12} /> {p.ruang_tes ? 'Pindah' : 'Assign'}
+                      </button>
                     </div>
                   </div>
                 ))}
@@ -773,6 +821,28 @@ function PesertaPage() {
             <div className="flex gap-2 justify-end pt-1">
               <Button variant="secondary" size="sm" onClick={() => setEditPeserta(null)}>Batal</Button>
               <Button size="sm" loading={savingPeserta} onClick={savePeserta}>Simpan</Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Modal assign ruangan */}
+      <Modal open={!!assignTarget} onClose={() => setAssignTarget(null)} title={`${assignTarget?.ruang_tes ? 'Pindah Ruangan' : 'Assign Ruangan'} — ${assignTarget?.nama_lengkap}`} size="sm">
+        {assignTarget && (
+          <div className="space-y-3">
+            <Select label="Pilih Ruangan" value={assignRoom} onChange={e => setAssignRoom(e.target.value)}
+              options={[
+                { value: '', label: '— Tanpa Ruangan —' },
+                ...allRooms.map(r => ({ value: r.room_name, label: r.room_name })),
+              ]} />
+            {assignTarget.ruang_tes && (
+              <p style={{ color: C.textMuted, fontSize: '11.5px' }}>
+                Ruangan saat ini: <strong style={{ color: C.text }}>{assignTarget.ruang_tes}</strong>
+              </p>
+            )}
+            <div className="flex gap-2 justify-end pt-1">
+              <Button variant="secondary" size="sm" onClick={() => setAssignTarget(null)}>Batal</Button>
+              <Button size="sm" loading={savingAssign} onClick={saveAssignRoom}>Simpan</Button>
             </div>
           </div>
         )}
