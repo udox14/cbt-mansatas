@@ -1,0 +1,16 @@
+{
+  "name": "cbt-pmb",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Sistem CBT Penerimaan Murid Baru - Cloudflare Stack",
+  "scripts": {
+    "setup": "cd apps/worker && npm install && cd ../../apps/web && npm install",
+    "dev:worker": "cd apps/worker && npm run dev",
+    "dev:web": "cd apps/web && npm run dev",
+    "deploy:worker": "cd apps/worker && npm run deploy",
+    "build:web": "cd apps/web && npm run build",
+    "deploy:web": "cd apps/web && npx wrangler pages deploy out --project-name=cbt-pmb",
+    "db:init": "cd apps/worker && npm run db:init",
+    "db:init:local": "cd apps/worker && npm run db:init:local"
+  }
+}
