@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { GET, POST, PUT, DEL } from '@/lib/api';
 import {
-  Button, Input, Textarea, Select, Modal, Badge, LoadingScreen, EmptyState,
+  Button, Input, Textarea, Select, Modal, LoadingScreen, EmptyState,
   ToastProvider, useToast, Confirm, Spinner,
 } from '@/components/ui';
 import RichEditor from '@/components/admin/RichEditor';
@@ -17,7 +17,7 @@ import {
 
 // ── TYPES ────────────────────────────────────────────────────
 interface Room { id: string; room_name: string; capacity: number; jumlah_peserta?: number }
-interface Proctor { id: string; username: string; full_name: string; room_id: string | null; room_name?: string }
+interface Proctor { id: string; username: string; full_name: string; role: string; room_id: string | null; room_name?: string }
 interface Pendaftar { id: string; nisn: string; nama_lengkap: string; no_pendaftaran: string; ruang_tes: string; jalur: string; asal_sekolah: string; jenis_kelamin: string; tanggal_lahir: string; tanggal_tes: string; sesi_tes: string }
 interface Exam { id: string; title: string; description: string | null; duration_minutes: number; active_status: string; question_count: number; is_score_visible: number; randomize_questions: number; randomize_options: number; rules_text: string | null; completion_message: string; passing_score: number }
 interface Question { id: string; question_text: string; question_type: string; question_order: number; image_url: string | null; audio_url: string | null; options: QOption[] }
@@ -25,24 +25,17 @@ interface QOption { id?: string; option_label: string; option_text: string; imag
 type Page = 'exams' | 'peserta' | 'rooms' | 'pelaksana';
 type ExamTab = 'soal' | 'token' | 'monitor' | 'hasil';
 
-// ── SHARED STYLE TOKENS ───────────────────────────────────────
 const C = {
-  bg: '#f4f6f4',
-  white: '#fff',
-  border: '#e0e5e0',
-  borderLight: '#edf0ed',
-  borderMid: '#d4dbd4',
-  text: '#1e2e22',
-  textMid: '#4a6655',
-  textMuted: '#8a9e8d',
-  textFaint: '#a8b9aa',
-  green: '#2d7a4f',
-  greenLight: '#e2ebe3',
-  greenBorder: '#b5d9c4',
+  bg: '#f4f6f4', white: '#fff', border: '#e0e5e0', borderLight: '#edf0ed', borderMid: '#d4dbd4',
+  text: '#1e2e22', textMid: '#4a6655', textMuted: '#8a9e8d', textFaint: '#a8b9aa',
+  green: '#2d7a4f', greenLight: '#e2ebe3', greenBorder: '#b5d9c4',
 };
 
+// ── JALUR YANG TAMPIL DI PESERTA TES ─────────────────────────
+const JALUR_REGULER = ['REGULER MURNI', 'Reguler Murni', 'reguler murni', 'REGULER'];
+
 const KemenagLogo = ({ size = 32 }: { size?: number }) => (
-  <div style={{ width: size, height: size, borderRadius: '50%', background: C.bg, border: `1.5px solid #cdd4cd`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+  <div style={{ width: size, height: size, borderRadius: '50%', background: C.bg, border: '1.5px solid #cdd4cd', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
     <svg width={size * 0.6} height={size * 0.6} viewBox="0 0 100 100" fill="none">
       <g transform="translate(50,50)">
         <polygon points="0,-20 4.5,-10 15,-14 10,-5 20,0 10,5 15,14 4.5,10 0,20 -4.5,10 -15,14 -10,5 -20,0 -10,-5 -15,-14 -4.5,-10" fill="#2d7a4f" />
@@ -54,33 +47,46 @@ const KemenagLogo = ({ size = 32 }: { size?: number }) => (
 
 const StatusBadge = ({ status }: { status: string }) => {
   const map: Record<string, { bg: string; color: string; label: string }> = {
-    active:   { bg: '#e0f0ff', color: '#1a5fa8', label: 'Aktif' },
-    draft:    { bg: '#f1f1f0', color: '#6b7c6e', label: 'Draft' },
+    active:   { bg: '#e0f0ff', color: '#1a5fa8', label: 'Aktif'   },
+    draft:    { bg: '#f1f1f0', color: '#6b7c6e', label: 'Draft'   },
     finished: { bg: C.greenLight, color: '#2d6644', label: 'Selesai' },
   };
   const s = map[status] || map.draft;
   return <span style={{ background: s.bg, color: s.color, fontSize: '10px', fontWeight: 700, padding: '3px 9px', borderRadius: '999px', whiteSpace: 'nowrap' }}>{s.label}</span>;
 };
 
-// ── FLAT TAB ──────────────────────────────────────────────────
 const EXAM_TABS: { key: ExamTab; label: string }[] = [
   { key: 'soal', label: 'Soal' }, { key: 'token', label: 'Token' },
   { key: 'monitor', label: 'Monitor' }, { key: 'hasil', label: 'Hasil' },
 ];
+
+// ── TABLE + CARD responsive helpers ──────────────────────────
+function TableHead({ cols }: { cols: { label: string; center?: boolean }[] }) {
+  return (
+    <thead>
+      <tr style={{ background: C.bg, borderBottom: `1.5px solid ${C.borderMid}` }}>
+        {cols.map(c => (
+          <th key={c.label} style={{ padding: '9px 14px', textAlign: c.center ? 'center' : 'left', color: C.textMid, fontSize: '10.5px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>{c.label}</th>
+        ))}
+      </tr>
+    </thead>
+  );
+}
 
 // ── MAIN ADMIN CONTENT ────────────────────────────────────────
 function AdminContent() {
   const { user, loading: authLoading, logout } = useAuth('admin');
   const [page, setPage] = useState<Page>('exams');
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
   if (authLoading) return <LoadingScreen />;
   if (!user) return null;
 
   const menu: { key: Page; label: string; icon: React.ReactNode }[] = [
-    { key: 'exams',    label: 'Ujian',            icon: <ClipboardList size={14} strokeWidth={2} /> },
-    { key: 'peserta',  label: 'Peserta Tes',       icon: <Users size={14} strokeWidth={2} /> },
-    { key: 'rooms',    label: 'Ruangan & Proktor', icon: <School size={14} strokeWidth={2} /> },
-    { key: 'pelaksana',label: 'Pelaksana Tes',     icon: <Shield size={14} strokeWidth={2} /> },
+    { key: 'exams',     label: 'Ujian',            icon: <ClipboardList size={14} strokeWidth={2} /> },
+    { key: 'peserta',   label: 'Peserta Tes',       icon: <Users size={14} strokeWidth={2} /> },
+    { key: 'rooms',     label: 'Ruangan & Proktor', icon: <School size={14} strokeWidth={2} /> },
+    { key: 'pelaksana', label: 'Pelaksana Tes',     icon: <Shield size={14} strokeWidth={2} /> },
   ];
   const nav = (p: Page) => { setPage(p); setSidebarOpen(false); };
 
@@ -91,29 +97,26 @@ function AdminContent() {
       <div className="pointer-events-none fixed inset-0" style={{ backgroundImage: 'radial-gradient(circle,#c4ccc4 1px,transparent 1px)', backgroundSize: '26px 26px', opacity: 0.3, zIndex: 0 }} />
 
       {/* mobile overlay */}
-      {sidebarOpen && <div className="fixed inset-0 bg-black/20 z-40 lg:hidden" onClick={() => setSidebarOpen(false)} />}
+      {sidebarOpen && (
+        <div className="fixed inset-0 z-40 lg:hidden" style={{ background: 'rgba(30,46,34,0.3)' }} onClick={() => setSidebarOpen(false)} />
+      )}
 
       {/* ── SIDEBAR ── */}
-      <aside className={`fixed lg:static inset-y-0 left-0 z-50 flex flex-col transform transition-transform lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}
-        style={{ width: '220px', background: C.white, borderRight: `1.5px solid ${C.border}`, minHeight: '100vh', position: 'relative', zIndex: 50 }}>
+      <aside
+        className={`fixed lg:static inset-y-0 left-0 z-50 flex flex-col transform transition-transform duration-200 lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}
+        style={{ width: '220px', background: C.white, borderRight: `1.5px solid ${C.border}`, minHeight: '100vh' }}>
 
-        {/* brand */}
-        <div style={{ padding: '18px 14px 14px', borderBottom: `1.5px solid ${C.border}` }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '9px', marginBottom: '11px' }}>
-            <KemenagLogo size={34} />
-            <div>
-              <p style={{ color: C.text, fontSize: '10.5px', fontWeight: 800, lineHeight: 1.2 }}>MAN 1 TASIKMALAYA</p>
-              <p style={{ color: '#7a9e86', fontSize: '9px', fontWeight: 600, fontStyle: 'italic', marginTop: '1px' }}>Bangkit · Maju · Juara</p>
-            </div>
-          </div>
-          <div style={{ background: C.greenLight, border: `1.5px solid ${C.greenBorder}`, borderRadius: '10px', padding: '7px 10px' }}>
-            <p style={{ color: C.text, fontSize: '11.5px', fontWeight: 700 }}>Administrator</p>
-            <p style={{ color: '#6b7c6e', fontSize: '10px', marginTop: '1px' }}>{user.username}</p>
+        {/* brand — border sejajar dengan header */}
+        <div style={{ padding: '0 14px', borderBottom: `1.5px solid ${C.border}`, height: '57px', display: 'flex', alignItems: 'center', gap: '9px' }}>
+          <KemenagLogo size={32} />
+          <div>
+            <p style={{ color: C.text, fontSize: '10.5px', fontWeight: 800, lineHeight: 1.2 }}>MAN 1 TASIKMALAYA</p>
+            <p style={{ color: '#7a9e86', fontSize: '9px', fontWeight: 600, fontStyle: 'italic', marginTop: '1px' }}>Bangkit · Maju · Juara</p>
           </div>
         </div>
 
         {/* nav */}
-        <nav style={{ flex: 1, padding: '10px 8px' }}>
+        <nav style={{ flex: 1, padding: '10px 8px', overflowY: 'auto' }}>
           <p style={{ color: C.textFaint, fontSize: '10px', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', padding: '0 6px', marginBottom: '5px' }}>Menu</p>
           {menu.map(m => (
             <button key={m.key} onClick={() => nav(m.key)}
@@ -129,8 +132,13 @@ function AdminContent() {
           ))}
         </nav>
 
-        {/* logout */}
-        <div style={{ padding: '8px', borderTop: `1.5px solid ${C.border}` }}>
+        {/* user info + logout */}
+        <div style={{ borderTop: `1.5px solid ${C.border}`, padding: '10px 8px' }}>
+          {/* user badge */}
+          <div style={{ background: C.greenLight, border: `1.5px solid ${C.greenBorder}`, borderRadius: '10px', padding: '8px 10px', marginBottom: '6px' }}>
+            <p style={{ color: C.text, fontSize: '12px', fontWeight: 700, lineHeight: 1.2 }}>{user.full_name || 'Administrator'}</p>
+            <p style={{ color: C.textMuted, fontSize: '10px', marginTop: '2px', fontFamily: 'monospace' }}>{user.username}</p>
+          </div>
           <button onClick={logout}
             style={{ display: 'flex', alignItems: 'center', gap: '9px', padding: '9px 12px', borderRadius: '11px', fontSize: '12.5px', fontWeight: 600, color: '#dc2626', background: 'none', border: 'none', cursor: 'pointer', width: '100%' }}>
             <LogOut size={14} strokeWidth={2} /> Keluar
@@ -142,11 +150,14 @@ function AdminContent() {
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', position: 'relative', zIndex: 1 }}>
 
         {/* mobile header */}
-        <header className="lg:hidden" style={{ background: C.white, borderBottom: `1.5px solid ${C.border}`, padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <button onClick={() => setSidebarOpen(true)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+        <header className="lg:hidden" style={{ background: C.white, borderBottom: `1.5px solid ${C.border}`, padding: '0 16px', height: '57px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <button onClick={() => setSidebarOpen(true)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px' }}>
             <Menu size={20} color="#6b7c6e" />
           </button>
-          <p style={{ fontSize: '14px', fontWeight: 700, color: C.text }}>{menu.find(m => m.key === page)?.label}</p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <KemenagLogo size={28} />
+            <p style={{ fontSize: '13px', fontWeight: 800, color: C.text }}>MAN 1 TASIKMALAYA</p>
+          </div>
         </header>
 
         <main style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
@@ -156,7 +167,7 @@ function AdminContent() {
           {page === 'pelaksana' && <PelaksanaPage />}
         </main>
 
-        <footer style={{ textAlign: 'center', padding: '12px', color: '#a8b3a8', fontSize: '11px', fontWeight: 500, borderTop: `1px solid ${C.borderLight}`, background: C.bg }}>
+        <footer style={{ textAlign: 'center', padding: '12px', color: '#a8b3a8', fontSize: '11px', fontWeight: 500, borderTop: `1px solid ${C.borderLight}` }}>
           © 2026 MAN 1 Tasikmalaya — DRUDOX
         </footer>
       </div>
@@ -197,16 +208,11 @@ function ExamsPage() {
     if (selectedExam?.id === confirmDel.id) setSelectedExam(null);
     fetchExams();
   };
-
   const openDetail = (exam: Exam) => { setSelectedExam(exam); setActiveTab('soal'); };
 
-  // ── DETAIL VIEW ──
   if (selectedExam) return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-
-      {/* detail header */}
       <div style={{ background: C.white, borderBottom: `1.5px solid ${C.border}`, padding: '14px 20px' }}>
-        {/* breadcrumb */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px' }}>
           <button onClick={() => setSelectedExam(null)}
             style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: '#6b7c6e', fontSize: '12px', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
@@ -215,7 +221,6 @@ function ExamsPage() {
           <span style={{ color: C.borderMid }}>›</span>
           <span style={{ color: C.text, fontSize: '12px', fontWeight: 700 }}>{selectedExam.title}</span>
         </div>
-        {/* title row */}
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px' }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '3px' }}>
@@ -242,12 +247,13 @@ function ExamsPage() {
         </div>
       </div>
 
-      {/* FLAT TAB STRIP */}
-      <div style={{ background: C.white, borderBottom: `1.5px solid ${C.border}`, padding: '0 20px', display: 'flex', gap: 0 }}>
+      {/* flat tabs */}
+      <div style={{ background: C.white, borderBottom: `1.5px solid ${C.border}`, padding: '0 20px', display: 'flex' }}>
         {EXAM_TABS.map(t => (
           <button key={t.key} onClick={() => setActiveTab(t.key)}
             style={{
-              padding: '11px 18px 10px', fontSize: '12.5px', fontWeight: activeTab === t.key ? 800 : 600,
+              padding: '11px 18px 10px', fontSize: '12.5px',
+              fontWeight: activeTab === t.key ? 800 : 600,
               color: activeTab === t.key ? C.green : C.textMuted,
               background: 'none', border: 'none',
               borderBottom: `2.5px solid ${activeTab === t.key ? C.green : 'transparent'}`,
@@ -258,71 +264,13 @@ function ExamsPage() {
         ))}
       </div>
 
-      {/* TAB CONTENT */}
       <div style={{ flex: 1, padding: '16px 20px', overflow: 'auto' }}>
         {activeTab === 'soal'    && <QuestionsView examId={selectedExam.id} />}
         {activeTab === 'token'   && <TokensView examId={selectedExam.id} />}
         {activeTab === 'monitor' && <MonitorView examId={selectedExam.id} />}
         {activeTab === 'hasil'   && <ResultsView examId={selectedExam.id} />}
       </div>
-    </div>
-  );
 
-  // ── LIST VIEW ──
-  return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-      {/* topbar */}
-      <div style={{ background: C.white, borderBottom: `1.5px solid ${C.border}`, padding: '14px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div>
-          <p style={{ color: C.text, fontSize: '15px', fontWeight: 800, letterSpacing: '-0.3px' }}>Daftar Ujian</p>
-          <p style={{ color: C.textMuted, fontSize: '11px', marginTop: '1px' }}>{exams.length} ujian terdaftar</p>
-        </div>
-        <button onClick={() => setEditExam({ duration_minutes: 60, active_status: 'draft' })}
-          style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: C.green, color: '#fff', fontSize: '12px', fontWeight: 700, padding: '8px 14px', borderRadius: '10px', border: 'none', cursor: 'pointer' }}>
-          <Plus size={13} strokeWidth={2.5} /> Buat Ujian
-        </button>
-      </div>
-
-      {/* list */}
-      <div style={{ flex: 1, padding: '16px 20px' }}>
-        {loading ? (
-          <div style={{ padding: '48px', textAlign: 'center' }}><Spinner /></div>
-        ) : exams.length === 0 ? (
-          <EmptyState title="Belum ada ujian" />
-        ) : (
-          <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '16px', overflow: 'hidden' }}>
-            {exams.map((exam, i) => (
-              <div key={exam.id}
-                onClick={() => openDetail(exam)}
-                style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  padding: '13px 18px',
-                  borderBottom: i < exams.length - 1 ? `1px solid ${C.borderLight}` : 'none',
-                  cursor: 'pointer',
-                  opacity: exam.active_status === 'finished' ? 0.65 : 1,
-                }}
-                onMouseEnter={e => (e.currentTarget.style.background = '#f9fbf9')}
-                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '3px' }}>
-                    <span style={{ color: exam.active_status === 'finished' ? '#6b7c6e' : C.text, fontSize: '13.5px', fontWeight: 800 }}>{exam.title}</span>
-                    <StatusBadge status={exam.active_status} />
-                  </div>
-                  <p style={{ color: exam.active_status === 'finished' ? C.textFaint : C.textMuted, fontSize: '11.5px' }}>
-                    {exam.duration_minutes} menit · {exam.question_count} soal
-                    {exam.randomize_questions ? ' · Acak soal' : ''}
-                    {exam.randomize_options ? ' · Acak opsi' : ''}
-                    {exam.is_score_visible ? ' · Skor tampil' : ''}
-                  </p>
-                </div>
-                <ArrowRight size={15} strokeWidth={2} color={C.borderMid} />
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* MODAL: Edit/Buat Ujian */}
       <Modal open={!!editExam} onClose={() => setEditExam(null)} title={editExam?.id ? 'Edit Ujian' : 'Buat Ujian'} size="lg">
         {editExam && (
           <div className="space-y-3">
@@ -351,9 +299,85 @@ function ExamsPage() {
           </div>
         )}
       </Modal>
-
       <Confirm open={!!confirmDel} onClose={() => setConfirmDel(null)} onConfirm={deleteExam}
         title="Hapus Ujian?" message={`Ujian "${confirmDel?.title}" beserta semua soal dan hasil akan dihapus permanen.`} />
+    </div>
+  );
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ background: C.white, borderBottom: `1.5px solid ${C.border}`, padding: '14px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <p style={{ color: C.text, fontSize: '15px', fontWeight: 800, letterSpacing: '-0.3px' }}>Daftar Ujian</p>
+          <p style={{ color: C.textMuted, fontSize: '11px', marginTop: '1px' }}>{exams.length} ujian terdaftar</p>
+        </div>
+        <button onClick={() => setEditExam({ duration_minutes: 60, active_status: 'draft' })}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: C.green, color: '#fff', fontSize: '12px', fontWeight: 700, padding: '8px 14px', borderRadius: '10px', border: 'none', cursor: 'pointer' }}>
+          <Plus size={13} strokeWidth={2.5} /> Buat Ujian
+        </button>
+      </div>
+      <div style={{ flex: 1, padding: '16px 20px' }}>
+        {loading ? <div className="py-12 text-center"><Spinner /></div>
+          : exams.length === 0 ? <EmptyState title="Belum ada ujian" />
+          : (
+            <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '16px', overflow: 'hidden' }}>
+              {exams.map((exam, i) => (
+                <div key={exam.id} onClick={() => openDetail(exam)}
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '13px 18px',
+                    borderBottom: i < exams.length - 1 ? `1px solid ${C.borderLight}` : 'none',
+                    cursor: 'pointer', opacity: exam.active_status === 'finished' ? 0.65 : 1,
+                    transition: 'background 0.1s',
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.background = '#f9fbf9')}
+                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '3px' }}>
+                      <span style={{ color: exam.active_status === 'finished' ? '#6b7c6e' : C.text, fontSize: '13.5px', fontWeight: 800 }}>{exam.title}</span>
+                      <StatusBadge status={exam.active_status} />
+                    </div>
+                    <p style={{ color: exam.active_status === 'finished' ? C.textFaint : C.textMuted, fontSize: '11.5px' }}>
+                      {exam.duration_minutes} menit · {exam.question_count} soal
+                      {exam.randomize_questions ? ' · Acak soal' : ''}
+                      {exam.randomize_options ? ' · Acak opsi' : ''}
+                      {exam.is_score_visible ? ' · Skor tampil' : ''}
+                    </p>
+                  </div>
+                  <ArrowRight size={15} strokeWidth={2} color={C.borderMid} />
+                </div>
+              ))}
+            </div>
+          )}
+      </div>
+      <Modal open={!!editExam} onClose={() => setEditExam(null)} title="Buat Ujian" size="lg">
+        {editExam && (
+          <div className="space-y-3">
+            <Input label="Judul" value={editExam.title || ''} onChange={e => setEditExam({ ...editExam, title: e.target.value })} />
+            <Textarea label="Deskripsi" value={editExam.description || ''} rows={2} onChange={e => setEditExam({ ...editExam, description: e.target.value })} />
+            <div className="grid grid-cols-2 gap-3">
+              <Input label="Durasi (menit)" type="number" value={editExam.duration_minutes || 60} onChange={e => setEditExam({ ...editExam, duration_minutes: parseInt(e.target.value) })} />
+              <Select label="Status" value={editExam.active_status || 'draft'} onChange={e => setEditExam({ ...editExam, active_status: e.target.value })}
+                options={[{ value: 'draft', label: 'Draft' }, { value: 'active', label: 'Aktif' }, { value: 'finished', label: 'Selesai' }]} />
+            </div>
+            <div><label className="block text-xs font-medium text-gray-500 mb-1">Tata Tertib</label>
+              <RichEditor value={editExam.rules_text || ''} onChange={v => setEditExam({ ...editExam, rules_text: v })} minHeight={80} /></div>
+            <Input label="Pesan Selesai" value={editExam.completion_message || ''} onChange={e => setEditExam({ ...editExam, completion_message: e.target.value })} />
+            <div className="flex flex-wrap gap-4 text-xs text-gray-600">
+              {[{ k: 'randomize_questions', l: 'Acak Soal' }, { k: 'randomize_options', l: 'Acak Opsi' }, { k: 'is_score_visible', l: 'Tampilkan Skor' }].map(c => (
+                <label key={c.k} className="flex items-center gap-1.5 cursor-pointer">
+                  <input type="checkbox" checked={!!(editExam as any)[c.k]} onChange={e => setEditExam({ ...editExam, [c.k]: e.target.checked ? 1 : 0 })} className="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+                  {c.l}
+                </label>
+              ))}
+            </div>
+            <div className="flex gap-2 justify-end pt-2">
+              <Button variant="secondary" size="sm" onClick={() => setEditExam(null)}>Batal</Button>
+              <Button size="sm" loading={saving} onClick={saveExam}>Simpan</Button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }
@@ -421,23 +445,22 @@ function QuestionsView({ examId }: { examId: string }) {
             {questions.map((q, i) => (
               <div key={q.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '11px 14px', borderBottom: i < questions.length - 1 ? `1px solid ${C.borderLight}` : 'none' }}>
                 <span style={{ color: C.textFaint, fontSize: '12px', fontWeight: 700, width: '22px', flexShrink: 0 }}>{i + 1}</span>
-                <div className="flex-1 min-w-0" dangerouslySetInnerHTML={{ __html: q.question_text }} style={{ fontSize: '12.5px', color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} />
+                <div className="flex-1 min-w-0" style={{ fontSize: '12.5px', color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                  dangerouslySetInnerHTML={{ __html: q.question_text }} />
                 <div style={{ display: 'flex', gap: '3px' }}>
                   {q.options?.map(o => (
                     <span key={o.option_label} style={{ background: o.is_correct ? C.greenLight : '#f1f1f0', color: o.is_correct ? '#2d6644' : '#8a9e8d', fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '999px' }}>{o.option_label}</span>
                   ))}
-                  {q.image_url && <Image size={12} color="#0ea5e9" style={{ marginLeft: '4px' }} />}
-                  {q.audio_url && <Volume2 size={12} color="#8b5cf6" style={{ marginLeft: '4px' }} />}
                 </div>
                 <div style={{ display: 'flex', gap: '4px' }}>
-                  <button onClick={() => setEditQ(q)} style={{ width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '8px', background: 'none', border: 'none', cursor: 'pointer', color: '#8a9e8d' }}
-                    onMouseEnter={e => { e.currentTarget.style.background = C.greenLight; e.currentTarget.style.color = C.green; }}
-                    onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = '#8a9e8d'; }}>
+                  <button onClick={() => setEditQ(q)} style={{ width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '8px', background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = C.greenLight; (e.currentTarget as HTMLElement).style.color = C.green; }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'none'; (e.currentTarget as HTMLElement).style.color = C.textMuted; }}>
                     <Pencil size={13} />
                   </button>
-                  <button onClick={() => setDelTarget(q.id)} style={{ width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '8px', background: 'none', border: 'none', cursor: 'pointer', color: '#8a9e8d' }}
-                    onMouseEnter={e => { e.currentTarget.style.background = '#fef2f2'; e.currentTarget.style.color = '#dc2626'; }}
-                    onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = '#8a9e8d'; }}>
+                  <button onClick={() => setDelTarget(q.id)} style={{ width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '8px', background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#fef2f2'; (e.currentTarget as HTMLElement).style.color = '#dc2626'; }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'none'; (e.currentTarget as HTMLElement).style.color = C.textMuted; }}>
                     <Trash2 size={13} />
                   </button>
                 </div>
@@ -445,7 +468,6 @@ function QuestionsView({ examId }: { examId: string }) {
             ))}
           </div>
         )}
-
       <Modal open={!!editQ} onClose={() => setEditQ(null)} title={editQ?.id ? 'Edit Soal' : 'Tambah Soal'} size="lg">
         {editQ && (
           <div className="space-y-3">
@@ -487,7 +509,9 @@ function QuestionsView({ examId }: { examId: string }) {
           </div>
         )}
       </Modal>
-      <Confirm open={!!delTarget} onClose={() => setDelTarget(null)} onConfirm={async () => { if (!delTarget) return; await DEL(`/api/admin/questions/${delTarget}`); setDelTarget(null); fetchQ(); }} title="Hapus Soal?" message="Soal yang dihapus tidak dapat dikembalikan." />
+      <Confirm open={!!delTarget} onClose={() => setDelTarget(null)}
+        onConfirm={async () => { if (!delTarget) return; await DEL(`/api/admin/questions/${delTarget}`); setDelTarget(null); fetchQ(); }}
+        title="Hapus Soal?" message="Soal yang dihapus tidak dapat dikembalikan." />
       <BulkImport type="questions" examId={examId} open={showImport} onClose={() => setShowImport(false)} onSuccess={() => { setShowImport(false); fetchQ(); }} />
     </div>
   );
@@ -578,11 +602,7 @@ function ResultsView({ examId }: { examId: string }) {
         : (
           <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '12px', overflow: 'hidden' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-              <thead><tr style={{ background: C.bg, borderBottom: `1.5px solid ${C.borderMid}` }}>
-                {['#', 'Nama', 'NISN', 'Ruangan', 'Benar', 'Salah', 'Nilai'].map((h, i) => (
-                  <th key={h} style={{ padding: '9px 14px', textAlign: i >= 4 ? 'center' : 'left', color: C.textMid, fontSize: '10.5px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{h}</th>
-                ))}
-              </tr></thead>
+              <TableHead cols={[{label:'#'},{label:'Nama'},{label:'NISN'},{label:'Ruangan'},{label:'Benar',center:true},{label:'Salah',center:true},{label:'Nilai',center:true}]} />
               <tbody>
                 {results.map((r: any, i: number) => (
                   <tr key={i} style={{ borderBottom: i < results.length - 1 ? `1px solid ${C.borderLight}` : 'none' }}>
@@ -604,50 +624,95 @@ function ResultsView({ examId }: { examId: string }) {
 }
 
 // ── PESERTA PAGE ──────────────────────────────────────────────
+// Hanya menampilkan peserta jalur REGULER MURNI (jalur yang membutuhkan tes)
 function PesertaPage() {
   const [data, setData] = useState<Pendaftar[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState('');
-  useEffect(() => { GET<Pendaftar[]>('/api/admin/pendaftar').then(r => { if (r.success) setData(r.data || []); setLoading(false); }); }, []);
-  const filtered = filter ? data.filter(p => p.ruang_tes === filter) : data;
+  const [filterRoom, setFilterRoom] = useState('');
+
+  useEffect(() => {
+    GET<Pendaftar[]>('/api/admin/pendaftar').then(r => {
+      if (r.success) {
+        // Filter hanya jalur Reguler Murni
+        const filtered = (r.data || []).filter(p =>
+          JALUR_REGULER.some(j => p.jalur?.toLowerCase() === j.toLowerCase())
+        );
+        setData(filtered);
+      }
+      setLoading(false);
+    });
+  }, []);
+
   const rooms = Array.from(new Set(data.map(p => p.ruang_tes).filter(Boolean))).sort();
+  const filtered = filterRoom ? data.filter(p => p.ruang_tes === filterRoom) : data;
+
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
       <div style={{ background: C.white, borderBottom: `1.5px solid ${C.border}`, padding: '14px 20px' }}>
         <p style={{ color: C.text, fontSize: '15px', fontWeight: 800, letterSpacing: '-0.3px' }}>Peserta Tes</p>
-        <p style={{ color: C.textMuted, fontSize: '11px', marginTop: '1px' }}>{data.length} peserta terdaftar</p>
+        <p style={{ color: C.textMuted, fontSize: '11px', marginTop: '1px' }}>{data.length} peserta jalur Reguler Murni</p>
       </div>
+
       <div style={{ flex: 1, padding: '16px 20px' }} className="space-y-3">
-        <div className="flex gap-2 flex-wrap">
-          <button onClick={() => setFilter('')} style={{ fontSize: '11px', padding: '4px 12px', borderRadius: '999px', fontWeight: 700, border: 'none', cursor: 'pointer', background: !filter ? C.green : C.bg, color: !filter ? '#fff' : '#6b7c6e' }}>Semua</button>
-          {rooms.map(r => <button key={r} onClick={() => setFilter(r)} style={{ fontSize: '11px', padding: '4px 12px', borderRadius: '999px', fontWeight: 700, border: 'none', cursor: 'pointer', background: filter === r ? C.green : C.bg, color: filter === r ? '#fff' : '#6b7c6e' }}>{r}</button>)}
+        {/* filter dropdown */}
+        <div style={{ maxWidth: '200px' }}>
+          <select value={filterRoom} onChange={e => setFilterRoom(e.target.value)}
+            style={{ width: '100%', padding: '8px 12px', fontSize: '12.5px', fontWeight: 600, background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '10px', outline: 'none', color: filterRoom ? C.text : C.textMuted, cursor: 'pointer', fontFamily: 'inherit' }}
+            onFocus={e => { e.target.style.borderColor = C.green; e.target.style.boxShadow = '0 0 0 3px rgba(45,122,79,0.1)'; }}
+            onBlur={e => { e.target.style.borderColor = C.borderMid; e.target.style.boxShadow = 'none'; }}>
+            <option value="">Semua Ruangan</option>
+            {rooms.map(r => <option key={r} value={r}>{r}</option>)}
+          </select>
         </div>
+
         {loading ? <div className="py-12 text-center"><Spinner /></div>
-          : filtered.length === 0 ? <EmptyState title="Belum ada peserta" />
+          : filtered.length === 0 ? <EmptyState title="Belum ada peserta" desc="Hanya peserta jalur Reguler Murni yang ditampilkan" />
           : (
-            <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '12px', overflow: 'hidden auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                <thead><tr style={{ background: C.bg, borderBottom: `1.5px solid ${C.borderMid}` }}>
-                  {['#', 'Nama', 'NISN', 'No. Daftar', 'Ruang', 'Jalur', 'Sesi', 'Tgl Tes'].map(h => (
-                    <th key={h} style={{ padding: '9px 14px', textAlign: 'left', color: C.textMid, fontSize: '10.5px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>{h}</th>
-                  ))}
-                </tr></thead>
-                <tbody>
-                  {filtered.map((p, i) => (
-                    <tr key={p.id} style={{ borderBottom: i < filtered.length - 1 ? `1px solid ${C.borderLight}` : 'none' }}>
-                      <td style={{ padding: '10px 14px', color: C.textMuted }}>{i + 1}</td>
-                      <td style={{ padding: '10px 14px', color: C.text, fontWeight: 700 }}>{p.nama_lengkap}</td>
-                      <td style={{ padding: '10px 14px', color: C.textMuted, fontFamily: 'monospace' }}>{p.nisn}</td>
-                      <td style={{ padding: '10px 14px', color: C.textMuted }}>{p.no_pendaftaran || '—'}</td>
-                      <td style={{ padding: '10px 14px' }}>{p.ruang_tes ? <span style={{ background: '#e0f0ff', color: '#1a5fa8', fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '999px' }}>{p.ruang_tes}</span> : <span style={{ color: '#d4dbd4' }}>—</span>}</td>
-                      <td style={{ padding: '10px 14px', color: C.textMuted }}>{p.jalur}</td>
-                      <td style={{ padding: '10px 14px', color: C.textMuted }}>{p.sesi_tes || '—'}</td>
-                      <td style={{ padding: '10px 14px', color: C.textMuted, whiteSpace: 'nowrap' }}>{p.tanggal_tes || '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <>
+              {/* DESKTOP: table */}
+              <div className="hidden md:block" style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '12px', overflow: 'hidden' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                  <TableHead cols={[{label:'#'},{label:'Nama'},{label:'NISN'},{label:'No. Daftar'},{label:'Ruang'},{label:'Sesi'},{label:'Tgl Tes'}]} />
+                  <tbody>
+                    {filtered.map((p, i) => (
+                      <tr key={p.id} style={{ borderBottom: i < filtered.length - 1 ? `1px solid ${C.borderLight}` : 'none' }}>
+                        <td style={{ padding: '10px 14px', color: C.textMuted }}>{i + 1}</td>
+                        <td style={{ padding: '10px 14px', color: C.text, fontWeight: 700 }}>{p.nama_lengkap}</td>
+                        <td style={{ padding: '10px 14px', color: C.textMuted, fontFamily: 'monospace' }}>{p.nisn}</td>
+                        <td style={{ padding: '10px 14px', color: C.textMuted }}>{p.no_pendaftaran || '—'}</td>
+                        <td style={{ padding: '10px 14px' }}>
+                          {p.ruang_tes
+                            ? <span style={{ background: '#e0f0ff', color: '#1a5fa8', fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '999px' }}>{p.ruang_tes}</span>
+                            : <span style={{ color: C.borderMid }}>—</span>}
+                        </td>
+                        <td style={{ padding: '10px 14px', color: C.textMuted }}>{p.sesi_tes || '—'}</td>
+                        <td style={{ padding: '10px 14px', color: C.textMuted, whiteSpace: 'nowrap' }}>{p.tanggal_tes || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* MOBILE: cards */}
+              <div className="md:hidden flex flex-col gap-2">
+                {filtered.map((p, i) => (
+                  <div key={p.id} style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '14px', padding: '14px' }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px', marginBottom: '8px' }}>
+                      <div>
+                        <p style={{ color: C.text, fontSize: '13.5px', fontWeight: 800 }}>{p.nama_lengkap}</p>
+                        <p style={{ color: C.textMuted, fontSize: '11px', fontFamily: 'monospace', marginTop: '2px' }}>{p.nisn}</p>
+                      </div>
+                      {p.ruang_tes && <span style={{ background: '#e0f0ff', color: '#1a5fa8', fontSize: '10px', fontWeight: 700, padding: '3px 9px', borderRadius: '999px', whiteSpace: 'nowrap', flexShrink: 0 }}>{p.ruang_tes}</span>}
+                    </div>
+                    <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                      {p.no_pendaftaran && <span style={{ color: C.textMuted, fontSize: '11px' }}>No. {p.no_pendaftaran}</span>}
+                      {p.sesi_tes && <span style={{ color: C.textMuted, fontSize: '11px' }}>Sesi {p.sesi_tes}</span>}
+                      {p.tanggal_tes && <span style={{ color: C.textMuted, fontSize: '11px' }}>{p.tanggal_tes}</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
           )}
       </div>
     </div>
@@ -663,61 +728,100 @@ function RoomsPage() {
   const [syncing, setSyncing] = useState(false);
   const [assignModal, setAssignModal] = useState<Room | null>(null);
   const [selectedProctor, setSelectedProctor] = useState('');
-  const fetchData = useCallback(async () => { const [r, p] = await Promise.all([GET<Room[]>('/api/admin/rooms'), GET<Proctor[]>('/api/admin/proctors')]); if (r.success) setRooms(r.data || []); if (p.success) setProctors(p.data || []); setLoading(false); }, []);
+
+  const fetchData = useCallback(async () => {
+    const [r, p] = await Promise.all([GET<Room[]>('/api/admin/rooms'), GET<Proctor[]>('/api/admin/proctors')]);
+    if (r.success) setRooms(r.data || []);
+    if (p.success) setProctors(p.data || []);
+    setLoading(false);
+  }, []);
   useEffect(() => { fetchData(); }, [fetchData]);
+
   const syncRooms = async () => { setSyncing(true); const r = await POST('/api/admin/rooms/sync', {}); toast(r.success ? 'success' : 'error', r.message || r.error || 'Gagal'); setSyncing(false); fetchData(); };
   const assignProctor = async () => { if (!assignModal || !selectedProctor) return; await PUT(`/api/admin/proctors/${selectedProctor}/assign`, { room_id: assignModal.id }); toast('success', 'Berhasil'); setAssignModal(null); setSelectedProctor(''); fetchData(); };
   const unassignProctor = async (pid: string) => { await PUT(`/api/admin/proctors/${pid}/assign`, { room_id: null }); toast('success', 'Proktor dihapus'); fetchData(); };
   const unassigned = proctors.filter(p => !p.room_id);
+
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
       <div style={{ background: C.white, borderBottom: `1.5px solid ${C.border}`, padding: '14px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div><p style={{ color: C.text, fontSize: '15px', fontWeight: 800 }}>Ruangan & Proktor</p><p style={{ color: C.textMuted, fontSize: '11px', marginTop: '1px' }}>Assign proktor ke ruangan ujian</p></div>
+        <div>
+          <p style={{ color: C.text, fontSize: '15px', fontWeight: 800 }}>Ruangan & Proktor</p>
+          <p style={{ color: C.textMuted, fontSize: '11px', marginTop: '1px' }}>Assign proktor ke ruangan ujian</p>
+        </div>
         <Button size="sm" loading={syncing} onClick={syncRooms}><RefreshCw size={13} /> Sinkronkan</Button>
       </div>
-      <div style={{ flex: 1, padding: '16px 20px' }}>
+      <div style={{ flex: 1, padding: '16px 20px' }} className="space-y-3">
         {loading ? <div className="py-12 text-center"><Spinner /></div>
           : rooms.length === 0 ? <EmptyState title="Belum ada ruangan" desc="Klik Sinkronkan dari PMB" />
           : (
-            <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '12px', overflow: 'hidden' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                <thead><tr style={{ background: C.bg, borderBottom: `1.5px solid ${C.borderMid}` }}>
-                  {['#', 'Ruangan', 'Peserta', 'Proktor', 'Aksi'].map((h, i) => (
-                    <th key={h} style={{ padding: '9px 14px', textAlign: i === 2 || i === 4 ? 'center' : 'left', color: C.textMid, fontSize: '10.5px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{h}</th>
-                  ))}
-                </tr></thead>
-                <tbody>
-                  {rooms.map((r, i) => {
-                    const rp = proctors.filter(p => p.room_id === r.id);
-                    return (
-                      <tr key={r.id} style={{ borderBottom: i < rooms.length - 1 ? `1px solid ${C.borderLight}` : 'none' }}>
-                        <td style={{ padding: '10px 14px', color: C.textMuted }}>{i + 1}</td>
-                        <td style={{ padding: '10px 14px', color: C.text, fontWeight: 700 }}>{r.room_name}</td>
-                        <td style={{ padding: '10px 14px', textAlign: 'center' }}><span style={{ background: '#e0f0ff', color: '#1a5fa8', fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '999px' }}>{r.jumlah_peserta || 0}</span></td>
-                        <td style={{ padding: '10px 14px' }}>
-                          {rp.length === 0 ? <span style={{ color: C.borderMid }}>Belum ada</span>
-                            : <div className="space-y-1">{rp.map(p => <div key={p.id} className="flex items-center gap-1.5 text-xs" style={{ color: '#4a6655' }}><span>{p.full_name}</span><button onClick={() => unassignProctor(p.id)} style={{ color: C.borderMid, background: 'none', border: 'none', cursor: 'pointer', lineHeight: 1 }}><X size={11} /></button></div>)}</div>}
-                        </td>
-                        <td style={{ padding: '10px 14px', textAlign: 'center' }}>
-                          <button onClick={() => { setAssignModal(r); setSelectedProctor(''); }} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: C.green, fontSize: '11px', fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer' }}>
-                            <UserPlus size={12} /> Assign
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+            <>
+              {/* DESKTOP: table */}
+              <div className="hidden md:block" style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '12px', overflow: 'hidden' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                  <TableHead cols={[{label:'#'},{label:'Ruangan'},{label:'Peserta',center:true},{label:'Proktor'},{label:'Aksi',center:true}]} />
+                  <tbody>
+                    {rooms.map((r, i) => {
+                      const rp = proctors.filter(p => p.room_id === r.id);
+                      return (
+                        <tr key={r.id} style={{ borderBottom: i < rooms.length - 1 ? `1px solid ${C.borderLight}` : 'none' }}>
+                          <td style={{ padding: '10px 14px', color: C.textMuted }}>{i + 1}</td>
+                          <td style={{ padding: '10px 14px', color: C.text, fontWeight: 700 }}>{r.room_name}</td>
+                          <td style={{ padding: '10px 14px', textAlign: 'center' }}><span style={{ background: '#e0f0ff', color: '#1a5fa8', fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '999px' }}>{r.jumlah_peserta || 0}</span></td>
+                          <td style={{ padding: '10px 14px' }}>
+                            {rp.length === 0 ? <span style={{ color: C.borderMid }}>Belum ada</span>
+                              : <div className="space-y-1">{rp.map(p => <div key={p.id} className="flex items-center gap-1.5 text-xs" style={{ color: C.textMid }}><span>{p.full_name}</span><button onClick={() => unassignProctor(p.id)} style={{ color: C.borderMid, background: 'none', border: 'none', cursor: 'pointer', lineHeight: 1 }}><X size={11} /></button></div>)}</div>}
+                          </td>
+                          <td style={{ padding: '10px 14px', textAlign: 'center' }}>
+                            <button onClick={() => { setAssignModal(r); setSelectedProctor(''); }} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: C.green, fontSize: '11px', fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer' }}>
+                              <UserPlus size={12} /> Assign
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* MOBILE: cards */}
+              <div className="md:hidden flex flex-col gap-2">
+                {rooms.map(r => {
+                  const rp = proctors.filter(p => p.room_id === r.id);
+                  return (
+                    <div key={r.id} style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '14px', padding: '14px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                        <p style={{ color: C.text, fontSize: '13.5px', fontWeight: 800 }}>{r.room_name}</p>
+                        <span style={{ background: '#e0f0ff', color: '#1a5fa8', fontSize: '10px', fontWeight: 700, padding: '3px 9px', borderRadius: '999px' }}>{r.jumlah_peserta || 0} peserta</span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <div>
+                          {rp.length === 0
+                            ? <p style={{ color: C.textFaint, fontSize: '11.5px' }}>Belum ada proktor</p>
+                            : rp.map(p => <p key={p.id} style={{ color: C.textMid, fontSize: '11.5px', fontWeight: 600 }}>{p.full_name}</p>)}
+                        </div>
+                        <button onClick={() => { setAssignModal(r); setSelectedProctor(''); }} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: C.green, fontSize: '11.5px', fontWeight: 700, background: C.greenLight, border: `1.5px solid ${C.greenBorder}`, borderRadius: '8px', padding: '5px 10px', cursor: 'pointer' }}>
+                          <UserPlus size={12} /> Assign
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
           )}
       </div>
+
       <Modal open={!!assignModal} onClose={() => setAssignModal(null)} title={`Assign Proktor — ${assignModal?.room_name}`} size="sm">
         {unassigned.length === 0
-          ? <p className="text-sm text-gray-500">Semua proktor sudah di-assign.</p>
+          ? <p style={{ color: C.textMuted, fontSize: '13px' }}>Semua proktor sudah di-assign.</p>
           : <div className="space-y-3">
               <Select label="Pilih Proktor" value={selectedProctor} onChange={e => setSelectedProctor(e.target.value)}
                 options={[{ value: '', label: '— Pilih —' }, ...unassigned.map(p => ({ value: p.id, label: `${p.full_name} (${p.username})` }))]} />
-              <div className="flex gap-2 justify-end"><Button variant="secondary" size="sm" onClick={() => setAssignModal(null)}>Batal</Button><Button size="sm" disabled={!selectedProctor} onClick={assignProctor}>Assign</Button></div>
+              <div className="flex gap-2 justify-end">
+                <Button variant="secondary" size="sm" onClick={() => setAssignModal(null)}>Batal</Button>
+                <Button size="sm" disabled={!selectedProctor} onClick={assignProctor}>Assign</Button>
+              </div>
             </div>}
       </Modal>
     </div>
@@ -725,68 +829,182 @@ function RoomsPage() {
 }
 
 // ── PELAKSANA PAGE ────────────────────────────────────────────
+// Tab Proktor + Tab Admin
 function PelaksanaPage() {
   const { toast } = useToast();
-  const [proctors, setProctors] = useState<Proctor[]>([]);
+  const [tab, setTab] = useState<'proktor' | 'admin'>('proktor');
+  const [users, setUsers] = useState<Proctor[]>([]);
   const [loading, setLoading] = useState(true);
   const [editUser, setEditUser] = useState<any | null>(null);
   const [saving, setSaving] = useState(false);
-  const fetchData = useCallback(async () => { const p = await GET<Proctor[]>('/api/admin/proctors'); if (p.success) setProctors(p.data || []); setLoading(false); }, []);
+  const [confirmDel, setConfirmDel] = useState<Proctor | null>(null);
+
+  const fetchData = useCallback(async () => {
+    // Fetch both proctors and admins
+    const [p, a] = await Promise.all([
+      GET<Proctor[]>('/api/admin/proctors'),
+      GET<Proctor[]>('/api/admin/users?role=admin'),
+    ]);
+    const proctors = (p.success ? p.data || [] : []).map((u: any) => ({ ...u, role: 'proctor' }));
+    const admins   = (a.success ? a.data || [] : []).map((u: any) => ({ ...u, role: 'admin' }));
+    setUsers([...proctors, ...admins]);
+    setLoading(false);
+  }, []);
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  const displayed = users.filter(u => u.role === tab);
+
   const save = async () => {
     if (!editUser?.username || !editUser.full_name) { toast('error', 'Data tidak lengkap'); return; }
     if (!editUser.id && !editUser.password) { toast('error', 'Password wajib'); return; }
     setSaving(true);
-    const r = editUser.id ? await PUT(`/api/admin/users/${editUser.id}`, { ...editUser, role: 'proctor' }) : await POST('/api/admin/users', { ...editUser, role: 'proctor' });
+    const role = editUser.role || tab;
+    const r = editUser.id
+      ? await PUT(`/api/admin/users/${editUser.id}`, { ...editUser, role })
+      : await POST('/api/admin/users', { ...editUser, role });
     setSaving(false);
     if (r.success) { toast('success', 'Berhasil'); setEditUser(null); fetchData(); } else toast('error', r.error || 'Gagal');
   };
-  const del = async (id: string) => { await DEL(`/api/admin/users/${id}`); toast('success', 'Dihapus'); fetchData(); };
+
+  const del = async () => {
+    if (!confirmDel) return;
+    await DEL(`/api/admin/users/${confirmDel.id}`);
+    toast('success', 'Dihapus');
+    setConfirmDel(null);
+    fetchData();
+  };
+
+  const TABS = [
+    { key: 'proktor' as const, label: 'Proktor' },
+    { key: 'admin'   as const, label: 'Admin'   },
+  ];
+
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+      {/* header */}
       <div style={{ background: C.white, borderBottom: `1.5px solid ${C.border}`, padding: '14px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div><p style={{ color: C.text, fontSize: '15px', fontWeight: 800 }}>Pelaksana Tes</p><p style={{ color: C.textMuted, fontSize: '11px', marginTop: '1px' }}>{proctors.length} proktor terdaftar</p></div>
-        <Button size="sm" onClick={() => setEditUser({ role: 'proctor', is_active: 1 })}><Plus size={13} /> Tambah Proktor</Button>
+        <div>
+          <p style={{ color: C.text, fontSize: '15px', fontWeight: 800 }}>Pelaksana Tes</p>
+          <p style={{ color: C.textMuted, fontSize: '11px', marginTop: '1px' }}>{displayed.length} {tab} terdaftar</p>
+        </div>
+        <button onClick={() => setEditUser({ role: tab, is_active: 1 })}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: C.green, color: '#fff', fontSize: '12px', fontWeight: 700, padding: '8px 14px', borderRadius: '10px', border: 'none', cursor: 'pointer' }}>
+          <Plus size={13} strokeWidth={2.5} /> Tambah {tab === 'proktor' ? 'Proktor' : 'Admin'}
+        </button>
       </div>
-      <div style={{ flex: 1, padding: '16px 20px' }}>
+
+      {/* flat tabs */}
+      <div style={{ background: C.white, borderBottom: `1.5px solid ${C.border}`, padding: '0 20px', display: 'flex' }}>
+        {TABS.map(t => (
+          <button key={t.key} onClick={() => setTab(t.key)}
+            style={{
+              padding: '11px 18px 10px', fontSize: '12.5px',
+              fontWeight: tab === t.key ? 800 : 600,
+              color: tab === t.key ? C.green : C.textMuted,
+              background: 'none', border: 'none',
+              borderBottom: `2.5px solid ${tab === t.key ? C.green : 'transparent'}`,
+              marginBottom: '-1.5px', cursor: 'pointer',
+            }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ flex: 1, padding: '16px 20px' }} className="space-y-3">
         {loading ? <div className="py-12 text-center"><Spinner /></div>
-          : proctors.length === 0 ? <EmptyState title="Belum ada proktor" />
+          : displayed.length === 0 ? <EmptyState title={`Belum ada ${tab}`} />
           : (
-            <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '12px', overflow: 'hidden' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                <thead><tr style={{ background: C.bg, borderBottom: `1.5px solid ${C.borderMid}` }}>
-                  {['#', 'Nama', 'Username', 'Ruangan', 'Aksi'].map((h, i) => (
-                    <th key={h} style={{ padding: '9px 14px', textAlign: i === 4 ? 'center' : 'left', color: C.textMid, fontSize: '10.5px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{h}</th>
-                  ))}
-                </tr></thead>
-                <tbody>
-                  {proctors.map((p, i) => (
-                    <tr key={p.id} style={{ borderBottom: i < proctors.length - 1 ? `1px solid ${C.borderLight}` : 'none' }}>
-                      <td style={{ padding: '10px 14px', color: C.textMuted }}>{i + 1}</td>
-                      <td style={{ padding: '10px 14px', color: C.text, fontWeight: 700 }}>{p.full_name}</td>
-                      <td style={{ padding: '10px 14px', color: C.textMuted, fontFamily: 'monospace' }}>{p.username}</td>
-                      <td style={{ padding: '10px 14px' }}>{p.room_name ? <span style={{ background: '#e0f0ff', color: '#1a5fa8', fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '999px' }}>{p.room_name}</span> : <span style={{ color: C.borderMid }}>—</span>}</td>
-                      <td style={{ padding: '10px 14px', textAlign: 'center' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
-                          <button onClick={() => setEditUser({ id: p.id, username: p.username, full_name: p.full_name })} style={{ width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '8px', background: 'none', border: 'none', cursor: 'pointer', color: '#8a9e8d' }}><Pencil size={13} /></button>
-                          <button onClick={() => del(p.id)} style={{ width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '8px', background: 'none', border: 'none', cursor: 'pointer', color: '#8a9e8d' }}><Trash2 size={13} /></button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <>
+              {/* DESKTOP: table */}
+              <div className="hidden md:block" style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '12px', overflow: 'hidden' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                  <TableHead cols={[
+                    {label:'#'},{label:'Nama'},{label:'Username'},
+                    ...(tab === 'proktor' ? [{label:'Ruangan'}] : []),
+                    {label:'Aksi',center:true},
+                  ]} />
+                  <tbody>
+                    {displayed.map((p, i) => (
+                      <tr key={p.id} style={{ borderBottom: i < displayed.length - 1 ? `1px solid ${C.borderLight}` : 'none' }}>
+                        <td style={{ padding: '10px 14px', color: C.textMuted }}>{i + 1}</td>
+                        <td style={{ padding: '10px 14px', color: C.text, fontWeight: 700 }}>{p.full_name}</td>
+                        <td style={{ padding: '10px 14px', color: C.textMuted, fontFamily: 'monospace' }}>{p.username}</td>
+                        {tab === 'proktor' && (
+                          <td style={{ padding: '10px 14px' }}>
+                            {p.room_name
+                              ? <span style={{ background: '#e0f0ff', color: '#1a5fa8', fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '999px' }}>{p.room_name}</span>
+                              : <span style={{ color: C.borderMid }}>—</span>}
+                          </td>
+                        )}
+                        <td style={{ padding: '10px 14px', textAlign: 'center' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                            <button onClick={() => setEditUser({ id: p.id, username: p.username, full_name: p.full_name, role: p.role })}
+                              style={{ width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '8px', background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted }}
+                              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = C.greenLight; (e.currentTarget as HTMLElement).style.color = C.green; }}
+                              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'none'; (e.currentTarget as HTMLElement).style.color = C.textMuted; }}>
+                              <Pencil size={13} />
+                            </button>
+                            <button onClick={() => setConfirmDel(p)}
+                              style={{ width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '8px', background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted }}
+                              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#fef2f2'; (e.currentTarget as HTMLElement).style.color = '#dc2626'; }}
+                              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'none'; (e.currentTarget as HTMLElement).style.color = C.textMuted; }}>
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* MOBILE: cards */}
+              <div className="md:hidden flex flex-col gap-2">
+                {displayed.map(p => (
+                  <div key={p.id} style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '14px', padding: '14px' }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px' }}>
+                      <div>
+                        <p style={{ color: C.text, fontSize: '13.5px', fontWeight: 800 }}>{p.full_name}</p>
+                        <p style={{ color: C.textMuted, fontSize: '11px', fontFamily: 'monospace', marginTop: '2px' }}>{p.username}</p>
+                        {tab === 'proktor' && p.room_name && (
+                          <span style={{ display: 'inline-block', marginTop: '6px', background: '#e0f0ff', color: '#1a5fa8', fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '999px' }}>{p.room_name}</span>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
+                        <button onClick={() => setEditUser({ id: p.id, username: p.username, full_name: p.full_name, role: p.role })}
+                          style={{ width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '9px', background: C.greenLight, border: `1.5px solid ${C.greenBorder}`, cursor: 'pointer', color: C.green }}>
+                          <Pencil size={13} />
+                        </button>
+                        <button onClick={() => setConfirmDel(p)}
+                          style={{ width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '9px', background: '#fef2f2', border: '1.5px solid #fecaca', cursor: 'pointer', color: '#dc2626' }}>
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
           )}
       </div>
-      <Modal open={!!editUser} onClose={() => setEditUser(null)} title={editUser?.id ? 'Edit Proktor' : 'Tambah Proktor'} size="sm">
-        {editUser && <div className="space-y-3">
-          <Input label="Nama Lengkap" value={editUser.full_name || ''} onChange={e => setEditUser({ ...editUser, full_name: e.target.value })} />
-          <Input label="Username" value={editUser.username || ''} onChange={e => setEditUser({ ...editUser, username: e.target.value })} disabled={!!editUser.id} />
-          <Input label={editUser.id ? 'Password Baru (opsional)' : 'Password'} type="password" value={editUser.password || ''} onChange={e => setEditUser({ ...editUser, password: e.target.value })} />
-          <div className="flex gap-2 justify-end pt-1"><Button variant="secondary" size="sm" onClick={() => setEditUser(null)}>Batal</Button><Button size="sm" loading={saving} onClick={save}>Simpan</Button></div>
-        </div>}
+
+      <Modal open={!!editUser} onClose={() => setEditUser(null)} title={editUser?.id ? `Edit ${tab === 'proktor' ? 'Proktor' : 'Admin'}` : `Tambah ${tab === 'proktor' ? 'Proktor' : 'Admin'}`} size="sm">
+        {editUser && (
+          <div className="space-y-3">
+            <Input label="Nama Lengkap" value={editUser.full_name || ''} onChange={e => setEditUser({ ...editUser, full_name: e.target.value })} />
+            <Input label="Username" value={editUser.username || ''} onChange={e => setEditUser({ ...editUser, username: e.target.value })} disabled={!!editUser.id} />
+            <Input label={editUser.id ? 'Password Baru (opsional)' : 'Password'} type="password" value={editUser.password || ''} onChange={e => setEditUser({ ...editUser, password: e.target.value })} />
+            <div className="flex gap-2 justify-end pt-1">
+              <Button variant="secondary" size="sm" onClick={() => setEditUser(null)}>Batal</Button>
+              <Button size="sm" loading={saving} onClick={save}>Simpan</Button>
+            </div>
+          </div>
+        )}
       </Modal>
+
+      <Confirm open={!!confirmDel} onClose={() => setConfirmDel(null)} onConfirm={del}
+        title={`Hapus ${tab === 'proktor' ? 'Proktor' : 'Admin'}?`}
+        message={`Akun "${confirmDel?.full_name}" akan dihapus permanen.`} />
     </div>
   );
 }
