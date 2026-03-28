@@ -16,12 +16,7 @@ interface Exam {
 const KemenagLogo = () => (
   <div className="shrink-0 flex items-center justify-center rounded-full"
     style={{ width: '36px', height: '36px', background: '#f4f6f4', border: '1.5px solid #cdd4cd' }}>
-    <svg width="22" height="22" viewBox="0 0 100 100" fill="none">
-      <g transform="translate(50,50)">
-        <polygon points="0,-20 4.5,-10 15,-14 10,-5 20,0 10,5 15,14 4.5,10 0,20 -4.5,10 -15,14 -10,5 -20,0 -10,-5 -15,-14 -4.5,-10" fill="#2d7a4f"/>
-        <circle cx="0" cy="0" r="9" fill="#fff"/><circle cx="0" cy="0" r="6" fill="#2d7a4f"/><circle cx="0" cy="0" r="3" fill="#fff"/>
-      </g>
-    </svg>
+    <img src="/kemenag.png" alt="Kemenag" width={28} height={28} style={{ objectFit: 'contain' }} />
   </div>
 );
 

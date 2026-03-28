@@ -13,12 +13,7 @@ const C = {
 
 const KemenagLogo = () => (
   <div style={{ width: 36, height: 36, borderRadius: '50%', background: C.bg, border: `1.5px solid #cdd4cd`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-    <svg width="21" height="21" viewBox="0 0 100 100" fill="none">
-      <g transform="translate(50,50)">
-        <polygon points="0,-20 4.5,-10 15,-14 10,-5 20,0 10,5 15,14 4.5,10 0,20 -4.5,10 -15,14 -10,5 -20,0 -10,-5 -15,-14 -4.5,-10" fill="#2d7a4f"/>
-        <circle cx="0" cy="0" r="9" fill="#fff"/><circle cx="0" cy="0" r="6" fill="#2d7a4f"/><circle cx="0" cy="0" r="3" fill="#fff"/>
-      </g>
-    </svg>
+    <img src="/kemenag.png" alt="Kemenag" width={28} height={28} style={{ objectFit: 'contain' }} />
   </div>
 );
 
@@ -52,6 +47,12 @@ function ProctorContent() {
     fetchData();
   };
 
+  const handleUnlock = async (session: any) => {
+    await POST(`/api/proctor/sessions/${session.id}/unlock`);
+    toast('success', `Sesi ${session.full_name} berhasil dibuka`);
+    fetchData();
+  };
+
   if (authLoading || loading) return <LoadingScreen />;
   if (!user) return null;
 
@@ -59,9 +60,12 @@ function ProctorContent() {
   const finished = sessions.filter((s: any) => s.live_status === 'selesai').length;
   const offline  = sessions.length - online - finished;
 
+  const locked  = sessions.filter((s: any) => s.live_status === 'dikunci').length;
+
   const stats = [
     { n: online,   label: 'Online',  icon: Wifi,         color: C.green,    bg: C.greenLight  },
     { n: offline,  label: 'Offline', icon: WifiOff,      color: '#dc2626',  bg: '#fef2f2'     },
+    { n: locked,   label: 'Dikunci', icon: CheckCircle2, color: '#b45309',  bg: '#fffbeb'     },
     { n: finished, label: 'Selesai', icon: CheckCircle2, color: '#6b7c6e',  bg: '#f1f1f0'     },
   ];
 
@@ -119,7 +123,7 @@ function ProctorContent() {
         </section>
 
         {/* STATS */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '10px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '10px' }}>
           {stats.map(s => (
             <div key={s.label} style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '14px', padding: '14px', textAlign: 'center' }}>
               <div style={{ width: '32px', height: '32px', borderRadius: '10px', background: s.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 8px' }}>

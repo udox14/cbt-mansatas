@@ -32,14 +32,7 @@ export default function LandingPage() {
       <nav className={`relative z-10 flex items-center gap-3 px-5 pt-10 pb-3 max-w-md mx-auto w-full ${fade(0)}`} style={style(0)}>
         <div className="w-11 h-11 rounded-full flex items-center justify-center shrink-0"
           style={{ background: '#fff', border: '1.5px solid #cdd4cd' }}>
-          <svg width="28" height="28" viewBox="0 0 100 100" fill="none">
-            <g transform="translate(50,50)">
-              <polygon points="0,-20 4.5,-10 15,-14 10,-5 20,0 10,5 15,14 4.5,10 0,20 -4.5,10 -15,14 -10,5 -20,0 -10,-5 -15,-14 -4.5,-10" fill="#2d7a4f"/>
-              <circle cx="0" cy="0" r="9" fill="#fff"/>
-              <circle cx="0" cy="0" r="6" fill="#2d7a4f"/>
-              <circle cx="0" cy="0" r="3" fill="#fff"/>
-            </g>
-          </svg>
+          <img src="/kemenag.png" alt="Kemenag" width={28} height={28} style={{ objectFit: 'contain' }} />
         </div>
         <div>
           <p className="font-extrabold leading-tight tracking-wide" style={{ color: '#1e2e22', fontSize: '12px' }}>MAN 1 TASIKMALAYA</p>

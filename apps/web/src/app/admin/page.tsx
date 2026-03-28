@@ -31,17 +31,12 @@ const C = {
   green: '#2d7a4f', greenLight: '#e2ebe3', greenBorder: '#b5d9c4',
 };
 
-// ── JALUR YANG TAMPIL DI PESERTA TES ─────────────────────────
-const JALUR_REGULER = ['REGULER MURNI', 'Reguler Murni', 'reguler murni', 'REGULER'];
+// Jalur yang wajib ikut tes — filter langsung via API query param
+const JALUR_TES = 'REGULER MURNI';
 
 const KemenagLogo = ({ size = 32 }: { size?: number }) => (
-  <div style={{ width: size, height: size, borderRadius: '50%', background: C.bg, border: '1.5px solid #cdd4cd', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-    <svg width={size * 0.6} height={size * 0.6} viewBox="0 0 100 100" fill="none">
-      <g transform="translate(50,50)">
-        <polygon points="0,-20 4.5,-10 15,-14 10,-5 20,0 10,5 15,14 4.5,10 0,20 -4.5,10 -15,14 -10,5 -20,0 -10,-5 -15,-14 -4.5,-10" fill="#2d7a4f" />
-        <circle cx="0" cy="0" r="9" fill="#fff" /><circle cx="0" cy="0" r="6" fill="#2d7a4f" /><circle cx="0" cy="0" r="3" fill="#fff" />
-      </g>
-    </svg>
+  <div style={{ width: size, height: size, borderRadius: '50%', background: '#fff', border: '1.5px solid #cdd4cd', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+    <img src="/kemenag.png" alt="Kemenag" width={size * 0.75} height={size * 0.75} style={{ objectFit: 'contain' }} />
   </div>
 );
 
@@ -626,22 +621,36 @@ function ResultsView({ examId }: { examId: string }) {
 // ── PESERTA PAGE ──────────────────────────────────────────────
 // Hanya menampilkan peserta jalur REGULER MURNI (jalur yang membutuhkan tes)
 function PesertaPage() {
+  const { toast } = useToast();
   const [data, setData] = useState<Pendaftar[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterRoom, setFilterRoom] = useState('');
+  const [showImport, setShowImport] = useState(false);
+  const [editPeserta, setEditPeserta] = useState<any | null>(null);
+  const [savingPeserta, setSavingPeserta] = useState(false);
 
-  useEffect(() => {
-    GET<Pendaftar[]>('/api/admin/pendaftar').then(r => {
-      if (r.success) {
-        // Filter hanya jalur Reguler Murni
-        const filtered = (r.data || []).filter(p =>
-          JALUR_REGULER.some(j => p.jalur?.toLowerCase() === j.toLowerCase())
-        );
-        setData(filtered);
-      }
-      setLoading(false);
+  const savePeserta = async () => {
+    if (!editPeserta?.nisn || !editPeserta?.nama_lengkap) { toast('error', 'NISN dan nama wajib diisi'); return; }
+    setSavingPeserta(true);
+    // Post as a student user — NISN as username, tanggal lahir DDMMYYYY as password
+    const r = await POST('/api/admin/users', {
+      username: editPeserta.nisn,
+      full_name: editPeserta.nama_lengkap,
+      password: editPeserta.tanggal_lahir?.replace(/-/g, '').split('').reverse().join('') || editPeserta.nisn,
+      role: 'student',
+      nisn: editPeserta.nisn,
     });
+    setSavingPeserta(false);
+    if (r.success) { toast('success', 'Peserta berhasil ditambahkan'); setEditPeserta(null); fetchPeserta(); }
+    else toast('error', r.error || 'Gagal');
+  };
+
+  const fetchPeserta = useCallback(async () => {
+    const r = await GET<Pendaftar[]>('/api/admin/pendaftar?jalur=' + encodeURIComponent(JALUR_TES));
+    if (r.success) setData(r.data || []);
+    setLoading(false);
   }, []);
+  useEffect(() => { fetchPeserta(); }, [fetchPeserta]);
 
   const rooms = Array.from(new Set(data.map(p => p.ruang_tes).filter(Boolean))).sort();
   const filtered = filterRoom ? data.filter(p => p.ruang_tes === filterRoom) : data;
@@ -654,8 +663,9 @@ function PesertaPage() {
       </div>
 
       <div style={{ flex: 1, padding: '16px 20px' }} className="space-y-3">
-        {/* filter dropdown */}
-        <div style={{ maxWidth: '200px' }}>
+        {/* toolbar: filter + actions */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          <div style={{ flex: 1, minWidth: '160px', maxWidth: '220px' }}>
           <select value={filterRoom} onChange={e => setFilterRoom(e.target.value)}
             style={{ width: '100%', padding: '8px 12px', fontSize: '12.5px', fontWeight: 600, background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '10px', outline: 'none', color: filterRoom ? C.text : C.textMuted, cursor: 'pointer', fontFamily: 'inherit' }}
             onFocus={e => { e.target.style.borderColor = C.green; e.target.style.boxShadow = '0 0 0 3px rgba(45,122,79,0.1)'; }}
@@ -663,6 +673,17 @@ function PesertaPage() {
             <option value="">Semua Ruangan</option>
             {rooms.map(r => <option key={r} value={r}>{r}</option>)}
           </select>
+          </div>
+          <div style={{ display: 'flex', gap: '6px', marginLeft: 'auto' }}>
+            <button onClick={() => setShowImport(true)}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: C.bg, color: C.textMid, fontSize: '12px', fontWeight: 700, padding: '8px 13px', borderRadius: '10px', border: `1.5px solid ${C.borderMid}`, cursor: 'pointer' }}>
+              <Upload size={13} /> Import Excel
+            </button>
+            <button onClick={() => setEditPeserta({ jalur: JALUR_TES })}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: C.green, color: '#fff', fontSize: '12px', fontWeight: 700, padding: '8px 13px', borderRadius: '10px', border: 'none', cursor: 'pointer' }}>
+              <Plus size={13} strokeWidth={2.5} /> Tambah Peserta
+            </button>
+          </div>
         </div>
 
         {loading ? <div className="py-12 text-center"><Spinner /></div>
@@ -715,6 +736,26 @@ function PesertaPage() {
             </>
           )}
       </div>
+
+      {/* Modal tambah peserta manual */}
+      <Modal open={!!editPeserta} onClose={() => setEditPeserta(null)} title="Tambah Peserta" size="sm">
+        {editPeserta && (
+          <div className="space-y-3">
+            <Input label="NISN" value={editPeserta.nisn || ''} onChange={e => setEditPeserta({ ...editPeserta, nisn: e.target.value })} placeholder="0012345678" />
+            <Input label="Nama Lengkap" value={editPeserta.nama_lengkap || ''} onChange={e => setEditPeserta({ ...editPeserta, nama_lengkap: e.target.value })} />
+            <Input label="Tanggal Lahir" type="date" value={editPeserta.tanggal_lahir || ''} onChange={e => setEditPeserta({ ...editPeserta, tanggal_lahir: e.target.value })}
+              placeholder="Password otomatis: DDMMYYYY" />
+            <p style={{ color: C.textFaint, fontSize: '11px' }}>Password login otomatis menggunakan format DDMMYYYY dari tanggal lahir.</p>
+            <div className="flex gap-2 justify-end pt-1">
+              <Button variant="secondary" size="sm" onClick={() => setEditPeserta(null)}>Batal</Button>
+              <Button size="sm" loading={savingPeserta} onClick={savePeserta}>Simpan</Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Import Excel peserta */}
+      <BulkImport type="users" open={showImport} onClose={() => setShowImport(false)} onSuccess={() => { setShowImport(false); fetchPeserta(); }} />
     </div>
   );
 }
@@ -840,14 +881,12 @@ function PelaksanaPage() {
   const [confirmDel, setConfirmDel] = useState<Proctor | null>(null);
 
   const fetchData = useCallback(async () => {
-    // Fetch both proctors and admins
-    const [p, a] = await Promise.all([
-      GET<Proctor[]>('/api/admin/proctors'),
-      GET<Proctor[]>('/api/admin/users?role=admin'),
-    ]);
-    const proctors = (p.success ? p.data || [] : []).map((u: any) => ({ ...u, role: 'proctor' }));
-    const admins   = (a.success ? a.data || [] : []).map((u: any) => ({ ...u, role: 'admin' }));
-    setUsers([...proctors, ...admins]);
+    // Fetch proctors + admins via /users endpoint which returns role field
+    const r = await GET<Proctor[]>('/api/admin/users');
+    if (r.success) {
+      const all = (r.data || []).filter((u: any) => u.role === 'proctor' || u.role === 'admin');
+      setUsers(all);
+    }
     setLoading(false);
   }, []);
   useEffect(() => { fetchData(); }, [fetchData]);

@@ -68,10 +68,16 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, onFini
     return () => clearInterval(iv);
   }, [startedAt, durationMinutes]);
 
-  // Auto-sync answers + heartbeat
+  // Auto-sync answers + heartbeat (cek time_locked dari server)
   useEffect(() => {
     const s = setInterval(() => flushAnswers(), 15000);
-    const h = setInterval(() => POST(`/api/student/sessions/${sessionId}/heartbeat`), 15000);
+    const h = setInterval(async () => {
+      const r = await POST(`/api/student/sessions/${sessionId}/heartbeat`);
+      if (r.data?.time_locked && !submittedRef.current) {
+        setCheatMsg('Waktu ujian Anda telah berakhir. Ujian dikunci oleh sistem.');
+        submittedRef.current = true; // prevent further actions
+      }
+    }, 15000);
     return () => { clearInterval(s); clearInterval(h); };
   }, [sessionId]);
 
