@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { POST } from '@/lib/api';
+import { Bold, Italic, Underline, Strikethrough, ListOrdered, List, Image, Music, Code, Type } from 'lucide-react';
 
 // ═══════════════════════════════════════════════════════════════
 // TipTap-like Rich Editor (Zero-dependency, custom implementation)
@@ -194,76 +195,41 @@ export default function RichEditor({ value, onChange, placeholder = 'Tulis di si
   // ── Toolbar Button Component ───────────────────────────────
   const TB = ({ onClick, active, children, title }: { onClick: () => void; active?: boolean; children: React.ReactNode; title: string }) => (
     <button type="button" onClick={onClick} title={title}
-      className={`w-7 h-7 flex items-center justify-center rounded text-xs font-bold transition-colors
-        ${active ? 'bg-brand-100 text-brand-700' : 'text-surface-500 hover:bg-surface-100 hover:text-surface-700'}`}>
+      className={`w-7 h-7 flex items-center justify-center rounded text-xs transition-colors
+        ${active ? 'bg-primary-100 text-primary-700' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'}`}>
       {children}
     </button>
   );
 
   return (
-    <div className="border border-surface-200 rounded-xl overflow-hidden bg-white">
+    <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
       {/* Toolbar */}
-      <div className="flex items-center gap-0.5 px-2 py-1.5 border-b border-surface-100 bg-surface-50/50 flex-wrap">
-        <TB onClick={toggleBold} title="Tebal (Ctrl+B)"><b>B</b></TB>
-        <TB onClick={toggleItalic} title="Miring (Ctrl+I)"><i>I</i></TB>
-        <TB onClick={toggleUnderline} title="Garis Bawah (Ctrl+U)"><u>U</u></TB>
-        <TB onClick={toggleStrike} title="Coret">
-          <span style={{ textDecoration: 'line-through' }}>S</span>
-        </TB>
-
-        <span className="w-px h-4 bg-surface-200 mx-1" />
-
-        <TB onClick={toggleOL} title="Daftar Nomor">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 6h11M10 12h11M10 18h11M3 6h1M3 12h1M3 18h1"/></svg>
-        </TB>
-        <TB onClick={toggleUL} title="Daftar Bullet">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4" cy="6" r="1" fill="currentColor"/><circle cx="4" cy="12" r="1" fill="currentColor"/><circle cx="4" cy="18" r="1" fill="currentColor"/></svg>
-        </TB>
-
-        <span className="w-px h-4 bg-surface-200 mx-1" />
-
-        {/* RTL Toggle */}
-        <TB onClick={toggleRTL} active={isRTL} title="Arah Teks (RTL/LTR)">
-          <span className="text-[10px]">{isRTL ? 'RTL' : 'LTR'}</span>
-        </TB>
-
-        {/* Math */}
-        <TB onClick={openMath} title="Sisipkan Rumus Matematika (KaTeX)">
-          <span className="text-[11px] italic font-serif">∑</span>
-        </TB>
-
-        <span className="w-px h-4 bg-surface-200 mx-1" />
-
-        {/* Image Upload */}
-        <TB onClick={() => fileInputRef.current?.click()} title="Upload Gambar">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
-        </TB>
+      <div className="flex items-center gap-0.5 px-2 py-1.5 border-b border-gray-100 bg-gray-50/50 flex-wrap">
+        <TB onClick={toggleBold} title="Tebal"><Bold size={14} /></TB>
+        <TB onClick={toggleItalic} title="Miring"><Italic size={14} /></TB>
+        <TB onClick={toggleUnderline} title="Garis Bawah"><Underline size={14} /></TB>
+        <TB onClick={toggleStrike} title="Coret"><Strikethrough size={14} /></TB>
+        <span className="w-px h-4 bg-gray-200 mx-1" />
+        <TB onClick={toggleOL} title="Daftar Nomor"><ListOrdered size={14} /></TB>
+        <TB onClick={toggleUL} title="Daftar Bullet"><List size={14} /></TB>
+        <span className="w-px h-4 bg-gray-200 mx-1" />
+        <TB onClick={toggleRTL} active={isRTL} title="Arah Teks (RTL/LTR)"><Type size={13} /></TB>
+        <TB onClick={openMath} title="Rumus Matematika"><span className="text-[11px] font-serif italic">fx</span></TB>
+        <span className="w-px h-4 bg-gray-200 mx-1" />
+        <TB onClick={() => fileInputRef.current?.click()} title="Upload Gambar"><Image size={14} /></TB>
         <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
-
-        {/* Audio Upload */}
-        <TB onClick={() => audioInputRef.current?.click()} title="Upload Audio">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
-        </TB>
+        <TB onClick={() => audioInputRef.current?.click()} title="Upload Audio"><Music size={14} /></TB>
         <input ref={audioInputRef} type="file" accept="audio/*" className="hidden" onChange={handleAudioUpload} />
-
-        <span className="w-px h-4 bg-surface-200 mx-1" />
-
-        {/* Source Toggle */}
-        <TB onClick={toggleSource} active={showSource} title="Kode HTML">
-          <span className="text-[10px] font-mono">&lt;/&gt;</span>
-        </TB>
-
-        {uploading && (
-          <span className="text-[10px] text-surface-400 ml-2 animate-pulse">Mengupload...</span>
-        )}
-      </div>
+        <span className="w-px h-4 bg-gray-200 mx-1" />
+        <TB onClick={toggleSource} active={showSource} title="Kode HTML"><Code size={14} /></TB>
+        {uploading && <span className="text-[10px] text-gray-400 ml-2 animate-pulse">Mengupload...</span>}</div>
 
       {/* Editor Area */}
       {showSource ? (
         <textarea
           value={sourceCode}
           onChange={(e) => handleSourceChange(e.target.value)}
-          className="w-full px-3 py-2 text-sm font-mono text-surface-700 bg-surface-50 outline-none resize-none"
+          className="w-full px-3 py-2 text-sm font-mono text-gray-700 bg-gray-50 outline-none resize-none"
           style={{ minHeight }}
           spellCheck={false}
         />
@@ -273,7 +239,7 @@ export default function RichEditor({ value, onChange, placeholder = 'Tulis di si
           contentEditable
           onInput={handleInput}
           onBlur={handleInput}
-          className="px-3 py-2 text-sm text-surface-800 outline-none overflow-y-auto"
+          className="px-3 py-2 text-sm text-gray-800 outline-none overflow-y-auto"
           style={{ minHeight }}
           data-placeholder={placeholder}
           suppressContentEditableWarning
@@ -285,16 +251,16 @@ export default function RichEditor({ value, onChange, placeholder = 'Tulis di si
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" onClick={() => setShowMathInput(false)}>
           <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" />
           <div className="relative bg-white rounded-2xl w-full max-w-md shadow-2xl p-5" onClick={e => e.stopPropagation()}>
-            <h3 className="font-bold text-surface-900 text-sm mb-3">Sisipkan Rumus Matematika</h3>
+            <h3 className="font-bold text-gray-900 text-sm mb-3">Sisipkan Rumus Matematika</h3>
 
             <div className="space-y-3">
               <div>
-                <label className="text-xs font-semibold text-surface-500 uppercase tracking-wide">Ekspresi LaTeX</label>
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Ekspresi LaTeX</label>
                 <input
                   value={mathExpr}
                   onChange={e => updateMathPreview(e.target.value)}
                   placeholder="contoh: \frac{a}{b}, x^2, \sqrt{n}"
-                  className="w-full px-3 py-2 mt-1 text-sm font-mono bg-surface-50 border border-surface-200 rounded-lg outline-none focus:border-brand-500"
+                  className="w-full px-3 py-2 mt-1 text-sm font-mono bg-gray-50 border border-gray-200 rounded-lg outline-none focus:border-primary-500"
                   autoFocus
                   onKeyDown={e => { if (e.key === 'Enter') insertMath(); }}
                 />
@@ -318,7 +284,7 @@ export default function RichEditor({ value, onChange, placeholder = 'Tulis di si
                 ].map(q => (
                   <button key={q.val} type="button"
                     onClick={() => updateMathPreview(mathExpr + q.val)}
-                    className="px-2 py-1 text-[10px] bg-surface-100 hover:bg-surface-200 rounded font-mono text-surface-600 transition-colors">
+                    className="px-2 py-1 text-[10px] bg-gray-100 hover:bg-gray-200 rounded font-mono text-gray-600 transition-colors">
                     {q.label}
                   </button>
                 ))}
@@ -326,19 +292,19 @@ export default function RichEditor({ value, onChange, placeholder = 'Tulis di si
 
               {/* Preview */}
               {mathPreview && (
-                <div className="p-3 bg-surface-50 rounded-lg border border-surface-100">
-                  <p className="text-[10px] text-surface-400 mb-1 uppercase font-semibold">Preview</p>
+                <div className="p-3 bg-gray-50 rounded-lg border border-gray-100">
+                  <p className="text-[10px] text-gray-400 mb-1 uppercase font-semibold">Preview</p>
                   <div className="text-lg" dangerouslySetInnerHTML={{ __html: mathPreview }} />
                 </div>
               )}
 
               <div className="flex gap-2 justify-end pt-1">
                 <button type="button" onClick={() => setShowMathInput(false)}
-                  className="px-3 py-1.5 text-xs font-semibold text-surface-600 bg-surface-100 rounded-lg hover:bg-surface-200">
+                  className="px-3 py-1.5 text-xs font-semibold text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200">
                   Batal
                 </button>
                 <button type="button" onClick={insertMath} disabled={!mathExpr.trim()}
-                  className="px-3 py-1.5 text-xs font-semibold text-white bg-brand-600 rounded-lg hover:bg-brand-700 disabled:opacity-50">
+                  className="px-3 py-1.5 text-xs font-semibold text-white bg-primary-600 rounded-lg hover:bg-primary-700 disabled:opacity-50">
                   Sisipkan
                 </button>
               </div>

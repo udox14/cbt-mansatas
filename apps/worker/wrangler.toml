@@ -1,10 +1,10 @@
-name = "cbtmansatas"
+name = "cbt-pmb-worker"
 main = "src/index.ts"
 compatibility_date = "2024-06-01"
 
 [vars]
-JWT_SECRET = "9bf165e74c80b8d8d88af0fa6e989056a272032506dfa7fa43ea06b07405c5e8"
-CORS_ORIGIN = "https://cbtmansatas.pages.dev"
+JWT_SECRET = "GANTI_DENGAN_SECRET_YANG_KUAT_MIN_32_KARAKTER"
+CORS_ORIGIN = "https://cbt.example.com"
 
 # Bind ke database PMB EXISTING — JANGAN buat baru!
 [[d1_databases]]

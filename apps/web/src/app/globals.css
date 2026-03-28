@@ -1,56 +1,17 @@
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
-
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --font-body: 'Plus Jakarta Sans', system-ui, sans-serif;
-  --font-display: 'Plus Jakarta Sans', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', monospace;
-}
-
 * { box-sizing: border-box; }
-
 html { -webkit-tap-highlight-color: transparent; }
-
-body {
-  font-family: var(--font-body);
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  background: #f8fafc;
-  color: #0f172a;
-}
-
-/* Scrollbar */
-::-webkit-scrollbar { width: 4px; height: 4px; }
+body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 999px; }
-
-/* Selection */
-::selection { background: #bbf7d0; color: #052e16; }
-
-/* Exam font scaling */
-.exam-text { font-size: var(--exam-font-size, 1rem); line-height: 1.7; }
-
-/* Toast animation */
-@keyframes slideIn { from { transform: translateY(-1rem); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-.toast-enter { animation: slideIn 0.3s ease-out; }
-
-/* Drawer animation */
-@keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
-.drawer-enter { animation: slideUp 0.25s ease-out; }
-
-/* Pulse for live indicator */
-@keyframes pulse-dot {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
-}
-.pulse-dot { animation: pulse-dot 1.5s ease-in-out infinite; }
-
-/* Prevent text selection in exam */
+::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 999px; }
+::selection { background: #a7f3d0; color: #022c22; }
+.exam-text { font-size: var(--exam-font-size, 1rem); line-height: 1.75; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+.fade-in { animation: fadeIn 0.3s ease-out; }
 .no-select { -webkit-user-select: none; user-select: none; }
-
-/* Audio player styling */
 audio { width: 100%; height: 40px; border-radius: 8px; }
-audio::-webkit-media-controls-panel { background: #f1f5f9; }

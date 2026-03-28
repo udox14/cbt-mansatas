@@ -365,13 +365,13 @@ export default function BulkImport({ type, examId, onSuccess, onClose, open }: B
       {/* Step: Upload */}
       {step === 'upload' && (
         <div className="space-y-4">
-          <div className="border-2 border-dashed border-surface-200 rounded-xl p-6 text-center hover:border-brand-400 transition-colors cursor-pointer"
+          <div className="border-2 border-dashed border-gray-200 rounded-xl p-6 text-center hover:border-primary-400 transition-colors cursor-pointer"
             onClick={() => fileRef.current?.click()}>
             <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="1.5" className="mx-auto mb-2">
               <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
             </svg>
-            <p className="text-sm font-semibold text-surface-700">Klik untuk memilih file</p>
-            <p className="text-xs text-surface-400 mt-1">
+            <p className="text-sm font-semibold text-gray-700">Klik untuk memilih file</p>
+            <p className="text-xs text-gray-400 mt-1">
               {type === 'questions' ? '.xlsx atau .docx' : '.xlsx'}
             </p>
             <input ref={fileRef} type="file"
@@ -382,62 +382,62 @@ export default function BulkImport({ type, examId, onSuccess, onClose, open }: B
           {error && <div className="px-3 py-2 bg-red-50 border border-red-100 rounded-xl text-xs text-red-600 whitespace-pre-line">{error}</div>}
 
           {/* Format Guide */}
-          <div className="bg-surface-50 rounded-xl p-3 space-y-2">
-            <p className="text-xs font-bold text-surface-500 uppercase tracking-wide">Format yang Didukung</p>
+          <div className="bg-gray-50 rounded-xl p-3 space-y-2">
+            <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Format yang Didukung</p>
             {type === 'questions' ? (
-              <div className="text-xs text-surface-600 space-y-1.5">
+              <div className="text-xs text-gray-600 space-y-1.5">
                 <p className="font-semibold">Excel (.xlsx):</p>
                 <div className="overflow-x-auto">
-                  <table className="text-[10px] border border-surface-200 rounded">
-                    <thead><tr className="bg-surface-100">
-                      <th className="px-2 py-1 border-r border-surface-200">soal</th>
-                      <th className="px-2 py-1 border-r border-surface-200">a</th>
-                      <th className="px-2 py-1 border-r border-surface-200">b</th>
-                      <th className="px-2 py-1 border-r border-surface-200">c</th>
-                      <th className="px-2 py-1 border-r border-surface-200">d</th>
+                  <table className="text-[10px] border border-gray-200 rounded">
+                    <thead><tr className="bg-gray-100">
+                      <th className="px-2 py-1 border-r border-gray-200">soal</th>
+                      <th className="px-2 py-1 border-r border-gray-200">a</th>
+                      <th className="px-2 py-1 border-r border-gray-200">b</th>
+                      <th className="px-2 py-1 border-r border-gray-200">c</th>
+                      <th className="px-2 py-1 border-r border-gray-200">d</th>
                       <th className="px-2 py-1">jawaban</th>
                     </tr></thead>
                     <tbody><tr>
-                      <td className="px-2 py-1 border-r border-surface-200">Teks soal...</td>
-                      <td className="px-2 py-1 border-r border-surface-200">Opsi A</td>
-                      <td className="px-2 py-1 border-r border-surface-200">Opsi B</td>
-                      <td className="px-2 py-1 border-r border-surface-200">Opsi C</td>
-                      <td className="px-2 py-1 border-r border-surface-200">Opsi D</td>
+                      <td className="px-2 py-1 border-r border-gray-200">Teks soal...</td>
+                      <td className="px-2 py-1 border-r border-gray-200">Opsi A</td>
+                      <td className="px-2 py-1 border-r border-gray-200">Opsi B</td>
+                      <td className="px-2 py-1 border-r border-gray-200">Opsi C</td>
+                      <td className="px-2 py-1 border-r border-gray-200">Opsi D</td>
                       <td className="px-2 py-1 font-bold">C</td>
                     </tr></tbody>
                   </table>
                 </div>
                 <p className="font-semibold mt-2">Word (.docx):</p>
-                <pre className="bg-white p-2 rounded border border-surface-200 text-[10px] font-mono">{`1. Teks soal pertama
+                <pre className="bg-white p-2 rounded border border-gray-200 text-[10px] font-mono">{`1. Teks soal pertama
 A. Opsi A
 B. Opsi B
 C. Opsi C *
 D. Opsi D
 
 2. Teks soal kedua...`}</pre>
-                <p className="text-surface-400">Tandai jawaban benar dengan * atau ✓</p>
+                <p className="text-gray-400">Tandai jawaban benar dengan * atau ✓</p>
               </div>
             ) : (
-              <div className="text-xs text-surface-600">
+              <div className="text-xs text-gray-600">
                 <div className="overflow-x-auto">
-                  <table className="text-[10px] border border-surface-200 rounded">
-                    <thead><tr className="bg-surface-100">
-                      <th className="px-2 py-1 border-r border-surface-200">username</th>
-                      <th className="px-2 py-1 border-r border-surface-200">nama</th>
-                      <th className="px-2 py-1 border-r border-surface-200">password</th>
-                      <th className="px-2 py-1 border-r border-surface-200">nisn</th>
+                  <table className="text-[10px] border border-gray-200 rounded">
+                    <thead><tr className="bg-gray-100">
+                      <th className="px-2 py-1 border-r border-gray-200">username</th>
+                      <th className="px-2 py-1 border-r border-gray-200">nama</th>
+                      <th className="px-2 py-1 border-r border-gray-200">password</th>
+                      <th className="px-2 py-1 border-r border-gray-200">nisn</th>
                       <th className="px-2 py-1">room_id</th>
                     </tr></thead>
                     <tbody><tr>
-                      <td className="px-2 py-1 border-r border-surface-200">siswa001</td>
-                      <td className="px-2 py-1 border-r border-surface-200">Ahmad Fauzi</td>
-                      <td className="px-2 py-1 border-r border-surface-200">pass123</td>
-                      <td className="px-2 py-1 border-r border-surface-200">0012345678</td>
+                      <td className="px-2 py-1 border-r border-gray-200">siswa001</td>
+                      <td className="px-2 py-1 border-r border-gray-200">Ahmad Fauzi</td>
+                      <td className="px-2 py-1 border-r border-gray-200">pass123</td>
+                      <td className="px-2 py-1 border-r border-gray-200">0012345678</td>
                       <td className="px-2 py-1">1</td>
                     </tr></tbody>
                   </table>
                 </div>
-                <p className="text-surface-400 mt-1">Password kosong = username jadi default password</p>
+                <p className="text-gray-400 mt-1">Password kosong = username jadi default password</p>
               </div>
             )}
           </div>
@@ -448,41 +448,41 @@ D. Opsi D
       {step === 'preview' && (
         <div className="space-y-3">
           {importResult ? (
-            <div className="px-3 py-3 bg-brand-50 border border-brand-100 rounded-xl text-sm text-brand-700 font-semibold text-center">
+            <div className="px-3 py-3 bg-primary-50 border border-primary-100 rounded-xl text-sm text-primary-700 font-semibold text-center">
               ✓ {importResult}
             </div>
           ) : (
             <>
               <div className="flex items-center justify-between">
-                <p className="text-sm font-semibold text-surface-800">
+                <p className="text-sm font-semibold text-gray-800">
                   {type === 'questions' ? `${parsedQuestions.length} soal` : `${parsedUsers.length} user`} ditemukan
                 </p>
-                <button onClick={reset} className="text-xs text-surface-400 hover:text-surface-600 font-semibold">← Upload ulang</button>
+                <button onClick={reset} className="text-xs text-gray-400 hover:text-gray-600 font-semibold">← Upload ulang</button>
               </div>
 
               {error && <div className="px-3 py-2 bg-red-50 border border-red-100 rounded-xl text-xs text-red-600">{error}</div>}
 
               {/* Preview Table */}
-              <div className="bg-white rounded-xl border border-surface-100 overflow-hidden max-h-[300px] overflow-y-auto">
+              <div className="bg-white rounded-xl border border-gray-100 overflow-hidden max-h-[300px] overflow-y-auto">
                 {type === 'questions' ? (
                   <table className="w-full text-xs">
-                    <thead className="sticky top-0 bg-surface-50">
-                      <tr className="text-surface-500 uppercase tracking-wider">
+                    <thead className="sticky top-0 bg-gray-50">
+                      <tr className="text-gray-500 uppercase tracking-wider">
                         <th className="text-left px-3 py-2 w-8">#</th>
                         <th className="text-left px-3 py-2">Soal</th>
                         <th className="text-center px-2 py-2">Opsi</th>
                         <th className="text-center px-2 py-2">Kunci</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-surface-50">
+                    <tbody className="divide-y divide-gray-50">
                       {parsedQuestions.map((q, i) => (
                         <tr key={i}>
-                          <td className="px-3 py-2 text-surface-400">{i + 1}</td>
-                          <td className="px-3 py-2 text-surface-800">
+                          <td className="px-3 py-2 text-gray-400">{i + 1}</td>
+                          <td className="px-3 py-2 text-gray-800">
                             <div className="line-clamp-2" dangerouslySetInnerHTML={{ __html: q.question_text }} />
                           </td>
                           <td className="text-center px-2 py-2">{q.options.length}</td>
-                          <td className="text-center px-2 py-2 font-bold text-brand-600">
+                          <td className="text-center px-2 py-2 font-bold text-primary-600">
                             {q.options.find(o => o.is_correct)?.option_label || '-'}
                           </td>
                         </tr>
@@ -491,8 +491,8 @@ D. Opsi D
                   </table>
                 ) : (
                   <table className="w-full text-xs">
-                    <thead className="sticky top-0 bg-surface-50">
-                      <tr className="text-surface-500 uppercase tracking-wider">
+                    <thead className="sticky top-0 bg-gray-50">
+                      <tr className="text-gray-500 uppercase tracking-wider">
                         <th className="text-left px-3 py-2 w-8">#</th>
                         <th className="text-left px-3 py-2">Username</th>
                         <th className="text-left px-3 py-2">Nama</th>
@@ -500,14 +500,14 @@ D. Opsi D
                         <th className="text-left px-3 py-2">NISN</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-surface-50">
+                    <tbody className="divide-y divide-gray-50">
                       {parsedUsers.map((u, i) => (
                         <tr key={i}>
-                          <td className="px-3 py-2 text-surface-400">{i + 1}</td>
-                          <td className="px-3 py-2 font-mono text-surface-700">{u.username}</td>
-                          <td className="px-3 py-2 text-surface-800">{u.full_name}</td>
+                          <td className="px-3 py-2 text-gray-400">{i + 1}</td>
+                          <td className="px-3 py-2 font-mono text-gray-700">{u.username}</td>
+                          <td className="px-3 py-2 text-gray-800">{u.full_name}</td>
                           <td className="text-center px-2 py-2"><Badge color="green">{u.role}</Badge></td>
-                          <td className="px-3 py-2 text-surface-500">{u.nisn || '-'}</td>
+                          <td className="px-3 py-2 text-gray-500">{u.nisn || '-'}</td>
                         </tr>
                       ))}
                     </tbody>
