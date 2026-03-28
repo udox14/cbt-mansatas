@@ -1,67 +1,119 @@
 'use client';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { BookOpen, LogIn, ShieldCheck, Wifi, Clock } from 'lucide-react';
+import { ShieldCheck, Clock, Monitor, CheckCircle2 } from 'lucide-react';
+
+const FEATURES = [
+  { icon: ShieldCheck, title: 'Anti-Kecurangan', desc: 'Deteksi pindah tab',    green: true  },
+  { icon: Clock,       title: 'Auto-Save',        desc: 'Jawaban aman tersimpan', green: false },
+  { icon: Monitor,     title: 'Berbasis Web',      desc: 'Tanpa install aplikasi', green: false },
+];
 
 export default function LandingPage() {
-  const [show, setShow] = useState(false);
-  useEffect(() => { setShow(true); }, []);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { const t = setTimeout(() => setMounted(true), 60); return () => clearTimeout(t); }, []);
+
+  const fade = (delay: number) =>
+    `transition-all duration-500 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`;
+  const style = (delay: number): React.CSSProperties => ({ transitionDelay: `${delay}ms` });
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-900 to-primary-950 text-white">
-      {/* Subtle grid bg */}
-      <div className="absolute inset-0 opacity-[0.03]" style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, white 1px, transparent 0)', backgroundSize: '40px 40px' }} />
+    <div className="min-h-screen flex flex-col select-none overflow-hidden" style={{ background: '#f4f6f4' }}>
 
-      <div className="relative z-10 min-h-screen flex flex-col">
-        {/* Nav */}
-        <nav className="flex items-center justify-between px-6 py-5 max-w-5xl mx-auto w-full">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-primary-600 flex items-center justify-center">
-              <BookOpen size={16} strokeWidth={2.5} />
-            </div>
-            <span className="font-bold text-sm tracking-tight">CBT PMB</span>
-          </div>
-          <Link href="/login/" className="flex items-center gap-1.5 text-sm font-medium text-primary-400 hover:text-primary-300 transition-colors">
-            <LogIn size={15} /> Masuk
+      {/* dot texture */}
+      <div className="pointer-events-none absolute inset-0"
+        style={{ backgroundImage: 'radial-gradient(circle,#c4ccc4 1px,transparent 1px)', backgroundSize: '26px 26px', opacity: 0.4 }} />
+
+      {/* shape blobs */}
+      <div className="pointer-events-none absolute -top-12 -right-12 w-52 h-52 rounded-full" style={{ background: '#dde2dd' }} />
+      <div className="pointer-events-none absolute -bottom-10 -left-10 w-44 h-44 rounded-full" style={{ background: '#d6e8dc' }} />
+
+      {/* NAV */}
+      <nav className={`relative z-10 flex items-center gap-3 px-5 pt-10 pb-3 max-w-md mx-auto w-full ${fade(0)}`} style={style(0)}>
+        <div className="w-11 h-11 rounded-full flex items-center justify-center shrink-0"
+          style={{ background: '#fff', border: '1.5px solid #cdd4cd' }}>
+          <svg width="28" height="28" viewBox="0 0 100 100" fill="none">
+            <g transform="translate(50,50)">
+              <polygon points="0,-20 4.5,-10 15,-14 10,-5 20,0 10,5 15,14 4.5,10 0,20 -4.5,10 -15,14 -10,5 -20,0 -10,-5 -15,-14 -4.5,-10" fill="#2d7a4f"/>
+              <circle cx="0" cy="0" r="9" fill="#fff"/>
+              <circle cx="0" cy="0" r="6" fill="#2d7a4f"/>
+              <circle cx="0" cy="0" r="3" fill="#fff"/>
+            </g>
+          </svg>
+        </div>
+        <div>
+          <p className="font-extrabold leading-tight tracking-wide" style={{ color: '#1e2e22', fontSize: '12px' }}>MAN 1 TASIKMALAYA</p>
+          <p className="font-semibold italic mt-0.5" style={{ color: '#7a9e86', fontSize: '10px', letterSpacing: '0.06em' }}>Bangkit · Maju · Juara</p>
+        </div>
+      </nav>
+
+      {/* divider */}
+      <div className="relative z-10 mx-5 max-w-md w-full self-center" style={{ height: '1px', background: 'linear-gradient(to right,transparent,#c4cec4,transparent)', marginBottom: '28px' }} />
+
+      {/* HERO */}
+      <main className="relative z-10 flex-1 flex flex-col justify-center px-5 max-w-md mx-auto w-full">
+
+        {/* Badge */}
+        <div className={`${fade(0)} mb-5`} style={style(0)}>
+          <span className="inline-flex items-center gap-1.5 font-bold uppercase"
+            style={{ background: '#e2ebe3', border: '1.5px solid #c4d4c7', color: '#2d6644', fontSize: '11px', letterSpacing: '0.09em', padding: '6px 14px', borderRadius: '999px' }}>
+            <span className="w-1.5 h-1.5 rounded-full" style={{ background: '#2d7a4f' }} />
+            Penerimaan Murid Baru 2025/2026
+          </span>
+        </div>
+
+        {/* Headline */}
+        <div className={`${fade(0)} mb-3`} style={style(80)}>
+          <p className="font-black leading-[1.06]" style={{ color: '#1e2e22', fontSize: 'clamp(2.1rem,9vw,2.6rem)', letterSpacing: '-1.2px' }}>Ujian Seleksi</p>
+          <p className="font-black leading-[1.06]" style={{ color: '#2d7a4f', fontSize: 'clamp(2.1rem,9vw,2.6rem)', letterSpacing: '-1.2px' }}>Penerimaan</p>
+          <p className="font-black leading-[1.06]" style={{ color: '#6b7c6e', fontSize: 'clamp(2.1rem,9vw,2.6rem)', letterSpacing: '-1.2px' }}>Murid Baru</p>
+        </div>
+
+        <p className={`${fade(0)} mb-8 leading-relaxed max-w-xs`} style={{ ...style(140), color: '#8a9e8d', fontSize: '13.5px', fontWeight: 500 }}>
+          Sistem CBT resmi MAN 1 Tasikmalaya. Aman, terstruktur, dan hasil tersedia langsung setelah ujian.
+        </p>
+
+        {/* CTA */}
+        <div className={`${fade(0)} mb-2.5`} style={style(200)}>
+          <Link href="/login/"
+            className="flex items-center justify-between w-full active:scale-[0.98] transition-transform"
+            style={{ background: '#2d7a4f', padding: '15px 20px', borderRadius: '16px' }}>
+            <span className="font-extrabold" style={{ color: '#fff', fontSize: '15px', letterSpacing: '-0.2px' }}>Masuk ke Ujian</span>
+            <span className="flex items-center justify-center rounded-lg" style={{ width: '34px', height: '34px', background: 'rgba(255,255,255,0.15)' }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+            </span>
           </Link>
-        </nav>
+        </div>
+        <p className={`${fade(0)} text-center mb-8`} style={{ ...style(200), color: '#a8b9aa', fontSize: '11px', fontWeight: 500 }}>
+          NISN &amp; tanggal lahir (DDMMYYYY) sebagai password
+        </p>
 
-        {/* Hero */}
-        <main className="flex-1 flex items-center justify-center px-6">
-          <div className={`text-center max-w-lg transition-all duration-700 ${show ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-6'}`}>
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary-500/10 border border-primary-500/20 text-xs font-medium text-primary-400 mb-6">
-              <div className="w-1.5 h-1.5 rounded-full bg-primary-400" />
-              Penerimaan Murid Baru 2025/2026
+        {/* Feature cards */}
+        <div className={`${fade(0)} grid grid-cols-3 gap-2.5 mb-3`} style={style(260)}>
+          {FEATURES.map(f => (
+            <div key={f.title} className="flex flex-col" style={{ background: '#fff', border: '1.5px solid #d4dbd4', borderRadius: '16px', padding: '13px 11px' }}>
+              <div className="flex items-center justify-center mb-2" style={{ width: '30px', height: '30px', background: f.green ? '#e2ebe3' : '#e8eae8', borderRadius: '9px' }}>
+                <f.icon size={14} strokeWidth={2} color={f.green ? '#2d7a4f' : '#6b7c6e'} />
+              </div>
+              <p className="font-bold leading-tight mb-0.5" style={{ color: '#1e2e22', fontSize: '10.5px' }}>{f.title}</p>
+              <p className="leading-tight" style={{ color: '#8a9e8d', fontSize: '9.5px' }}>{f.desc}</p>
             </div>
-            <h1 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold leading-tight tracking-tight">
-              Ujian Seleksi<br />
-              <span className="text-primary-400">Penerimaan Murid Baru</span>
-            </h1>
-            <p className="text-gray-400 mt-4 mb-8 leading-relaxed text-sm sm:text-base max-w-md mx-auto">
-              Sistem ujian berbasis komputer yang aman, cepat, dan andal. Selamat datang dan semoga sukses.
-            </p>
-            <Link href="/login/" className="inline-flex items-center gap-2 px-6 py-3 bg-primary-600 hover:bg-primary-500 text-white font-semibold rounded-xl shadow-lg shadow-primary-600/20 transition-all text-sm">
-              <LogIn size={16} /> Masuk ke Ujian
-            </Link>
+          ))}
+        </div>
 
-            {/* Features */}
-            <div className="grid grid-cols-3 gap-4 mt-16 text-center">
-              {[
-                { icon: ShieldCheck, label: 'Anti-Cheat' },
-                { icon: Wifi, label: 'Offline-Ready' },
-                { icon: Clock, label: 'Auto-Save' },
-              ].map(f => (
-                <div key={f.label} className="flex flex-col items-center gap-1.5">
-                  <f.icon size={18} className="text-primary-500" />
-                  <span className="text-xs text-gray-500">{f.label}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </main>
+        {/* Trust strip */}
+        <div className={`${fade(0)} flex items-center gap-2.5 mb-8`} style={{ ...style(320), background: '#fff', border: '1.5px solid #d4dbd4', borderRadius: '14px', padding: '11px 14px' }}>
+          <CheckCircle2 size={13} strokeWidth={2.2} color="#2d7a4f" className="shrink-0" />
+          <p style={{ color: '#8a9e8d', fontSize: '11px', fontWeight: 500, lineHeight: 1.4 }}>
+            Data terintegrasi langsung dari sistem pendaftaran PMB.
+          </p>
+        </div>
+      </main>
 
-        <footer className="text-center py-5 text-xs text-gray-600">© 2025 — Sistem CBT PMB</footer>
-      </div>
+      {/* FOOTER */}
+      <footer className="relative z-10 pb-10 pt-2 text-center max-w-md mx-auto w-full">
+        <p style={{ color: '#a8b3a8', fontSize: '11px', fontWeight: 500 }}>© 2026 MAN 1 Tasikmalaya — DRUDOX</p>
+      </footer>
     </div>
   );
 }

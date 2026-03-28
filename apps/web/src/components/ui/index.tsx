@@ -1,24 +1,36 @@
 'use client';
 import { ReactNode, useState, createContext, useContext, useCallback } from 'react';
 
+const C = {
+  white: '#fff', bg: '#f4f6f4', border: '#e0e5e0', borderMid: '#d4dbd4',
+  text: '#1e2e22', textMid: '#4a6655', textMuted: '#8a9e8d', textFaint: '#a8b9aa',
+  green: '#2d7a4f', greenLight: '#e2ebe3', greenBorder: '#b5d9c4',
+};
+
 // ── MODAL ────────────────────────────────────────────────────
 export function Modal({ open, onClose, title, children, size = 'md' }: {
-  open: boolean; onClose: () => void; title?: string; children: ReactNode; size?: 'sm' | 'md' | 'lg'
+  open: boolean; onClose: () => void; title?: string; children: ReactNode; size?: 'sm' | 'md' | 'lg';
 }) {
   if (!open) return null;
-  const w = { sm: 'max-w-md', md: 'max-w-xl', lg: 'max-w-2xl' }[size];
+  const maxW = { sm: '420px', md: '560px', lg: '680px' }[size];
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" onClick={onClose}>
-      <div className="fixed inset-0 bg-gray-900/50" />
-      <div className={`relative bg-white rounded-t-xl sm:rounded-xl w-full ${w} max-h-[90vh] overflow-y-auto shadow-xl fade-in`}
-        onClick={e => e.stopPropagation()}>
+    <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}
+      className="sm:items-center" onClick={onClose}>
+      <div style={{ position: 'fixed', inset: 0, background: 'rgba(30,46,34,0.4)' }} />
+      <div style={{
+        position: 'relative', background: C.white, width: '100%', maxWidth: maxW,
+        maxHeight: '90vh', overflowY: 'auto',
+        borderRadius: '20px 20px 0 0', boxShadow: '0 -4px 32px rgba(0,0,0,0.08)',
+      }} className="sm:rounded-xl fade-in" onClick={e => e.stopPropagation()}>
         {title && (
-          <div className="sticky top-0 bg-white border-b border-gray-100 px-5 py-3.5 flex items-center justify-between z-10">
-            <h3 className="font-semibold text-gray-900 text-sm">{title}</h3>
-            <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-0.5"><svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 5l8 8M13 5l-8 8"/></svg></button>
+          <div style={{ position: 'sticky', top: 0, background: C.white, borderBottom: `1.5px solid ${C.border}`, padding: '14px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', zIndex: 10, borderRadius: '20px 20px 0 0' }}>
+            <p style={{ fontWeight: 800, color: C.text, fontSize: '14px' }}>{title}</p>
+            <button onClick={onClose} style={{ background: C.bg, border: `1.5px solid ${C.borderMid}`, borderRadius: '8px', width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+              <svg width="14" height="14" fill="none" stroke={C.textMuted} strokeWidth="2.5"><path d="M3 3l8 8M11 3l-8 8"/></svg>
+            </button>
           </div>
         )}
-        <div className="p-5">{children}</div>
+        <div style={{ padding: '20px' }}>{children}</div>
       </div>
     </div>
   );
@@ -31,69 +43,163 @@ export const useToast = () => useContext(ToastCtx);
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<{ id: number; type: ToastType; msg: string }[]>([]);
   const toast = useCallback((type: ToastType, msg: string) => {
-    const id = Date.now(); setToasts(p => [...p, { id, type, msg }]);
+    const id = Date.now();
+    setToasts(p => [...p, { id, type, msg }]);
     setTimeout(() => setToasts(p => p.filter(t => t.id !== id)), 3500);
   }, []);
-  const bg: Record<ToastType, string> = { success: 'bg-primary-600', error: 'bg-red-600', warning: 'bg-amber-500', info: 'bg-gray-800' };
-  return (<ToastCtx.Provider value={{ toast }}>{children}
-    <div className="fixed top-4 right-4 z-[100] space-y-2 max-w-xs">
-      {toasts.map(t => <div key={t.id} className={`${bg[t.type]} text-white px-4 py-2.5 rounded-lg text-sm font-medium shadow-lg fade-in`}>{t.msg}</div>)}
-    </div>
-  </ToastCtx.Provider>);
+  const styles: Record<ToastType, { bg: string; color: string }> = {
+    success: { bg: C.greenLight,  color: '#2d6644'  },
+    error:   { bg: '#fef2f2',     color: '#dc2626'  },
+    warning: { bg: '#fffbeb',     color: '#b45309'  },
+    info:    { bg: '#f1f1f0',     color: '#4a6655'  },
+  };
+  return (
+    <ToastCtx.Provider value={{ toast }}>
+      {children}
+      <div style={{ position: 'fixed', top: '16px', right: '16px', zIndex: 100, display: 'flex', flexDirection: 'column', gap: '8px', maxWidth: '300px' }}>
+        {toasts.map(t => (
+          <div key={t.id} className="fade-in" style={{
+            background: styles[t.type].bg, color: styles[t.type].color,
+            border: `1.5px solid ${C.borderMid}`,
+            padding: '10px 14px', borderRadius: '12px', fontSize: '12.5px', fontWeight: 700,
+            boxShadow: '0 4px 12px rgba(0,0,0,0.06)',
+          }}>{t.msg}</div>
+        ))}
+      </div>
+    </ToastCtx.Provider>
+  );
 }
 
-// ── SIMPLE COMPONENTS ─────────────────────────────────────────
+// ── SPINNER ───────────────────────────────────────────────────
 export function Spinner({ size = 20 }: { size?: number }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className="animate-spin"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" opacity="0.2" /><path d="M12 2a10 10 0 019.8 8" stroke="currentColor" strokeWidth="3" strokeLinecap="round" /></svg>;
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className="animate-spin">
+      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" opacity="0.15" />
+      <path d="M12 2a10 10 0 019.8 8" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+    </svg>
+  );
 }
+
+// ── LOADING SCREEN ────────────────────────────────────────────
 export function LoadingScreen() {
-  return <div className="min-h-screen flex items-center justify-center"><div className="text-center"><Spinner size={28} /><p className="text-sm text-gray-400 mt-3">Memuat...</p></div></div>;
-}
-export function EmptyState({ title, desc }: { title: string; desc?: string }) {
-  return <div className="text-center py-16 px-4"><div className="w-12 h-12 mx-auto mb-3 rounded-full bg-gray-100 flex items-center justify-center"><svg width="20" height="20" fill="none" stroke="#9ca3af" strokeWidth="1.5"><rect x="3" y="3" width="14" height="14" rx="2"/><path d="M7 7h6M7 10h4"/></svg></div><p className="font-medium text-gray-600">{title}</p>{desc && <p className="text-sm text-gray-400 mt-1">{desc}</p>}</div>;
-}
-export function Badge({ children, color = 'gray' }: { children: ReactNode; color?: string }) {
-  const c: Record<string, string> = { green: 'bg-emerald-50 text-emerald-700', red: 'bg-red-50 text-red-700', yellow: 'bg-amber-50 text-amber-700', blue: 'bg-sky-50 text-sky-700', gray: 'bg-gray-100 text-gray-600', purple: 'bg-violet-50 text-violet-700' };
-  return <span className={`inline-block px-2 py-0.5 text-[11px] font-medium rounded-full ${c[color] || c.gray}`}>{children}</span>;
-}
-export function Confirm({ open, onClose, onConfirm, title, message, confirmText = 'Hapus', danger = true }: {
-  open: boolean; onClose: () => void; onConfirm: () => void; title: string; message: string; confirmText?: string; danger?: boolean;
-}) {
-  return <Modal open={open} onClose={onClose} title={title} size="sm">
-    <p className="text-sm text-gray-500 mb-4">{message}</p>
-    <div className="flex gap-2 justify-end">
-      <button onClick={onClose} className="px-3 py-1.5 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200">Batal</button>
-      <button onClick={onConfirm} className={`px-3 py-1.5 text-sm font-medium text-white rounded-lg ${danger ? 'bg-red-600 hover:bg-red-700' : 'bg-primary-600 hover:bg-primary-700'}`}>{confirmText}</button>
+  return (
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: C.bg }}>
+      <div style={{ textAlign: 'center', color: C.textMuted }}>
+        <Spinner size={28} />
+        <p style={{ fontSize: '12px', marginTop: '10px', fontWeight: 500 }}>Memuat...</p>
+      </div>
     </div>
-  </Modal>;
+  );
+}
+
+// ── EMPTY STATE ───────────────────────────────────────────────
+export function EmptyState({ title, desc }: { title: string; desc?: string }) {
+  return (
+    <div style={{ textAlign: 'center', padding: '48px 16px' }}>
+      <div style={{ width: '44px', height: '44px', margin: '0 auto 12px', borderRadius: '14px', background: C.bg, border: `1.5px solid ${C.borderMid}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <svg width="18" height="18" fill="none" stroke={C.textFaint as string} strokeWidth="1.5"><rect x="2" y="2" width="14" height="14" rx="2"/><path d="M6 6h6M6 9h4"/></svg>
+      </div>
+      <p style={{ fontWeight: 700, color: C.textMuted, fontSize: '13px' }}>{title}</p>
+      {desc && <p style={{ color: '#a8b9aa', fontSize: '12px', marginTop: '3px' }}>{desc}</p>}
+    </div>
+  );
+}
+
+// ── BADGE ─────────────────────────────────────────────────────
+export function Badge({ children, color = 'gray' }: { children: ReactNode; color?: string }) {
+  const map: Record<string, { bg: string; color: string }> = {
+    green:  { bg: C.greenLight,  color: '#2d6644'  },
+    blue:   { bg: '#e0f0ff',     color: '#1a5fa8'  },
+    red:    { bg: '#fef2f2',     color: '#dc2626'  },
+    yellow: { bg: '#fffbeb',     color: '#b45309'  },
+    gray:   { bg: '#f1f1f0',     color: '#6b7c6e'  },
+    purple: { bg: '#f3f0ff',     color: '#5b3fd4'  },
+  };
+  const s = map[color] || map.gray;
+  return <span style={{ display: 'inline-block', background: s.bg, color: s.color, fontSize: '10px', fontWeight: 700, padding: '3px 9px', borderRadius: '999px' }}>{children}</span>;
+}
+
+// ── CONFIRM ───────────────────────────────────────────────────
+export function Confirm({ open, onClose, onConfirm, title, message, confirmText = 'Hapus', danger = true }: {
+  open: boolean; onClose: () => void; onConfirm: () => void;
+  title: string; message: string; confirmText?: string; danger?: boolean;
+}) {
+  return (
+    <Modal open={open} onClose={onClose} title={title} size="sm">
+      <p style={{ color: C.textMuted, fontSize: '13px', marginBottom: '20px', lineHeight: 1.5 }}>{message}</p>
+      <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+        <button onClick={onClose} style={{ padding: '8px 16px', fontSize: '12px', fontWeight: 700, color: C.textMid, background: C.bg, border: `1.5px solid ${C.borderMid}`, borderRadius: '10px', cursor: 'pointer' }}>Batal</button>
+        <button onClick={onConfirm} style={{ padding: '8px 16px', fontSize: '12px', fontWeight: 700, color: '#fff', background: danger ? '#dc2626' : C.green, border: 'none', borderRadius: '10px', cursor: 'pointer' }}>{confirmText}</button>
+      </div>
+    </Modal>
+  );
 }
 
 // ── FORM ELEMENTS ─────────────────────────────────────────────
+const inputStyle = {
+  width: '100%', padding: '10px 12px', fontSize: '13px', fontWeight: 500,
+  background: C.bg, border: `1.5px solid ${C.borderMid}`, borderRadius: '10px',
+  outline: 'none', color: C.text, fontFamily: 'inherit',
+  transition: 'border-color 0.15s, box-shadow 0.15s',
+};
+
 export function Input({ label, error, className = '', ...p }: { label?: string; error?: string } & React.InputHTMLAttributes<HTMLInputElement>) {
-  return <div><label className="block text-xs font-medium text-gray-500 mb-1">{label}</label>
-    <input className={`w-full px-3 py-2 text-sm bg-white border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition ${error ? 'border-red-400' : ''} ${className}`} {...p} />
-    {error && <p className="text-xs text-red-500 mt-0.5">{error}</p>}</div>;
+  return (
+    <div>
+      {label && <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: C.textMid, letterSpacing: '0.04em', textTransform: 'uppercase', marginBottom: '6px' }}>{label}</label>}
+      <input style={{ ...inputStyle, borderColor: error ? '#fca5a5' : C.borderMid } as any} className={className}
+        onFocus={e => { e.target.style.borderColor = C.green; e.target.style.boxShadow = '0 0 0 3px rgba(45,122,79,0.1)'; }}
+        onBlur={e => { e.target.style.borderColor = error ? '#fca5a5' : C.borderMid; e.target.style.boxShadow = 'none'; }}
+        {...p} />
+      {error && <p style={{ color: '#dc2626', fontSize: '11px', marginTop: '3px' }}>{error}</p>}
+    </div>
+  );
 }
+
 export function Textarea({ label, className = '', ...p }: { label?: string } & React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
-  return <div><label className="block text-xs font-medium text-gray-500 mb-1">{label}</label>
-    <textarea className={`w-full px-3 py-2 text-sm bg-white border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 resize-none transition ${className}`} {...p} /></div>;
+  return (
+    <div>
+      {label && <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: C.textMid, letterSpacing: '0.04em', textTransform: 'uppercase', marginBottom: '6px' }}>{label}</label>}
+      <textarea style={{ ...inputStyle, resize: 'none' } as any}
+        onFocus={e => { e.target.style.borderColor = C.green; e.target.style.boxShadow = '0 0 0 3px rgba(45,122,79,0.1)'; }}
+        onBlur={e => { e.target.style.borderColor = C.borderMid; e.target.style.boxShadow = 'none'; }}
+        className={className} {...p} />
+    </div>
+  );
 }
+
 export function Select({ label, options, className = '', ...p }: { label?: string; options: { value: string | number; label: string }[] } & React.SelectHTMLAttributes<HTMLSelectElement>) {
-  return <div><label className="block text-xs font-medium text-gray-500 mb-1">{label}</label>
-    <select className={`w-full px-3 py-2 text-sm bg-white border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition ${className}`} {...p}>
-      {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}</select></div>;
+  return (
+    <div>
+      {label && <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: C.textMid, letterSpacing: '0.04em', textTransform: 'uppercase', marginBottom: '6px' }}>{label}</label>}
+      <select style={inputStyle as any} className={className}
+        onFocus={e => { e.target.style.borderColor = C.green; e.target.style.boxShadow = '0 0 0 3px rgba(45,122,79,0.1)'; }}
+        onBlur={e => { e.target.style.borderColor = C.borderMid; e.target.style.boxShadow = 'none'; }}
+        {...p}>
+        {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+    </div>
+  );
 }
+
 export function Button({ variant = 'primary', size = 'md', loading, children, className = '', ...p }: {
-  variant?: 'primary' | 'secondary' | 'danger' | 'ghost'; size?: 'sm' | 'md'; loading?: boolean
+  variant?: 'primary' | 'secondary' | 'danger' | 'ghost'; size?: 'sm' | 'md'; loading?: boolean;
 } & React.ButtonHTMLAttributes<HTMLButtonElement>) {
-  const v: Record<string, string> = {
-    primary: 'bg-primary-600 text-white hover:bg-primary-700 shadow-sm',
-    secondary: 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50',
-    danger: 'bg-red-600 text-white hover:bg-red-700',
-    ghost: 'text-gray-600 hover:bg-gray-100',
+  const variants: Record<string, React.CSSProperties> = {
+    primary:   { background: C.green,    color: '#fff',       border: 'none'                                          },
+    secondary: { background: C.bg,       color: C.textMid,    border: `1.5px solid ${C.borderMid}`                    },
+    danger:    { background: '#fef2f2',  color: '#dc2626',    border: '1.5px solid #fecaca'                           },
+    ghost:     { background: 'none',     color: C.textMuted,  border: 'none'                                          },
   };
-  const s = size === 'sm' ? 'text-xs px-3 py-1.5' : 'text-sm px-4 py-2';
-  return <button className={`inline-flex items-center justify-center gap-1.5 font-medium rounded-lg transition-all disabled:opacity-50 ${v[variant]} ${s} ${className}`} disabled={loading || p.disabled} {...p}>
-    {loading && <Spinner size={14} />}{children}
-  </button>;
+  const sizes: Record<string, React.CSSProperties> = {
+    sm: { fontSize: '12px', padding: '7px 13px' },
+    md: { fontSize: '13px', padding: '9px 16px' },
+  };
+  return (
+    <button style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '5px', fontWeight: 700, borderRadius: '10px', cursor: 'pointer', fontFamily: 'inherit', transition: 'opacity 0.15s', ...variants[variant], ...sizes[size] } as any}
+      disabled={loading || p.disabled} className={className} {...p}>
+      {loading && <Spinner size={13} />}{children}
+    </button>
+  );
 }
+

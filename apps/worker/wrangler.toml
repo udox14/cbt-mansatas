@@ -4,7 +4,7 @@ compatibility_date = "2024-06-01"
 
 [vars]
 JWT_SECRET = "GANTI_DENGAN_SECRET_YANG_KUAT_MIN_32_KARAKTER"
-CORS_ORIGIN = "https://cbt.example.com"
+CORS_ORIGIN = "https://cbtmansatas.drudox.workers.dev"
 
 # Bind ke database PMB EXISTING — JANGAN buat baru!
 [[d1_databases]]

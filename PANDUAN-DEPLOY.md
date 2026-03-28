@@ -106,15 +106,15 @@ npm run deploy:worker
 
 Output:
 ```
-Published cbt-pmb-worker
-  https://cbt-pmb-worker.NAMA-ANDA.workers.dev
+Published cbtmansatasr
+  https://cbtmansatasr.NAMA-ANDA.workers.dev
 ```
 **CATAT URL ini.**
 
 ### 3.6 Test Login
 ```bash
 # Test dengan akun admin PMB existing
-curl -X POST https://cbt-pmb-worker.NAMA-ANDA.workers.dev/api/auth/login \
+curl -X POST https://cbtmansatasr.NAMA-ANDA.workers.dev/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username":"ADMIN_USERNAME_PMB","password":"PASSWORD_ADMIN_PMB"}'
 ```
@@ -126,7 +126,7 @@ Harus dapat `{"success":true,"data":{"token":"...","user":{"role":"admin"}}}`
 
 ### 4.1 Konfigurasi Environment
 ```bash
-echo "NEXT_PUBLIC_API_URL=https://cbt-pmb-worker.NAMA-ANDA.workers.dev" > apps/web/.env.local
+echo "NEXT_PUBLIC_API_URL=https://cbtmansatasr.NAMA-ANDA.workers.dev" > apps/web/.env.local
 ```
 
 ### 4.2 Test Lokal (Opsional)
@@ -171,7 +171,7 @@ npm run deploy:web
 Dashboard → Workers & Pages → project `cbt-pmb` → **Custom domains** → tambah `cbt.man1tasikmalaya.sch.id`
 
 ### 5.2 Backend
-Dashboard → Workers → `cbt-pmb-worker` → **Settings** → **Triggers** → **Custom Domains** → tambah `api-cbt.man1tasikmalaya.sch.id`
+Dashboard → Workers → `cbtmansatasr` → **Settings** → **Triggers** → **Custom Domains** → tambah `api-cbt.man1tasikmalaya.sch.id`
 
 ### 5.3 Update Config
 **`apps/worker/wrangler.toml`:**

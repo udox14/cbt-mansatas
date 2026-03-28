@@ -2,77 +2,195 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { GET, POST } from '@/lib/api';
-import { Button, Badge, LoadingScreen, EmptyState, ToastProvider, useToast, Confirm, Spinner } from '@/components/ui';
-import { LogOut, RefreshCw, Monitor, KeyRound, Wifi, WifiOff, CheckCircle, AlertTriangle } from 'lucide-react';
+import { LoadingScreen, EmptyState, ToastProvider, useToast, Confirm, Spinner } from '@/components/ui';
+import { LogOut, Wifi, WifiOff, CheckCircle2, RefreshCw } from 'lucide-react';
+
+const C = {
+  bg: '#f4f6f4', white: '#fff', border: '#e0e5e0', borderLight: '#edf0ed', borderMid: '#d4dbd4',
+  text: '#1e2e22', textMid: '#4a6655', textMuted: '#8a9e8d', textFaint: '#a8b9aa',
+  green: '#2d7a4f', greenLight: '#e2ebe3', greenBorder: '#b5d9c4',
+};
+
+const KemenagLogo = () => (
+  <div style={{ width: 36, height: 36, borderRadius: '50%', background: C.bg, border: `1.5px solid #cdd4cd`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+    <svg width="21" height="21" viewBox="0 0 100 100" fill="none">
+      <g transform="translate(50,50)">
+        <polygon points="0,-20 4.5,-10 15,-14 10,-5 20,0 10,5 15,14 4.5,10 0,20 -4.5,10 -15,14 -10,5 -20,0 -10,-5 -15,-14 -4.5,-10" fill="#2d7a4f"/>
+        <circle cx="0" cy="0" r="9" fill="#fff"/><circle cx="0" cy="0" r="6" fill="#2d7a4f"/><circle cx="0" cy="0" r="3" fill="#fff"/>
+      </g>
+    </svg>
+  </div>
+);
 
 function ProctorContent() {
   const { user, loading: authLoading, logout } = useAuth('proctor');
   const { toast } = useToast();
-  const [tokens, setTokens] = useState<any[]>([]); const [sessions, setSessions] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true); const [resetTarget, setResetTarget] = useState<any>(null);
+  const [tokens, setTokens] = useState<any[]>([]);
+  const [sessions, setSessions] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [resetTarget, setResetTarget] = useState<any>(null);
 
   const fetchData = useCallback(async () => {
     const [t, s] = await Promise.all([GET('/api/proctor/token'), GET('/api/proctor/sessions')]);
-    if (t.success) setTokens(t.data || []); if (s.success) setSessions(s.data || []); setLoading(false);
+    if (t.success) setTokens(t.data || []);
+    if (s.success) setSessions(s.data || []);
+    setLoading(false);
   }, []);
 
-  useEffect(() => { if (!user) return; fetchData(); const iv = setInterval(fetchData, 10000); return () => clearInterval(iv); }, [user, fetchData]);
+  useEffect(() => {
+    if (!user) return;
+    fetchData();
+    const iv = setInterval(fetchData, 10000);
+    return () => clearInterval(iv);
+  }, [user, fetchData]);
 
-  const handleReset = async () => { if (!resetTarget) return; await POST(`/api/proctor/sessions/${resetTarget.id}/reset`); toast('success', 'Sesi berhasil direset'); setResetTarget(null); fetchData(); };
+  const handleReset = async () => {
+    if (!resetTarget) return;
+    await POST(`/api/proctor/sessions/${resetTarget.id}/reset`);
+    toast('success', 'Sesi berhasil direset');
+    setResetTarget(null);
+    fetchData();
+  };
 
   if (authLoading || loading) return <LoadingScreen />;
   if (!user) return null;
 
-  const online = sessions.filter((s: any) => s.live_status === 'online').length;
+  const online   = sessions.filter((s: any) => s.live_status === 'online').length;
   const finished = sessions.filter((s: any) => s.live_status === 'selesai').length;
-  const offline = sessions.length - online - finished;
+  const offline  = sessions.length - online - finished;
+
+  const stats = [
+    { n: online,   label: 'Online',  icon: Wifi,         color: C.green,    bg: C.greenLight  },
+    { n: offline,  label: 'Offline', icon: WifiOff,      color: '#dc2626',  bg: '#fef2f2'     },
+    { n: finished, label: 'Selesai', icon: CheckCircle2, color: '#6b7c6e',  bg: '#f1f1f0'     },
+  ];
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b border-gray-100 px-4 py-3">
-        <div className="max-w-3xl mx-auto flex items-center justify-between">
-          <div><h1 className="text-sm font-semibold text-gray-900">{user.full_name}</h1><p className="text-[11px] text-gray-400">Pengawas Ruangan</p></div>
-          <button onClick={logout} className="text-gray-400 hover:text-red-500"><LogOut size={16} /></button>
+    <div style={{ minHeight: '100vh', background: C.bg, fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}>
+
+      {/* dot texture */}
+      <div className="pointer-events-none fixed inset-0" style={{ backgroundImage: 'radial-gradient(circle,#c4ccc4 1px,transparent 1px)', backgroundSize: '26px 26px', opacity: 0.35, zIndex: 0 }} />
+
+      {/* HEADER */}
+      <header style={{ position: 'relative', zIndex: 2, background: C.white, borderBottom: `1.5px solid ${C.border}` }}>
+        <div style={{ maxWidth: '720px', margin: '0 auto', padding: '14px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <KemenagLogo />
+            <div>
+              <p style={{ color: C.text, fontSize: '11px', fontWeight: 800, letterSpacing: '0.01em', lineHeight: 1.2 }}>MAN 1 TASIKMALAYA</p>
+              <p style={{ color: '#7a9e86', fontSize: '9.5px', fontWeight: 600, fontStyle: 'italic', letterSpacing: '0.05em', marginTop: '1px' }}>Bangkit · Maju · Juara</p>
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{ textAlign: 'right' }}>
+              <p style={{ color: C.text, fontSize: '13px', fontWeight: 700, lineHeight: 1.2 }}>{user.full_name}</p>
+              <p style={{ color: C.textMuted, fontSize: '11px' }}>Pengawas Ruangan</p>
+            </div>
+            <button onClick={logout} style={{ width: '34px', height: '34px', borderRadius: '10px', background: '#fef2f2', border: '1.5px solid #fecaca', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}>
+              <LogOut size={15} color="#dc2626" strokeWidth={2} />
+            </button>
+          </div>
         </div>
       </header>
-      <main className="max-w-3xl mx-auto px-4 py-5 space-y-5">
-        {/* Token */}
+
+      <main style={{ position: 'relative', zIndex: 1, maxWidth: '720px', margin: '0 auto', padding: '20px' }} className="space-y-5">
+
+        {/* TOKEN */}
         <section>
-          <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Token Aktif</h2>
-          {tokens.length === 0 ? <div className="bg-white rounded-lg border border-gray-200 p-4 text-center text-sm text-gray-400">Belum ada ujian aktif</div> : (
-            <div className="space-y-2">{tokens.map((t: any) => (
-              <div key={t.id} className="bg-white rounded-lg border border-gray-200 p-4 flex items-center justify-between">
-                <div><p className="text-xs text-gray-500">{t.exam_title}</p><p className="text-[11px] text-gray-400">{t.room_name}</p></div>
-                <span className="text-2xl sm:text-3xl font-mono font-bold text-primary-700 tracking-widest">{t.token_code}</span>
-              </div>))}</div>)}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+            <p style={{ color: C.textMid, fontSize: '11px', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Token Aktif</p>
+            <span style={{ background: '#e0f0ff', color: '#1a5fa8', fontSize: '10px', fontWeight: 700, padding: '3px 10px', borderRadius: '999px' }}>Auto-refresh 10s</span>
+          </div>
+          {tokens.length === 0
+            ? <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '14px', padding: '20px', textAlign: 'center', color: C.textFaint, fontSize: '13px' }}>Belum ada ujian aktif</div>
+            : (
+              <div className="space-y-2">
+                {tokens.map((t: any) => (
+                  <div key={t.id} style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '14px', padding: '14px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+                    <div>
+                      <p style={{ color: C.text, fontSize: '13px', fontWeight: 700 }}>{t.exam_title}</p>
+                      <p style={{ color: C.textMuted, fontSize: '11px', marginTop: '2px' }}>{t.room_name}</p>
+                    </div>
+                    <span style={{ color: C.green, fontSize: '28px', fontWeight: 900, letterSpacing: '0.22em', fontVariantNumeric: 'tabular-nums', fontFamily: 'monospace' }}>{t.token_code}</span>
+                  </div>
+                ))}
+              </div>
+            )}
         </section>
 
-        {/* Stats */}
-        <div className="grid grid-cols-3 gap-3">
-          {[{ n: online, l: 'Online', Icon: Wifi, c: 'text-primary-600' }, { n: offline, l: 'Offline', Icon: WifiOff, c: 'text-gray-400' }, { n: finished, l: 'Selesai', Icon: CheckCircle, c: 'text-gray-500' }].map(s => (
-            <div key={s.l} className="bg-white rounded-lg border border-gray-200 p-3 text-center">
-              <s.Icon size={16} className={`mx-auto mb-1 ${s.c}`} /><p className="text-xl font-bold text-gray-800">{s.n}</p><p className="text-[11px] text-gray-400">{s.l}</p></div>))}
+        {/* STATS */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '10px' }}>
+          {stats.map(s => (
+            <div key={s.label} style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '14px', padding: '14px', textAlign: 'center' }}>
+              <div style={{ width: '32px', height: '32px', borderRadius: '10px', background: s.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 8px' }}>
+                <s.icon size={15} color={s.color} strokeWidth={2} />
+              </div>
+              <p style={{ color: C.text, fontSize: '22px', fontWeight: 900, lineHeight: 1 }}>{s.n}</p>
+              <p style={{ color: C.textMuted, fontSize: '11px', marginTop: '3px' }}>{s.label}</p>
+            </div>
+          ))}
         </div>
 
-        {/* Table */}
+        {/* SESSIONS TABLE */}
         <section>
-          <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Monitoring Peserta</h2>
-          {sessions.length === 0 ? <EmptyState title="Belum ada peserta" /> : (
-            <div className="bg-white rounded-lg border border-gray-200 overflow-hidden overflow-x-auto">
-              <table className="w-full text-xs"><thead><tr className="bg-gray-50 text-gray-500 border-b border-gray-100">
-                <th className="text-left px-4 py-2.5 font-medium">Peserta</th><th className="text-center px-3 py-2.5 font-medium">Status</th><th className="text-center px-3 py-2.5 font-medium">Progres</th><th className="text-center px-3 py-2.5 font-medium">Warn</th><th className="text-center px-3 py-2.5 font-medium">Aksi</th>
-              </tr></thead>
-              <tbody>{sessions.map((s: any) => (
-                <tr key={s.id} className="border-b border-gray-50">
-                  <td className="px-4 py-2.5"><p className="font-medium text-gray-800">{s.full_name}</p><p className="text-gray-400 text-[10px]">{s.nisn}</p></td>
-                  <td className="text-center px-3 py-2.5"><Badge color={s.live_status === 'selesai' ? 'gray' : s.live_status === 'online' ? 'green' : 'red'}>{s.live_status === 'online' ? 'Online' : s.live_status === 'selesai' ? 'Selesai' : 'Offline'}</Badge></td>
-                  <td className="text-center px-3 py-2.5 font-mono text-gray-600">{s.answered_count}/{s.total_questions}</td>
-                  <td className="text-center px-3 py-2.5">{s.cheat_warnings > 0 ? <span className="text-red-600 font-bold">{s.cheat_warnings}</span> : <span className="text-gray-300">0</span>}</td>
-                  <td className="text-center px-3 py-2.5">{s.live_status !== 'selesai' && <button onClick={() => setResetTarget(s)} className="text-xs text-primary-600 font-medium hover:underline">Reset</button>}</td>
-                </tr>))}</tbody></table></div>)}
+          <p style={{ color: C.textMid, fontSize: '11px', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '10px' }}>Monitoring Peserta</p>
+          {sessions.length === 0
+            ? <EmptyState title="Belum ada peserta" />
+            : (
+              <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '14px', overflow: 'hidden' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                  <thead>
+                    <tr style={{ background: C.bg, borderBottom: `1.5px solid ${C.borderMid}` }}>
+                      {['Peserta', 'Status', 'Progres', 'Pelanggaran', 'Aksi'].map((h, i) => (
+                        <th key={h} style={{ padding: '9px 14px', textAlign: i === 0 ? 'left' : 'center', color: C.textMid, fontSize: '10.5px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sessions.map((s: any, i: number) => {
+                      const isOnline  = s.live_status === 'online';
+                      const isDone    = s.live_status === 'selesai';
+                      const isOffline = !isOnline && !isDone;
+                      return (
+                        <tr key={s.id} style={{ borderBottom: i < sessions.length - 1 ? `1px solid ${C.borderLight}` : 'none' }}>
+                          <td style={{ padding: '10px 14px' }}>
+                            <p style={{ color: C.text, fontWeight: 700 }}>{s.full_name}</p>
+                            <p style={{ color: C.textFaint, fontSize: '10px', marginTop: '1px', fontFamily: 'monospace' }}>{s.nisn}</p>
+                          </td>
+                          <td style={{ padding: '10px 14px', textAlign: 'center' }}>
+                            <span style={{
+                              background: isDone ? '#f1f1f0' : isOnline ? C.greenLight : '#fef2f2',
+                              color: isDone ? '#6b7c6e' : isOnline ? '#2d6644' : '#dc2626',
+                              fontSize: '10px', fontWeight: 700, padding: '3px 9px', borderRadius: '999px',
+                            }}>
+                              {isDone ? 'Selesai' : isOnline ? 'Online' : 'Offline'}
+                            </span>
+                          </td>
+                          <td style={{ padding: '10px 14px', textAlign: 'center', color: C.textMuted, fontFamily: 'monospace', fontWeight: 600 }}>{s.answered_count}/{s.total_questions}</td>
+                          <td style={{ padding: '10px 14px', textAlign: 'center', fontWeight: s.cheat_warnings > 0 ? 700 : 400, color: s.cheat_warnings > 0 ? '#dc2626' : C.textFaint }}>{s.cheat_warnings}</td>
+                          <td style={{ padding: '10px 14px', textAlign: 'center' }}>
+                            {!isDone && (
+                              <button onClick={() => setResetTarget(s)} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: C.green, fontSize: '11px', fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer' }}>
+                                <RefreshCw size={11} strokeWidth={2.5} /> Reset
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
         </section>
       </main>
-      <Confirm open={!!resetTarget} onClose={() => setResetTarget(null)} onConfirm={handleReset} title="Reset Sesi?" danger={false} confirmText="Reset"
+
+      <footer style={{ position: 'relative', zIndex: 1, textAlign: 'center', padding: '16px', color: '#a8b3a8', fontSize: '11px', fontWeight: 500 }}>
+        © 2026 MAN 1 Tasikmalaya — DRUDOX
+      </footer>
+
+      <Confirm open={!!resetTarget} onClose={() => setResetTarget(null)} onConfirm={handleReset}
+        title="Reset Sesi?" danger={false} confirmText="Reset"
         message={`Reset device lock untuk ${resetTarget?.full_name}?`} />
     </div>
   );
