@@ -143,7 +143,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, onFini
       const existing = m.get(qId) || { question_id: qId };
       m.set(qId, { ...existing, ...update });
       // Persist to localStorage
-      localStorage.setItem(`cbt_answers_${sessionId}`, JSON.stringify([...m.values()]));
+      localStorage.setItem(`cbt_answers_${sessionId}`, JSON.stringify(Array.from(m.values())));
       dirtyRef.current.add(qId);
       return m;
     });
@@ -164,7 +164,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, onFini
     setSubmitting(true);
     setShowConfirm(false);
     // Flush remaining
-    const batch = [...answers.values()];
+    const batch = Array.from(answers.values());
     if (batch.length > 0) {
       await POST(`/api/student/sessions/${sessionId}/answers`, { answers: batch });
     }
@@ -187,8 +187,8 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, onFini
   const q = questions[current];
   if (!q) return null;
   const ans = answers.get(q.id);
-  const answeredCount = [...answers.values()].filter(a => a.selected_option_id || a.essay_answer).length;
-  const doubtCount = [...answers.values()].filter(a => a.is_doubtful).length;
+  const answeredCount = Array.from(answers.values()).filter(a => a.selected_option_id || a.essay_answer).length;
+  const doubtCount = Array.from(answers.values()).filter(a => a.is_doubtful).length;
   const mm = Math.floor(timeLeft / 60);
   const ss = timeLeft % 60;
   const isUrgent = timeLeft < 300; // < 5 menit
