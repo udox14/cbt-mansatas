@@ -740,11 +740,12 @@ function PesertaPage() {
       GET<Room[]>('/api/admin/rooms'),
     ]);
     const pmbData: Pendaftar[] = pmb.success ? (pmb.data || []) : [];
-    if (rooms.success) setAllRooms(rooms.data || []);
+    const roomList = rooms.success ? (rooms.data || []) : [];
+    if (rooms.success) setAllRooms(roomList);
     // Map cbt_users student ke format Pendaftar
     const manualData: Pendaftar[] = (manual.success ? (manual.data || []) : []).map((u: any) => ({
       id: u.id, nisn: u.nisn || u.username, nama_lengkap: u.full_name,
-      no_pendaftaran: '—', ruang_tes: u.room_id || '',
+      no_pendaftaran: '—', ruang_tes: roomList.find((r: Room) => r.id === u.room_id)?.room_name || '',
       jalur: 'REGULER', asal_sekolah: '', jenis_kelamin: '',
       tanggal_lahir: '', tanggal_tes: '', sesi_tes: '',
       _sumber: 'manual' as const,
