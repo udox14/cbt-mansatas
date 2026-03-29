@@ -859,6 +859,25 @@ function PesertaPage() {
                         </td>
                         <td style={{ padding: '10px 14px', color: C.textMuted }}>{p.sesi_tes || '—'}</td>
                         <td style={{ padding: '10px 14px', color: C.textMuted, whiteSpace: 'nowrap' }}>{p.tanggal_tes || '—'}</td>
+                        <td style={{ padding: '10px 14px' }}>
+                          {(p as any)._sumber === 'manual'
+                            ? <span style={{ background:'#fffbeb',color:'#b45309',fontSize:'10px',fontWeight:700,padding:'2px 8px',borderRadius:'999px' }}>Manual</span>
+                            : <span style={{ background:'#e2ebe3',color:'#2d6644',fontSize:'10px',fontWeight:700,padding:'2px 8px',borderRadius:'999px' }}>PMB</span>}
+                        </td>
+                        <td style={{ padding: '10px 14px', textAlign: 'center' }}>
+                          <button onClick={() => { setAssignTarget(p); setAssignRoom((p as any).ruang_tes || ''); }}
+                            style={{ display:'inline-flex',alignItems:'center',gap:'4px',color:C.green,fontSize:'11px',fontWeight:700,background:'none',border:'none',cursor:'pointer' }}>
+                            <UserPlus size={12} /> {p.ruang_tes ? 'Pindah' : 'Assign'}
+                          </button>
+                        </td>
+                        <td style={{ padding: '10px 14px', textAlign: 'center' }}>
+                          <button onClick={() => setConfirmDelPeserta(p)}
+                            style={{ width:'28px',height:'28px',display:'inline-flex',alignItems:'center',justifyContent:'center',borderRadius:'8px',background:'none',border:'none',cursor:'pointer',color:C.textMuted }}
+                            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background='#fef2f2'; (e.currentTarget as HTMLElement).style.color='#dc2626'; }}
+                            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background='none'; (e.currentTarget as HTMLElement).style.color=C.textMuted; }}>
+                            <Trash2 size={13} />
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
