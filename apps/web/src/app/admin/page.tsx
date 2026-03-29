@@ -1206,13 +1206,16 @@ function PelaksanaPage() {
   }, []);
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const displayed = users.filter(u => u.role === tab);
+  // Map tab name (Indonesian) → DB role (English)
+  const TAB_TO_ROLE: Record<string, string> = { proktor: 'proctor', admin: 'admin' };
+  const dbRole = TAB_TO_ROLE[tab] || tab;
+  const displayed = users.filter(u => u.role === dbRole);
 
   const save = async () => {
     if (!editUser?.username || !editUser.full_name) { toast('error', 'Data tidak lengkap'); return; }
     if (!editUser.id && !editUser.password) { toast('error', 'Password wajib'); return; }
     setSaving(true);
-    const role = editUser.role || tab;
+    const role = TAB_TO_ROLE[editUser.role] || editUser.role || dbRole;
     const r = editUser.id
       ? await PUT(`/api/admin/users/${editUser.id}`, { ...editUser, role })
       : await POST('/api/admin/users', { ...editUser, role });
