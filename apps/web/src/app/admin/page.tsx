@@ -759,38 +759,81 @@ function PesertaPage() {
   }, []);
   useEffect(() => { fetchPeserta(); }, [fetchPeserta]);
 
-  const rooms = Array.from(new Set(data.map(p => p.ruang_tes).filter(Boolean))).sort();
-  const filtered = filterRoom ? data.filter(p => p.ruang_tes === filterRoom) : data;
+  // derive filter options from data
+  const roomOpts  = Array.from(new Set(data.map((p:any) => p.ruang_tes).filter(Boolean))).sort() as string[];
+  const sesiOpts  = Array.from(new Set(data.map((p:any) => p.sesi_tes).filter(Boolean))).sort() as string[];
+  const tglOpts   = Array.from(new Set(data.map((p:any) => p.tanggal_tes).filter(Boolean))).sort() as string[];
+  const [filterSesi, setFilterSesi] = useState('');
+  const [filterSumber, setFilterSumber] = useState('');
+  const [filterTgl, setFilterTgl] = useState('');
+  const [filterJk, setFilterJk] = useState('');
+
+  const filtered = data.filter((p: any) => {
+    if (filterRoom   && p.ruang_tes     !== filterRoom)   return false;
+    if (filterSesi   && p.sesi_tes      !== filterSesi)   return false;
+    if (filterSumber && p._sumber       !== filterSumber) return false;
+    if (filterTgl    && p.tanggal_tes   !== filterTgl)    return false;
+    if (filterJk     && (p.jenis_kelamin || '').toUpperCase() !== filterJk) return false;
+    return true;
+  });
+
+  const selStyle = (val: string): React.CSSProperties => ({
+    padding: '7px 11px', fontSize: '12px', fontWeight: 600,
+    background: C.white, border: `1.5px solid ${val ? C.green : C.borderMid}`,
+    borderRadius: '10px', outline: 'none', color: val ? C.text : C.textMuted,
+    cursor: 'pointer', fontFamily: 'inherit',
+  });
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-      <div style={{ background: C.white, borderBottom: `1.5px solid ${C.border}`, padding: '14px 20px' }}>
-        <p style={{ color: C.text, fontSize: '15px', fontWeight: 800, letterSpacing: '-0.3px' }}>Peserta Tes</p>
-        <p style={{ color: C.textMuted, fontSize: '11px', marginTop: '1px' }}>{data.length} peserta jalur Reguler Murni</p>
+      <div style={{ background: C.white, borderBottom: `1.5px solid ${C.border}`, padding: '14px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+        <div>
+          <p style={{ color: C.text, fontSize: '15px', fontWeight: 800, letterSpacing: '-0.3px' }}>Peserta Tes</p>
+          <p style={{ color: C.textMuted, fontSize: '11px', marginTop: '1px' }}>{filtered.length} dari {data.length} peserta</p>
+        </div>
+        <div style={{ display: 'flex', gap: '6px' }}>
+          <button onClick={() => setShowImport(true)}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: C.bg, color: C.textMid, fontSize: '12px', fontWeight: 700, padding: '8px 13px', borderRadius: '10px', border: `1.5px solid ${C.borderMid}`, cursor: 'pointer' }}>
+            <Upload size={13} /> Import
+          </button>
+          <button onClick={() => setEditPeserta({ jalur: JALUR_TES })}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: C.green, color: '#fff', fontSize: '12px', fontWeight: 700, padding: '8px 13px', borderRadius: '10px', border: 'none', cursor: 'pointer' }}>
+            <Plus size={13} strokeWidth={2.5} /> Tambah
+          </button>
+        </div>
       </div>
 
       <div style={{ flex: 1, padding: '16px 20px' }} className="space-y-3">
-        {/* toolbar: filter + actions */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-          <div style={{ flex: 1, minWidth: '160px', maxWidth: '220px' }}>
-          <select value={filterRoom} onChange={e => setFilterRoom(e.target.value)}
-            style={{ width: '100%', padding: '8px 12px', fontSize: '12.5px', fontWeight: 600, background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '10px', outline: 'none', color: filterRoom ? C.text : C.textMuted, cursor: 'pointer', fontFamily: 'inherit' }}
-            onFocus={e => { e.target.style.borderColor = C.green; e.target.style.boxShadow = '0 0 0 3px rgba(45,122,79,0.1)'; }}
-            onBlur={e => { e.target.style.borderColor = C.borderMid; e.target.style.boxShadow = 'none'; }}>
+        {/* FILTER BAR */}
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+          <select value={filterRoom} onChange={e => setFilterRoom(e.target.value)} style={selStyle(filterRoom)}>
             <option value="">Semua Ruangan</option>
-            {rooms.map(r => <option key={r} value={r}>{r}</option>)}
+            {roomOpts.map(r => <option key={r} value={r}>{r}</option>)}
           </select>
-          </div>
-          <div style={{ display: 'flex', gap: '6px', marginLeft: 'auto' }}>
-            <button onClick={() => setShowImport(true)}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: C.bg, color: C.textMid, fontSize: '12px', fontWeight: 700, padding: '8px 13px', borderRadius: '10px', border: `1.5px solid ${C.borderMid}`, cursor: 'pointer' }}>
-              <Upload size={13} /> Import Excel
+          <select value={filterSesi} onChange={e => setFilterSesi(e.target.value)} style={selStyle(filterSesi)}>
+            <option value="">Semua Sesi</option>
+            {sesiOpts.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+          <select value={filterTgl} onChange={e => setFilterTgl(e.target.value)} style={selStyle(filterTgl)}>
+            <option value="">Semua Tanggal</option>
+            {tglOpts.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+          <select value={filterSumber} onChange={e => setFilterSumber(e.target.value)} style={selStyle(filterSumber)}>
+            <option value="">Semua Sumber</option>
+            <option value="pmb">PMB</option>
+            <option value="manual">Manual</option>
+          </select>
+          <select value={filterJk} onChange={e => setFilterJk(e.target.value)} style={selStyle(filterJk)}>
+            <option value="">Semua JK</option>
+            <option value="L">Laki-laki</option>
+            <option value="P">Perempuan</option>
+          </select>
+          {(filterRoom || filterSesi || filterTgl || filterSumber || filterJk) && (
+            <button onClick={() => { setFilterRoom(''); setFilterSesi(''); setFilterTgl(''); setFilterSumber(''); setFilterJk(''); }}
+              style={{ fontSize: '11.5px', fontWeight: 700, color: '#dc2626', background: '#fef2f2', border: '1.5px solid #fecaca', borderRadius: '10px', padding: '7px 12px', cursor: 'pointer' }}>
+              Reset
             </button>
-            <button onClick={() => setEditPeserta({ jalur: JALUR_TES })}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: C.green, color: '#fff', fontSize: '12px', fontWeight: 700, padding: '8px 13px', borderRadius: '10px', border: 'none', cursor: 'pointer' }}>
-              <Plus size={13} strokeWidth={2.5} /> Tambah Peserta
-            </button>
-          </div>
+          )}
         </div>
 
         {loading ? <div className="py-12 text-center"><Spinner /></div>
@@ -800,13 +843,14 @@ function PesertaPage() {
               {/* DESKTOP: table */}
               <div className="hidden md:block" style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '12px', overflow: 'hidden' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                  <TableHead cols={[{label:'#'},{label:'Nama'},{label:'NISN'},{label:'No. Daftar'},{label:'Ruang'},{label:'Sesi'},{label:'Tgl Tes'},{label:'Sumber'},{label:'Aksi',center:true},{label:'',center:true}]} />
+                  <TableHead cols={[{label:'#'},{label:'Nama'},{label:'NISN'},{label:'JK',center:true},{label:'Ruang'},{label:'Sesi'},{label:'Tgl Tes'},{label:'Sumber'},{label:'Aksi',center:true},{label:'',center:true}]} />
                   <tbody>
                     {filtered.map((p, i) => (
                       <tr key={p.id} style={{ borderBottom: i < filtered.length - 1 ? `1px solid ${C.borderLight}` : 'none' }}>
                         <td style={{ padding: '10px 14px', color: C.textMuted }}>{i + 1}</td>
                         <td style={{ padding: '10px 14px', color: C.text, fontWeight: 700 }}>{p.nama_lengkap}</td>
                         <td style={{ padding: '10px 14px', color: C.textMuted, fontFamily: 'monospace' }}>{p.nisn}</td>
+                        <td style={{ padding: '10px 14px', textAlign: 'center', color: C.textMuted, fontWeight: 600 }}>{p.jenis_kelamin ? (p.jenis_kelamin === 'L' || p.jenis_kelamin?.toUpperCase() === 'LAKI-LAKI' ? 'L' : 'P') : '—'}</td>
                         <td style={{ padding: '10px 14px', color: C.textMuted }}>{p.no_pendaftaran || '—'}</td>
                         <td style={{ padding: '10px 14px' }}>
                           {p.ruang_tes
@@ -821,36 +865,38 @@ function PesertaPage() {
                 </table>
               </div>
 
-              {/* MOBILE: cards */}
+              {/* MOBILE: cards — compact & consistent */}
               <div className="md:hidden flex flex-col gap-2">
-                {filtered.map((p, i) => (
-                  <div key={p.id} style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '14px', padding: '14px' }}>
-                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px', marginBottom: '8px' }}>
-                      <div>
-                        <p style={{ color: C.text, fontSize: '13.5px', fontWeight: 800 }}>{p.nama_lengkap}</p>
-                        <p style={{ color: C.textMuted, fontSize: '11px', fontFamily: 'monospace', marginTop: '2px' }}>{p.nisn}</p>
+                {(filtered as any[]).map((p: any) => (
+                  <div key={p.id} style={{ background: C.white, border: `1.5px solid ${p.ruang_tes ? C.borderMid : C.borderMid}`, borderRadius: '14px', padding: '12px 14px' }}>
+                    {/* Row 1: nama + ruangan badge */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '6px' }}>
+                      <p style={{ color: C.text, fontSize: '13.5px', fontWeight: 800, lineHeight: 1.2, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.nama_lengkap}</p>
+                      <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
+                        {p.ruang_tes
+                          ? <span style={{ background:'#e0f0ff',color:'#1a5fa8',fontSize:'10px',fontWeight:700,padding:'3px 8px',borderRadius:'999px',whiteSpace:'nowrap' }}>{p.ruang_tes}</span>
+                          : <span style={{ background:'#fef2f2',color:'#dc2626',fontSize:'10px',fontWeight:700,padding:'3px 8px',borderRadius:'999px' }}>Belum ada ruangan</span>}
+                        {p._sumber === 'manual'
+                          ? <span style={{ background:'#fffbeb',color:'#b45309',fontSize:'10px',fontWeight:700,padding:'3px 8px',borderRadius:'999px' }}>Manual</span>
+                          : <span style={{ background:'#e2ebe3',color:'#2d6644',fontSize:'10px',fontWeight:700,padding:'3px 8px',borderRadius:'999px' }}>PMB</span>}
                       </div>
-                      {p.ruang_tes && <span style={{ background: '#e0f0ff', color: '#1a5fa8', fontSize: '10px', fontWeight: 700, padding: '3px 9px', borderRadius: '999px', whiteSpace: 'nowrap', flexShrink: 0 }}>{p.ruang_tes}</span>}
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
-                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-                        {p.no_pendaftaran && p.no_pendaftaran !== '—' && <span style={{ color: C.textMuted, fontSize: '11px' }}>No. {p.no_pendaftaran}</span>}
-                        {p.sesi_tes && <span style={{ color: C.textMuted, fontSize: '11px' }}>Sesi {p.sesi_tes}</span>}
-                        {p.tanggal_tes && <span style={{ color: C.textMuted, fontSize: '11px' }}>{p.tanggal_tes}</span>}
-                        {(p as any)._sumber === 'manual'
-                          ? <span style={{ background:'#fffbeb',color:'#b45309',fontSize:'10px',fontWeight:700,padding:'2px 9px',borderRadius:'999px' }}>Manual</span>
-                          : <span style={{ background:'#e0f0ff',color:'#1a5fa8',fontSize:'10px',fontWeight:700,padding:'2px 9px',borderRadius:'999px' }}>PMB</span>}
-                      </div>
-                      <div style={{ display:'flex',gap:'6px',flexShrink:0 }}>
-                        <button onClick={() => { setAssignTarget(p); setAssignRoom((p as any).ruang_tes || ''); }}
-                          style={{ display:'inline-flex',alignItems:'center',gap:'4px',color:C.green,background:C.greenLight,border:`1.5px solid ${C.greenBorder}`,borderRadius:'8px',padding:'5px 10px',fontSize:'11.5px',fontWeight:700,cursor:'pointer' }}>
-                          <UserPlus size={12} /> {p.ruang_tes ? 'Pindah' : 'Assign'}
-                        </button>
-                        <button onClick={() => setConfirmDelPeserta(p)}
-                          style={{ width:'32px',height:'32px',display:'inline-flex',alignItems:'center',justifyContent:'center',borderRadius:'8px',background:'#fef2f2',border:'1.5px solid #fecaca',cursor:'pointer',color:'#dc2626' }}>
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
+                    {/* Row 2: sesi + tgl + jk */}
+                    <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '10px' }}>
+                      {p.sesi_tes    && <span style={{ color: C.textMuted, fontSize: '11px' }}>{p.sesi_tes}</span>}
+                      {p.tanggal_tes && <span style={{ color: C.textMuted, fontSize: '11px' }}>{p.tanggal_tes}</span>}
+                      {p.jenis_kelamin && <span style={{ color: C.textMuted, fontSize: '11px' }}>{p.jenis_kelamin === 'L' || p.jenis_kelamin === 'LAKI-LAKI' ? 'L' : 'P'}</span>}
+                    </div>
+                    {/* Row 3: actions — full width, consistent */}
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <button onClick={() => { setAssignTarget(p); setAssignRoom(p.ruang_tes || ''); }}
+                        style={{ flex: 1, display:'inline-flex',alignItems:'center',justifyContent:'center',gap:'5px',color:C.green,background:C.greenLight,border:`1.5px solid ${C.greenBorder}`,borderRadius:'9px',padding:'7px',fontSize:'12px',fontWeight:700,cursor:'pointer' }}>
+                        <UserPlus size={13} /> {p.ruang_tes ? 'Pindah Ruangan' : 'Assign Ruangan'}
+                      </button>
+                      <button onClick={() => setConfirmDelPeserta(p)}
+                        style={{ width:'36px',height:'36px',display:'inline-flex',alignItems:'center',justifyContent:'center',borderRadius:'9px',background:'#fef2f2',border:'1.5px solid #fecaca',cursor:'pointer',color:'#dc2626',flexShrink:0 }}>
+                        <Trash2 size={14} />
+                      </button>
                     </div>
                   </div>
                 ))}
@@ -865,9 +911,10 @@ function PesertaPage() {
           <div className="space-y-3">
             <Input label="NISN" value={editPeserta.nisn || ''} onChange={e => setEditPeserta({ ...editPeserta, nisn: e.target.value })} placeholder="0012345678" />
             <Input label="Nama Lengkap" value={editPeserta.nama_lengkap || ''} onChange={e => setEditPeserta({ ...editPeserta, nama_lengkap: e.target.value })} />
-            <Input label="Tanggal Lahir" type="date" value={editPeserta.tanggal_lahir || ''} onChange={e => setEditPeserta({ ...editPeserta, tanggal_lahir: e.target.value })}
-              placeholder="Password otomatis: DDMMYYYY" />
-            <p style={{ color: C.textFaint, fontSize: '11px' }}>Password login otomatis menggunakan format DDMMYYYY dari tanggal lahir.</p>
+            <Input label="Tanggal Lahir" type="date" value={editPeserta.tanggal_lahir || ''} onChange={e => setEditPeserta({ ...editPeserta, tanggal_lahir: e.target.value })} />
+            <Select label="Jenis Kelamin" value={editPeserta.jenis_kelamin || ''} onChange={e => setEditPeserta({ ...editPeserta, jenis_kelamin: e.target.value })}
+              options={[{ value: '', label: '— Pilih —' }, { value: 'L', label: 'Laki-laki' }, { value: 'P', label: 'Perempuan' }]} />
+            <p style={{ color: C.textFaint, fontSize: '11px' }}>Password otomatis: tanggal lahir format DDMMYYYY.</p>
             <div className="flex gap-2 justify-end pt-1">
               <Button variant="secondary" size="sm" onClick={() => setEditPeserta(null)}>Batal</Button>
               <Button size="sm" loading={savingPeserta} onClick={savePeserta}>Simpan</Button>
