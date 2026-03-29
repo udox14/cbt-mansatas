@@ -249,6 +249,14 @@ admin.get('/pendaftar/stats', async (c) => {
   return c.json(ok(results));
 });
 
+// Daftar jalur unik dari pendaftar
+admin.get('/pendaftar/jalur', async (c) => {
+  const { results } = await c.env.DB.prepare(
+    `SELECT DISTINCT jalur FROM pendaftar WHERE jalur IS NOT NULL AND jalur != '' ORDER BY jalur`
+  ).all();
+  return c.json(ok(results.map((r: any) => r.jalur)));
+});
+
 // ══════════════════════════════════════════════════════════════
 // EXAMS
 // ══════════════════════════════════════════════════════════════
@@ -274,12 +282,13 @@ admin.post('/exams', async (c) => {
   const id = newId();
   await c.env.DB.prepare(
     `INSERT INTO cbt_exams (id, title, description, duration_minutes, rules_text, completion_message,
-     is_score_visible, randomize_questions, randomize_options, active_status, passing_score, created_by)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
+     is_score_visible, randomize_questions, randomize_options, active_status, passing_score, created_by, target_jalur)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`
   ).bind(id, b.title, b.description || null, b.duration_minutes || 60,
     b.rules_text || null, b.completion_message || 'Ujian telah selesai. Terima kasih.',
     b.is_score_visible ? 1 : 0, b.randomize_questions ? 1 : 0,
-    b.randomize_options ? 1 : 0, b.active_status || 'draft', b.passing_score || 0, user.sub
+    b.randomize_options ? 1 : 0, b.active_status || 'draft', b.passing_score || 0, user.sub,
+    b.target_jalur || null
   ).run();
   return c.json(ok({ id }, 'Ujian dibuat'), 201);
 });
@@ -289,10 +298,10 @@ admin.put('/exams/:id', async (c) => {
   await c.env.DB.prepare(
     `UPDATE cbt_exams SET title=?, description=?, duration_minutes=?, rules_text=?,
      completion_message=?, is_score_visible=?, randomize_questions=?, randomize_options=?,
-     active_status=?, passing_score=?, updated_at=? WHERE id=?`
+     active_status=?, passing_score=?, target_jalur=?, updated_at=? WHERE id=?`
   ).bind(b.title, b.description, b.duration_minutes, b.rules_text, b.completion_message,
     b.is_score_visible ? 1 : 0, b.randomize_questions ? 1 : 0, b.randomize_options ? 1 : 0,
-    b.active_status, b.passing_score || 0, now(), c.req.param('id')
+    b.active_status, b.passing_score || 0, b.target_jalur || null, now(), c.req.param('id')
   ).run();
   return c.json(ok(null, 'Ujian diperbarui'));
 });

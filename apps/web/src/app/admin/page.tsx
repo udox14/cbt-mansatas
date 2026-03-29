@@ -19,7 +19,7 @@ import {
 interface Room { id: string; room_name: string; capacity: number; jumlah_peserta?: number }
 interface Proctor { id: string; username: string; full_name: string; role: string; room_id: string | null; room_name?: string }
 interface Pendaftar { id: string; nisn: string; nama_lengkap: string; no_pendaftaran: string; ruang_tes: string; jalur: string; asal_sekolah: string; jenis_kelamin: string; tanggal_lahir: string; tanggal_tes: string; sesi_tes: string }
-interface Exam { id: string; title: string; description: string | null; duration_minutes: number; active_status: string; question_count: number; is_score_visible: number; randomize_questions: number; randomize_options: number; rules_text: string | null; completion_message: string; passing_score: number }
+interface Exam { id: string; title: string; description: string | null; duration_minutes: number; active_status: string; question_count: number; is_score_visible: number; randomize_questions: number; randomize_options: number; rules_text: string | null; completion_message: string; passing_score: number; target_jalur: string | null }
 interface Question { id: string; question_text: string; question_type: string; question_order: number; image_url: string | null; audio_url: string | null; options: QOption[] }
 interface QOption { id?: string; option_label: string; option_text: string; image_url: string | null; is_correct: number }
 type Page = 'exams' | 'peserta' | 'rooms' | 'pelaksana';
@@ -220,10 +220,15 @@ function ExamsPage() {
   const [selectedExam, setSelectedExam] = useState<Exam | null>(null);
   const [activeTab, setActiveTab] = useState<ExamTab>('soal');
   const [confirmDel, setConfirmDel] = useState<Exam | null>(null);
+  const [jalurList, setJalurList] = useState<string[]>([]);
 
   const fetchExams = useCallback(async () => {
-    const r = await GET<Exam[]>('/api/admin/exams');
+    const [r, j] = await Promise.all([
+      GET<Exam[]>('/api/admin/exams'),
+      GET<string[]>('/api/admin/pendaftar/jalur'),
+    ]);
     if (r.success) setExams(r.data || []);
+    if (j.success) setJalurList(j.data || []);
     setLoading(false);
   }, []);
   useEffect(() => { fetchExams(); }, [fetchExams]);
@@ -267,6 +272,7 @@ function ExamsPage() {
               {selectedExam.randomize_questions ? ' · Acak soal' : ''}
               {selectedExam.randomize_options ? ' · Acak opsi' : ''}
               {selectedExam.is_score_visible ? ' · Skor tampil' : ''}
+              {selectedExam.target_jalur ? ` · Target: ${selectedExam.target_jalur}` : ''}
             </p>
           </div>
           <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
@@ -315,6 +321,31 @@ function ExamsPage() {
               <Input label="Durasi (menit)" type="number" value={editExam.duration_minutes || 60} onChange={e => setEditExam({ ...editExam, duration_minutes: parseInt(e.target.value) })} />
               <Select label="Status" value={editExam.active_status || 'draft'} onChange={e => setEditExam({ ...editExam, active_status: e.target.value })}
                 options={[{ value: 'draft', label: 'Draft' }, { value: 'active', label: 'Aktif' }, { value: 'finished', label: 'Selesai' }]} />
+            </div>
+            {/* Target Jalur */}
+            <div>
+              <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: C.textMid, letterSpacing: '0.04em', textTransform: 'uppercase', marginBottom: '6px' }}>Target Peserta (Jalur)</label>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                <button type="button" onClick={() => setEditExam({ ...editExam, target_jalur: null })}
+                  style={{ padding: '5px 12px', fontSize: '11.5px', fontWeight: 700, borderRadius: '999px', cursor: 'pointer', border: `1.5px solid ${!editExam.target_jalur ? C.green : C.borderMid}`, background: !editExam.target_jalur ? C.greenLight : C.white, color: !editExam.target_jalur ? C.green : C.textMuted }}>
+                  Semua Jalur
+                </button>
+                {jalurList.map(j => {
+                  const selected = (editExam.target_jalur || '').split(',').map(s => s.trim().toLowerCase()).includes(j.toLowerCase());
+                  const toggle = () => {
+                    const current = editExam.target_jalur ? editExam.target_jalur.split(',').map(s => s.trim()).filter(Boolean) : [];
+                    const next = selected ? current.filter(c => c.toLowerCase() !== j.toLowerCase()) : [...current, j];
+                    setEditExam({ ...editExam, target_jalur: next.length ? next.join(',') : null });
+                  };
+                  return (
+                    <button key={j} type="button" onClick={toggle}
+                      style={{ padding: '5px 12px', fontSize: '11.5px', fontWeight: 700, borderRadius: '999px', cursor: 'pointer', border: `1.5px solid ${selected ? '#1a5fa8' : C.borderMid}`, background: selected ? '#e0f0ff' : C.white, color: selected ? '#1a5fa8' : C.textMuted }}>
+                      {j}
+                    </button>
+                  );
+                })}
+              </div>
+              {editExam.target_jalur && <p style={{ color: C.textMuted, fontSize: '10.5px', marginTop: '4px' }}>Hanya peserta dengan jalur terpilih yang bisa melihat ujian ini.</p>}
             </div>
             <div><label className="block text-xs font-medium text-gray-500 mb-1">Tata Tertib</label>
               <RichEditor value={editExam.rules_text || ''} onChange={v => setEditExam({ ...editExam, rules_text: v })} minHeight={80} /></div>
@@ -377,6 +408,7 @@ function ExamsPage() {
                       {exam.randomize_questions ? ' · Acak soal' : ''}
                       {exam.randomize_options ? ' · Acak opsi' : ''}
                       {exam.is_score_visible ? ' · Skor tampil' : ''}
+                      {exam.target_jalur ? ` · ${exam.target_jalur}` : ''}
                     </p>
                   </div>
                   <ArrowRight size={15} strokeWidth={2} color={C.borderMid} />
@@ -394,6 +426,31 @@ function ExamsPage() {
               <Input label="Durasi (menit)" type="number" value={editExam.duration_minutes || 60} onChange={e => setEditExam({ ...editExam, duration_minutes: parseInt(e.target.value) })} />
               <Select label="Status" value={editExam.active_status || 'draft'} onChange={e => setEditExam({ ...editExam, active_status: e.target.value })}
                 options={[{ value: 'draft', label: 'Draft' }, { value: 'active', label: 'Aktif' }, { value: 'finished', label: 'Selesai' }]} />
+            </div>
+            {/* Target Jalur */}
+            <div>
+              <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: C.textMid, letterSpacing: '0.04em', textTransform: 'uppercase', marginBottom: '6px' }}>Target Peserta (Jalur)</label>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                <button type="button" onClick={() => setEditExam({ ...editExam, target_jalur: null })}
+                  style={{ padding: '5px 12px', fontSize: '11.5px', fontWeight: 700, borderRadius: '999px', cursor: 'pointer', border: `1.5px solid ${!editExam.target_jalur ? C.green : C.borderMid}`, background: !editExam.target_jalur ? C.greenLight : C.white, color: !editExam.target_jalur ? C.green : C.textMuted }}>
+                  Semua Jalur
+                </button>
+                {jalurList.map(j => {
+                  const selected = (editExam.target_jalur || '').split(',').map(s => s.trim().toLowerCase()).includes(j.toLowerCase());
+                  const toggle = () => {
+                    const current = editExam.target_jalur ? editExam.target_jalur.split(',').map(s => s.trim()).filter(Boolean) : [];
+                    const next = selected ? current.filter(c => c.toLowerCase() !== j.toLowerCase()) : [...current, j];
+                    setEditExam({ ...editExam, target_jalur: next.length ? next.join(',') : null });
+                  };
+                  return (
+                    <button key={j} type="button" onClick={toggle}
+                      style={{ padding: '5px 12px', fontSize: '11.5px', fontWeight: 700, borderRadius: '999px', cursor: 'pointer', border: `1.5px solid ${selected ? '#1a5fa8' : C.borderMid}`, background: selected ? '#e0f0ff' : C.white, color: selected ? '#1a5fa8' : C.textMuted }}>
+                      {j}
+                    </button>
+                  );
+                })}
+              </div>
+              {editExam.target_jalur && <p style={{ color: C.textMuted, fontSize: '10.5px', marginTop: '4px' }}>Hanya peserta dengan jalur terpilih yang bisa melihat ujian ini.</p>}
             </div>
             <div><label className="block text-xs font-medium text-gray-500 mb-1">Tata Tertib</label>
               <RichEditor value={editExam.rules_text || ''} onChange={v => setEditExam({ ...editExam, rules_text: v })} minHeight={80} /></div>

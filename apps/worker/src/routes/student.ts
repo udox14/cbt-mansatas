@@ -18,7 +18,7 @@ student.get('/exams', async (c) => {
   const userType = user.source === 'pendaftar' ? 'pendaftar' : 'cbt_user';
 
   const { results } = await c.env.DB.prepare(
-    `SELECT e.id, e.title, e.description, e.duration_minutes, e.rules_text, e.active_status,
+    `SELECT e.id, e.title, e.description, e.duration_minutes, e.rules_text, e.active_status, e.target_jalur,
             es.id as session_id, es.status as session_status, es.is_time_locked
      FROM cbt_exams e
      LEFT JOIN cbt_exam_sessions es ON es.exam_id = e.id AND es.user_id = ? AND es.user_type = ?
@@ -26,15 +26,24 @@ student.get('/exams', async (c) => {
      ORDER BY e.title`
   ).bind(user.sub, userType).all();
 
-  // Kalau pendaftar PMB, ambil jadwal dan cek waktu
-  let jadwalData: { sesi_tes: string; tanggal_tes: string } | null = null;
+  // Kalau pendaftar PMB, ambil jadwal dan jalur
+  let jadwalData: { sesi_tes: string; tanggal_tes: string; jalur: string } | null = null;
   if (userType === 'pendaftar') {
     jadwalData = await c.env.DB.prepare(
-      'SELECT sesi_tes, tanggal_tes FROM pendaftar WHERE id = ?'
+      'SELECT sesi_tes, tanggal_tes, jalur FROM pendaftar WHERE id = ?'
     ).bind(user.sub).first<any>() || null;
   }
 
-  const enriched = (results as any[]).map(exam => {
+  // Filter berdasarkan target_jalur
+  const filtered = (results as any[]).filter(exam => {
+    if (!exam.target_jalur) return true; // NULL = semua boleh
+    if (!jadwalData?.jalur) return true; // cbt_user tanpa jalur = boleh semua
+    // target_jalur berisi comma-separated, cek apakah jalur siswa ada di dalamnya (case-insensitive)
+    const targets = exam.target_jalur.split(',').map((t: string) => t.trim().toLowerCase());
+    return targets.includes(jadwalData.jalur.trim().toLowerCase());
+  });
+
+  const enriched = filtered.map(exam => {
     let jadwal_status: 'aktif' | 'belum' | 'selesai' | 'no_schedule' = 'no_schedule';
     let jadwal_info: string | null = null;
 
@@ -56,7 +65,7 @@ student.get('/exams', async (c) => {
       jadwal_status = 'aktif';
     }
 
-    return { ...exam, jadwal_status, jadwal_info };
+    return { ...exam, jadwal_status, jadwal_info, target_jalur: undefined };
   });
 
   return c.json(ok(enriched));

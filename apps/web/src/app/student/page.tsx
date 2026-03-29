@@ -5,12 +5,15 @@ import { GET, POST } from '@/lib/api';
 import { getDeviceId } from '@/lib/device';
 import { Button, Modal, LoadingScreen, EmptyState, ToastProvider } from '@/components/ui';
 import ExamRoom from '@/components/exam/ExamRoom';
-import { Clock, ArrowRight, Check, KeyRound } from 'lucide-react';
+import { Clock, ArrowRight, Check, KeyRound, CalendarClock, Lock } from 'lucide-react';
 
 interface Exam {
   id: string; title: string; description: string | null;
   duration_minutes: number; rules_text: string | null;
   session_id: string | null; session_status: string | null;
+  jadwal_status?: 'aktif' | 'belum' | 'selesai' | 'no_schedule';
+  jadwal_info?: string | null;
+  is_time_locked?: number;
 }
 
 const KemenagLogo = () => (
@@ -25,20 +28,37 @@ const BadgeStatus = ({ status }: { status: string | null }) => {
   return <span style={{ background:'#f1f1f0', color:'#6b7c6e', fontSize:'10px', fontWeight:700, padding:'4px 10px', borderRadius:'999px', whiteSpace:'nowrap' }}>Belum Mulai</span>;
 };
 
-const ActionBtn = ({ label, variant, onClick }: { label: string; variant: 'primary' | 'resume'; onClick: () => void }) => (
-  <button onClick={onClick}
+const ActionBtn = ({ label, variant, onClick, disabled }: { label: string; variant: 'primary' | 'resume'; onClick: () => void; disabled?: boolean }) => (
+  <button onClick={onClick} disabled={disabled}
     style={{
       display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '5px',
       width: '88px', height: '34px', fontSize: '12px', fontWeight: 700,
-      borderRadius: '10px', border: variant === 'resume' ? '1.5px solid #b5d9c4' : 'none', cursor: 'pointer',
-      background: variant === 'primary' ? '#2d7a4f' : '#e2ebe3',
-      color: variant === 'primary' ? '#fff' : '#2d7a4f',
-      flexShrink: 0,
+      borderRadius: '10px', border: variant === 'resume' ? '1.5px solid #b5d9c4' : 'none', cursor: disabled ? 'not-allowed' : 'pointer',
+      background: disabled ? '#e8ebe8' : variant === 'primary' ? '#2d7a4f' : '#e2ebe3',
+      color: disabled ? '#a8b9aa' : variant === 'primary' ? '#fff' : '#2d7a4f',
+      flexShrink: 0, opacity: disabled ? 0.7 : 1,
     }}>
+    {disabled ? <Lock size={12} strokeWidth={2.5} /> : null}
     {label}
-    {variant === 'primary' && <ArrowRight size={12} strokeWidth={2.5} />}
+    {!disabled && variant === 'primary' && <ArrowRight size={12} strokeWidth={2.5} />}
   </button>
 );
+
+const JadwalInfo = ({ exam }: { exam: Exam }) => {
+  if (!exam.jadwal_info) return null;
+  const js = exam.jadwal_status;
+  const color = js === 'aktif' ? '#2d7a4f' : js === 'belum' ? '#b45309' : '#dc2626';
+  const bg = js === 'aktif' ? '#e2ebe3' : js === 'belum' ? '#fffbeb' : '#fef2f2';
+  const statusLabel = js === 'aktif' ? 'Sedang berlangsung' : js === 'belum' ? 'Belum dimulai' : 'Waktu habis';
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: bg, color, fontSize: '10.5px', fontWeight: 700, padding: '3px 9px', borderRadius: '999px' }}>
+        <CalendarClock size={11} strokeWidth={2.5} /> {statusLabel}
+      </div>
+      <span style={{ color: '#8a9e8d', fontSize: '10.5px' }}>{exam.jadwal_info}</span>
+    </div>
+  );
+};
 
 function StudentContent() {
   const { user, loading: authLoading, logout } = useAuth('student');
@@ -96,6 +116,7 @@ function StudentContent() {
   );
 
   const start = (exam: Exam) => {
+    if (exam.jadwal_status !== 'aktif' && exam.jadwal_status !== 'no_schedule') return;
     setSelected(exam);
     if (exam.session_id && exam.session_status === 'active') { setShowToken(true); }
     else { setShowRules(true); }
@@ -157,6 +178,7 @@ function StudentContent() {
               {exams.map(exam => {
                 const done = exam.session_status === 'submitted' || exam.session_status === 'force_submitted';
                 const active = exam.session_status === 'active';
+                const canStart = !done && (exam.jadwal_status === 'aktif' || exam.jadwal_status === 'no_schedule');
                 return (
                   <div key={exam.id} style={{
                     background: done ? '#fafbfa' : '#fff',
@@ -164,19 +186,20 @@ function StudentContent() {
                     borderRadius: '18px', padding: '16px 18px',
                     opacity: done ? 0.75 : 1,
                   }}>
-                    <div className="flex items-start justify-between gap-2.5 mb-3">
+                    <div className="flex items-start justify-between gap-2.5 mb-2">
                       <div className="flex-1">
                         <p className="font-extrabold leading-tight mb-1" style={{ color: done ? '#6b7c6e' : '#1e2e22', fontSize: '14px' }}>{exam.title}</p>
                         {exam.description && <p className="leading-relaxed" style={{ color: '#8a9e8d', fontSize: '11.5px' }}>{exam.description}</p>}
                       </div>
                       <BadgeStatus status={exam.session_status} />
                     </div>
+                    {exam.jadwal_info && <div className="mb-3"><JadwalInfo exam={exam} /></div>}
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-1.5 font-semibold" style={{ color: done ? '#a8b9aa' : '#6b7c6e', fontSize: '11.5px' }}>
                         <Clock size={13} strokeWidth={2} />
                         {exam.duration_minutes} menit
                       </div>
-                      {!done && <ActionBtn label={active ? 'Lanjut' : 'Mulai'} variant={active ? 'resume' : 'primary'} onClick={() => start(exam)} />}
+                      {!done && <ActionBtn label={active ? 'Lanjut' : 'Mulai'} variant={active ? 'resume' : 'primary'} onClick={() => start(exam)} disabled={!canStart} />}
                     </div>
                   </div>
                 );
@@ -188,7 +211,7 @@ function StudentContent() {
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ background: '#f4f6f4', borderBottom: '1.5px solid #d4dbd4' }}>
-                    {['#', 'Nama Ujian', 'Deskripsi', 'Durasi', 'Status', 'Aksi'].map((h, i) => (
+                    {['#', 'Nama Ujian', 'Jadwal', 'Durasi', 'Status', 'Aksi'].map((h, i) => (
                       <th key={h} style={{
                         padding: '12px 20px', color: '#4a6655', fontSize: '11px', fontWeight: 700,
                         letterSpacing: '0.07em', textTransform: 'uppercase',
@@ -202,17 +225,20 @@ function StudentContent() {
                   {exams.map((exam, i) => {
                     const done = exam.session_status === 'submitted' || exam.session_status === 'force_submitted';
                     const active = exam.session_status === 'active';
+                    const canStart = !done && (exam.jadwal_status === 'aktif' || exam.jadwal_status === 'no_schedule');
                     const dimmed = { color: '#a8b9aa' };
                     return (
                       <tr key={exam.id} style={{ borderBottom: i < exams.length - 1 ? '1px solid #edf0ed' : 'none', background: i % 2 !== 0 ? '#fafbfa' : '#fff' }}>
                         <td style={{ padding: '14px 20px', textAlign: 'center', fontSize: '12px', fontWeight: 600, ...(done ? dimmed : { color: '#8a9e8d' }) }}>{i + 1}</td>
                         <td style={{ padding: '14px 20px', fontSize: '13px', fontWeight: 700, whiteSpace: 'nowrap', ...(done ? dimmed : { color: '#1e2e22' }) }}>{exam.title}</td>
-                        <td style={{ padding: '14px 20px', fontSize: '12px', maxWidth: '240px', ...(done ? dimmed : { color: '#8a9e8d' }) }}>{exam.description || '—'}</td>
+                        <td style={{ padding: '14px 20px', fontSize: '12px', maxWidth: '280px' }}>
+                          {exam.jadwal_info ? <JadwalInfo exam={exam} /> : <span style={{ color: '#a8b9aa' }}>—</span>}
+                        </td>
                         <td style={{ padding: '14px 20px', textAlign: 'center', fontSize: '12px', fontWeight: 600, whiteSpace: 'nowrap', ...(done ? dimmed : { color: '#6b7c6e' }) }}>{exam.duration_minutes} menit</td>
                         <td style={{ padding: '14px 20px', textAlign: 'center' }}><BadgeStatus status={exam.session_status} /></td>
                         <td style={{ padding: '14px 20px', textAlign: 'center' }}>
                           {!done
-                            ? <ActionBtn label={active ? 'Lanjut' : 'Mulai'} variant={active ? 'resume' : 'primary'} onClick={() => start(exam)} />
+                            ? <ActionBtn label={active ? 'Lanjut' : 'Mulai'} variant={active ? 'resume' : 'primary'} onClick={() => start(exam)} disabled={!canStart} />
                             : <span style={{ color: '#c4cec4', fontSize: '14px', fontWeight: 700 }}>—</span>}
                         </td>
                       </tr>
