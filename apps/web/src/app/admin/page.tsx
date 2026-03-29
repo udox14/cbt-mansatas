@@ -863,6 +863,9 @@ function RoomsPage() {
   const [syncing, setSyncing] = useState(false);
   const [assignModal, setAssignModal] = useState<Room | null>(null);
   const [selectedProctor, setSelectedProctor] = useState('');
+  const [roomDetail, setRoomDetail] = useState<Room | null>(null);
+  const [roomStudents, setRoomStudents] = useState<any[]>([]);
+  const [loadingStudents, setLoadingStudents] = useState(false);
 
   const fetchData = useCallback(async () => {
     const [r, p] = await Promise.all([GET<Room[]>('/api/admin/rooms'), GET<Proctor[]>('/api/admin/proctors')]);
@@ -876,6 +879,25 @@ function RoomsPage() {
   const assignProctor = async () => { if (!assignModal || !selectedProctor) return; await PUT(`/api/admin/proctors/${selectedProctor}/assign`, { room_id: assignModal.id }); toast('success', 'Berhasil'); setAssignModal(null); setSelectedProctor(''); fetchData(); };
   const unassignProctor = async (pid: string) => { await PUT(`/api/admin/proctors/${pid}/assign`, { room_id: null }); toast('success', 'Proktor dihapus'); fetchData(); };
   const unassigned = proctors.filter(p => !p.room_id);
+
+  const openRoomDetail = async (room: Room) => {
+    setRoomDetail(room);
+    setLoadingStudents(true);
+    setRoomStudents([]);
+    // Ambil dari dua sumber: pendaftar PMB + cbt_users manual (room_id)
+    const [pmb, manual] = await Promise.all([
+      GET<any[]>(`/api/admin/pendaftar?ruang_tes=${encodeURIComponent(room.room_name)}`),
+      GET<any[]>(`/api/admin/users?role=student&room_id=${encodeURIComponent(room.id)}`),
+    ]);
+    const pmbList = (pmb.success ? pmb.data || [] : []).map((p: any) => ({
+      nama: p.nama_lengkap, nisn: p.nisn, sesi: p.sesi_tes, sumber: 'PMB',
+    }));
+    const manualList = (manual.success ? manual.data || [] : []).map((u: any) => ({
+      nama: u.full_name, nisn: u.nisn || u.username, sesi: '—', sumber: 'Manual',
+    }));
+    setRoomStudents([...pmbList, ...manualList]);
+    setLoadingStudents(false);
+  };
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
@@ -901,7 +923,12 @@ function RoomsPage() {
                       return (
                         <tr key={r.id} style={{ borderBottom: i < rooms.length - 1 ? `1px solid ${C.borderLight}` : 'none' }}>
                           <td style={{ padding: '10px 14px', color: C.textMuted }}>{i + 1}</td>
-                          <td style={{ padding: '10px 14px', color: C.text, fontWeight: 700 }}>{r.room_name}</td>
+                          <td style={{ padding: '10px 14px' }}>
+                            <button onClick={() => openRoomDetail(r)}
+                              style={{ color: C.green, fontWeight: 800, fontSize: '13px', background: 'none', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline', textUnderlineOffset: '3px' }}>
+                              {r.room_name}
+                            </button>
+                          </td>
                           <td style={{ padding: '10px 14px', textAlign: 'center' }}><span style={{ background: '#e0f0ff', color: '#1a5fa8', fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '999px' }}>{r.jumlah_peserta || 0}</span></td>
                           <td style={{ padding: '10px 14px' }}>
                             {rp.length === 0 ? <span style={{ color: C.borderMid }}>Belum ada</span>
@@ -926,7 +953,10 @@ function RoomsPage() {
                   return (
                     <div key={r.id} style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '14px', padding: '14px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                        <p style={{ color: C.text, fontSize: '13.5px', fontWeight: 800 }}>{r.room_name}</p>
+                        <button onClick={() => openRoomDetail(r)}
+                          style={{ color: C.green, fontSize: '13.5px', fontWeight: 800, background: 'none', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline', textUnderlineOffset: '3px' }}>
+                          {r.room_name}
+                        </button>
                         <span style={{ background: '#e0f0ff', color: '#1a5fa8', fontSize: '10px', fontWeight: 700, padding: '3px 9px', borderRadius: '999px' }}>{r.jumlah_peserta || 0} peserta</span>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -946,6 +976,47 @@ function RoomsPage() {
             </>
           )}
       </div>
+
+      {/* Modal detail siswa per ruangan */}
+      <Modal open={!!roomDetail} onClose={() => setRoomDetail(null)} title={`Siswa — ${roomDetail?.room_name}`} size="md">
+        {loadingStudents
+          ? <div className="py-8 text-center"><Spinner /></div>
+          : roomStudents.length === 0
+          ? <EmptyState title="Belum ada siswa di ruangan ini" />
+          : (
+            <div>
+              <p style={{ color: C.textMuted, fontSize: '11.5px', marginBottom: '12px' }}>{roomStudents.length} siswa terdaftar</p>
+              <div style={{ background: C.bg, borderRadius: '12px', overflow: 'hidden', border: `1.5px solid ${C.borderMid}` }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                  <thead>
+                    <tr style={{ background: C.bg, borderBottom: `1.5px solid ${C.borderMid}` }}>
+                      <th style={{ padding: '8px 14px', textAlign: 'left', color: C.textMid, fontSize: '10.5px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>#</th>
+                      <th style={{ padding: '8px 14px', textAlign: 'left', color: C.textMid, fontSize: '10.5px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Nama</th>
+                      <th style={{ padding: '8px 14px', textAlign: 'left', color: C.textMid, fontSize: '10.5px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>NISN</th>
+                      <th style={{ padding: '8px 14px', textAlign: 'left', color: C.textMid, fontSize: '10.5px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Sesi</th>
+                      <th style={{ padding: '8px 14px', textAlign: 'left', color: C.textMid, fontSize: '10.5px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Sumber</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {roomStudents.map((s, i) => (
+                      <tr key={i} style={{ borderBottom: i < roomStudents.length - 1 ? `1px solid ${C.borderLight}` : 'none', background: C.white }}>
+                        <td style={{ padding: '9px 14px', color: C.textMuted }}>{i + 1}</td>
+                        <td style={{ padding: '9px 14px', color: C.text, fontWeight: 700 }}>{s.nama}</td>
+                        <td style={{ padding: '9px 14px', color: C.textMuted, fontFamily: 'monospace' }}>{s.nisn}</td>
+                        <td style={{ padding: '9px 14px', color: C.textMuted }}>{s.sesi || '—'}</td>
+                        <td style={{ padding: '9px 14px' }}>
+                          {s.sumber === 'Manual'
+                            ? <span style={{ background:'#fffbeb',color:'#b45309',fontSize:'10px',fontWeight:700,padding:'2px 8px',borderRadius:'999px' }}>Manual</span>
+                            : <span style={{ background:'#e0f0ff',color:'#1a5fa8',fontSize:'10px',fontWeight:700,padding:'2px 8px',borderRadius:'999px' }}>PMB</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+      </Modal>
 
       <Modal open={!!assignModal} onClose={() => setAssignModal(null)} title={`Assign Proktor — ${assignModal?.room_name}`} size="sm">
         {unassigned.length === 0

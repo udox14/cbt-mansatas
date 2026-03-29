@@ -1,6 +1,4 @@
-import { v4 as uuidv4 } from 'uuid';
-
-export const newId = () => uuidv4();
+export const newId = () => crypto.randomUUID();
 export const now = () => new Date().toISOString();
 export const ok  = (data?: any, message?: string) => ({ success: true, data, message });
 export const err = (error: string) => ({ success: false, error });

@@ -96,10 +96,14 @@ admin.put('/proctors/:id/assign', async (c) => {
 // ══════════════════════════════════════════════════════════════
 
 admin.get('/users', async (c) => {
-  const role = c.req.query('role');
+  const role    = c.req.query('role');
+  const room_id = c.req.query('room_id');
   let sql = `SELECT id, username, nama_lengkap as full_name, role, room_id, nisn, is_active, created_at, 'cbt_user' as source FROM cbt_users`;
+  const conditions: string[] = [];
   const params: string[] = [];
-  if (role) { sql += ' WHERE role = ?'; params.push(role); }
+  if (role)    { conditions.push('role = ?');    params.push(role); }
+  if (room_id) { conditions.push('room_id = ?'); params.push(room_id); }
+  if (conditions.length) sql += ' WHERE ' + conditions.join(' AND ');
   sql += ' ORDER BY nama_lengkap';
   const { results } = await c.env.DB.prepare(sql).bind(...params).all();
   return c.json(ok(results));
