@@ -1,4 +1,4 @@
-const API = '';
+const API = 'https://cbtmansatas.drudox.workers.dev';
 
 interface ApiRes<T = any> { success: boolean; data?: T; message?: string; error?: string }
 
