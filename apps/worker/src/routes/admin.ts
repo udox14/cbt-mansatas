@@ -98,7 +98,17 @@ admin.put('/proctors/:id/assign', async (c) => {
 admin.get('/users', async (c) => {
   const role    = c.req.query('role');
   const room_id = c.req.query('room_id');
-  let sql = `SELECT id, username, nama_lengkap as full_name, role, room_id, nisn, is_active, created_at, 'cbt_user' as source FROM cbt_users`;
+
+  // Kalau filter role=admin, ambil dari tabel admins
+  if (role === 'admin') {
+    const { results } = await c.env.DB.prepare(
+      `SELECT id, username, nama_lengkap as full_name, 'admin' as role, NULL as room_id, NULL as nisn, 1 as is_active FROM admins ORDER BY nama_lengkap`
+    ).all();
+    return c.json(ok(results));
+  }
+
+  // Selain itu ambil dari cbt_users
+  let sql = `SELECT id, username, nama_lengkap as full_name, role, room_id, nisn, is_active, 'cbt_user' as source FROM cbt_users`;
   const conditions: string[] = [];
   const params: string[] = [];
   if (role)    { conditions.push('role = ?');    params.push(role); }
@@ -106,6 +116,15 @@ admin.get('/users', async (c) => {
   if (conditions.length) sql += ' WHERE ' + conditions.join(' AND ');
   sql += ' ORDER BY nama_lengkap';
   const { results } = await c.env.DB.prepare(sql).bind(...params).all();
+
+  // Kalau tidak ada filter role, tambahkan juga admin dari tabel admins
+  if (!role) {
+    const { results: admins } = await c.env.DB.prepare(
+      `SELECT id, username, nama_lengkap as full_name, 'admin' as role, NULL as room_id, NULL as nisn, 1 as is_active FROM admins ORDER BY nama_lengkap`
+    ).all();
+    return c.json(ok([...results, ...admins]));
+  }
+
   return c.json(ok(results));
 });
 
@@ -114,12 +133,20 @@ admin.post('/users', async (c) => {
   const { username, password, role, room_id, nisn } = body;
   const nama = body.full_name || body.nama_lengkap;
   if (!username || !password || !nama || !role) return c.json(err('Data tidak lengkap'), 400);
-  const hash = await hashPassword(password);
   try {
     const id = newId();
-    await c.env.DB.prepare(
-      'INSERT INTO cbt_users (id, username, password_hash, nama_lengkap, role, room_id, nisn) VALUES (?,?,?,?,?,?,?)'
-    ).bind(id, username, hash, nama, role, room_id || null, nisn || null).run();
+    if (role === 'admin') {
+      // Admin disimpan ke tabel admins (tabel PMB existing) — password plain text
+      await c.env.DB.prepare(
+        'INSERT INTO admins (id, username, password, nama_lengkap) VALUES (?,?,?,?)'
+      ).bind(id, username, password, nama).run();
+    } else {
+      // Proktor & student ke cbt_users dengan password hash PBKDF2
+      const hash = await hashPassword(password);
+      await c.env.DB.prepare(
+        'INSERT INTO cbt_users (id, username, password_hash, nama_lengkap, role, room_id, nisn) VALUES (?,?,?,?,?,?,?)'
+      ).bind(id, username, hash, nama, role, room_id || null, nisn || null).run();
+    }
     return c.json(ok({ id }, 'User ditambahkan'), 201);
   } catch (e: any) {
     if (e.message?.includes('UNIQUE')) return c.json(err('Username sudah digunakan'), 409);
@@ -145,16 +172,31 @@ admin.post('/users/bulk', async (c) => {
 admin.put('/users/:id', async (c) => {
   const body = await c.req.json();
   const nama = body.full_name || body.nama_lengkap;
-  let sql = 'UPDATE cbt_users SET nama_lengkap=?, role=?, room_id=?, nisn=?, is_active=?, updated_at=?';
-  const params: any[] = [nama, body.role, body.room_id || null, body.nisn || null, body.is_active ?? 1, now()];
-  if (body.password) { sql += ', password_hash=?'; params.push(await hashPassword(body.password)); }
-  sql += ' WHERE id=?'; params.push(c.req.param('id'));
-  await c.env.DB.prepare(sql).bind(...params).run();
+  const id = c.req.param('id');
+  if (body.role === 'admin') {
+    // Update ke tabel admins
+    let sql = 'UPDATE admins SET nama_lengkap=?';
+    const params: any[] = [nama];
+    if (body.password) { sql += ', password=?'; params.push(body.password); }
+    sql += ' WHERE id=?'; params.push(id);
+    await c.env.DB.prepare(sql).bind(...params).run();
+  } else {
+    let sql = 'UPDATE cbt_users SET nama_lengkap=?, role=?, room_id=?, nisn=?, is_active=?, updated_at=?';
+    const params: any[] = [nama, body.role, body.room_id || null, body.nisn || null, body.is_active ?? 1, now()];
+    if (body.password) { sql += ', password_hash=?'; params.push(await hashPassword(body.password)); }
+    sql += ' WHERE id=?'; params.push(id);
+    await c.env.DB.prepare(sql).bind(...params).run();
+  }
   return c.json(ok(null, 'User diperbarui'));
 });
 
 admin.delete('/users/:id', async (c) => {
-  await c.env.DB.prepare('DELETE FROM cbt_users WHERE id=?').bind(c.req.param('id')).run();
+  const id = c.req.param('id');
+  // Coba hapus dari kedua tabel (salah satu pasti ada)
+  await c.env.DB.batch([
+    c.env.DB.prepare('DELETE FROM cbt_users WHERE id=?').bind(id),
+    c.env.DB.prepare('DELETE FROM admins WHERE id=?').bind(id),
+  ]);
   return c.json(ok(null, 'User dihapus'));
 });
 

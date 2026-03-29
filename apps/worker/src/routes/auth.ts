@@ -53,7 +53,13 @@ auth.post('/login', async (c) => {
   ).bind(uname).first<any>();
 
   if (cbtUser) {
-    const valid = await verifyPassword(pwd, cbtUser.password_hash);
+    // Support both PBKDF2 (ada ':') dan plain text (lama)
+    let valid = false;
+    if (cbtUser.password_hash?.includes(':')) {
+      valid = await verifyPassword(pwd, cbtUser.password_hash);
+    } else {
+      valid = cbtUser.password_hash === pwd;
+    }
     if (!valid) return c.json(err('Username atau password salah'), 401);
 
     const token = await signJWT({
