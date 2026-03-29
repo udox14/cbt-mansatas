@@ -704,7 +704,7 @@ function PesertaPage() {
       r = await PUT(`/api/admin/users/${assignTarget.id}`, {
         full_name: assignTarget.nama_lengkap,
         role: 'student',
-        room_id: assignRoom || null,
+        room_id: (allRooms.find(r => r.room_name === assignRoom))?.id || null,
       });
     } else {
       // pendaftar PMB: update ruang_tes via PUT /api/admin/pendaftar/:id/ruang
@@ -851,7 +851,6 @@ function PesertaPage() {
                         <td style={{ padding: '10px 14px', color: C.text, fontWeight: 700 }}>{p.nama_lengkap}</td>
                         <td style={{ padding: '10px 14px', color: C.textMuted, fontFamily: 'monospace' }}>{p.nisn}</td>
                         <td style={{ padding: '10px 14px', textAlign: 'center', color: C.textMuted, fontWeight: 600 }}>{p.jenis_kelamin ? (p.jenis_kelamin === 'L' || p.jenis_kelamin?.toUpperCase() === 'LAKI-LAKI' ? 'L' : 'P') : '—'}</td>
-                        <td style={{ padding: '10px 14px', color: C.textMuted }}>{p.no_pendaftaran || '—'}</td>
                         <td style={{ padding: '10px 14px' }}>
                           {p.ruang_tes
                             ? <span style={{ background: '#e0f0ff', color: '#1a5fa8', fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '999px' }}>{p.ruang_tes}</span>
