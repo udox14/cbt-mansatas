@@ -179,6 +179,12 @@ admin.get('/pendaftar', async (c) => {
   return c.json(ok(results));
 });
 
+// Hapus peserta dari tabel pendaftar PMB
+admin.delete('/pendaftar/:id', async (c) => {
+  await c.env.DB.prepare('DELETE FROM pendaftar WHERE id = ?').bind(c.req.param('id')).run();
+  return c.json(ok(null, 'Peserta berhasil dihapus'));
+});
+
 // Update ruang_tes peserta pendaftar PMB
 admin.put('/pendaftar/:id/ruang', async (c) => {
   const { ruang_tes } = await c.req.json<{ ruang_tes: string | null }>();

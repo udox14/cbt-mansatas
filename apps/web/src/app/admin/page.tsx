@@ -89,6 +89,14 @@ function AdminContent() {
     return 'exams';
   });
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(() =>
+    typeof window !== 'undefined' ? localStorage.getItem('admin_sidebar') === 'collapsed' : false
+  );
+  const toggleCollapsed = () => setCollapsed(prev => {
+    const next = !prev;
+    localStorage.setItem('admin_sidebar', next ? 'collapsed' : 'expanded');
+    return next;
+  });
 
   if (authLoading) return <LoadingScreen />;
   if (!user) return null;
@@ -114,45 +122,63 @@ function AdminContent() {
 
       {/* ── SIDEBAR ── */}
       <aside
-        className={`fixed lg:static inset-y-0 left-0 z-50 flex flex-col transform transition-transform duration-200 lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}
-        style={{ width: '220px', background: C.white, borderRight: `1.5px solid ${C.border}`, minHeight: '100vh' }}>
+        className={`fixed lg:static inset-y-0 left-0 z-50 flex flex-col transform transition-all duration-200 lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}
+        style={{ width: collapsed ? '60px' : '220px', background: C.white, borderRight: `1.5px solid ${C.border}`, minHeight: '100vh', overflow: 'hidden' }}>
 
-        {/* brand — border sejajar dengan header */}
-        <div style={{ padding: '0 14px', borderBottom: `1.5px solid ${C.border}`, height: '57px', display: 'flex', alignItems: 'center', gap: '9px' }}>
-          <KemenagLogo size={32} />
-          <div>
-            <p style={{ color: C.text, fontSize: '10.5px', fontWeight: 800, lineHeight: 1.2 }}>MAN 1 TASIKMALAYA</p>
-            <p style={{ color: '#7a9e86', fontSize: '9px', fontWeight: 600, fontStyle: 'italic', marginTop: '1px' }}>Bangkit · Maju · Juara</p>
-          </div>
+        {/* brand */}
+        <div style={{ padding: '0 14px', borderBottom: `1.5px solid ${C.border}`, height: '57px', display: 'flex', alignItems: 'center', justifyContent: collapsed ? 'center' : 'space-between', gap: '9px', flexShrink: 0 }}>
+          {!collapsed && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '9px', minWidth: 0 }}>
+              <KemenagLogo size={28} />
+              <div style={{ minWidth: 0 }}>
+                <p style={{ color: C.text, fontSize: '10px', fontWeight: 800, lineHeight: 1.2, whiteSpace: 'nowrap' }}>MAN 1 TASIKMALAYA</p>
+                <p style={{ color: '#7a9e86', fontSize: '8.5px', fontWeight: 600, fontStyle: 'italic', marginTop: '1px', whiteSpace: 'nowrap' }}>Bangkit · Maju · Juara</p>
+              </div>
+            </div>
+          )}
+          {collapsed && <KemenagLogo size={28} />}
+          {/* toggle collapse button — desktop only */}
+          <button onClick={toggleCollapsed} className="hidden lg:flex"
+            style={{ width: '26px', height: '26px', borderRadius: '8px', background: C.bg, border: `1.5px solid ${C.borderMid}`, alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={C.textMuted} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              {collapsed
+                ? <><path d="M9 18l6-6-6-6"/><path d="M3 18l6-6-6-6"/></>
+                : <><path d="M15 18l-6-6 6-6"/><path d="M21 18l-6-6 6-6"/></>}
+            </svg>
+          </button>
         </div>
 
         {/* nav */}
-        <nav style={{ flex: 1, padding: '10px 8px', overflowY: 'auto' }}>
-          <p style={{ color: C.textFaint, fontSize: '10px', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', padding: '0 6px', marginBottom: '5px' }}>Menu</p>
+        <nav style={{ flex: 1, padding: '10px 6px', overflowY: 'auto', overflowX: 'hidden' }}>
+          {!collapsed && <p style={{ color: C.textFaint, fontSize: '10px', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', padding: '0 6px', marginBottom: '5px' }}>Menu</p>}
           {menu.map(m => (
-            <button key={m.key} onClick={() => nav(m.key)}
+            <button key={m.key} onClick={() => nav(m.key)} title={collapsed ? m.label : undefined}
               style={{
-                display: 'flex', alignItems: 'center', gap: '9px', padding: '9px 12px', borderRadius: '11px',
+                display: 'flex', alignItems: 'center', justifyContent: collapsed ? 'center' : 'flex-start',
+                gap: '9px', padding: collapsed ? '10px' : '9px 12px', borderRadius: '11px',
                 fontSize: '12.5px', fontWeight: page === m.key ? 700 : 600,
                 color: page === m.key ? C.text : '#6b7c6e',
                 background: page === m.key ? C.greenLight : 'none',
                 border: 'none', cursor: 'pointer', width: '100%', textAlign: 'left', marginBottom: '2px',
               }}>
-              {m.icon} {m.label}
+              {m.icon}
+              {!collapsed && m.label}
             </button>
           ))}
         </nav>
 
         {/* user info + logout */}
-        <div style={{ borderTop: `1.5px solid ${C.border}`, padding: '10px 8px' }}>
-          {/* user badge */}
-          <div style={{ background: C.greenLight, border: `1.5px solid ${C.greenBorder}`, borderRadius: '10px', padding: '8px 10px', marginBottom: '6px' }}>
-            <p style={{ color: C.text, fontSize: '12px', fontWeight: 700, lineHeight: 1.2 }}>{user.full_name || 'Administrator'}</p>
-            <p style={{ color: C.textMuted, fontSize: '10px', marginTop: '2px', fontFamily: 'monospace' }}>{user.username}</p>
-          </div>
-          <button onClick={logout}
-            style={{ display: 'flex', alignItems: 'center', gap: '9px', padding: '9px 12px', borderRadius: '11px', fontSize: '12.5px', fontWeight: 600, color: '#dc2626', background: 'none', border: 'none', cursor: 'pointer', width: '100%' }}>
-            <LogOut size={14} strokeWidth={2} /> Keluar
+        <div style={{ borderTop: `1.5px solid ${C.border}`, padding: '8px 6px', flexShrink: 0 }}>
+          {!collapsed && (
+            <div style={{ background: C.greenLight, border: `1.5px solid ${C.greenBorder}`, borderRadius: '10px', padding: '8px 10px', marginBottom: '6px' }}>
+              <p style={{ color: C.text, fontSize: '12px', fontWeight: 700, lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{user.full_name || 'Administrator'}</p>
+              <p style={{ color: C.textMuted, fontSize: '10px', marginTop: '2px', fontFamily: 'monospace', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{user.username}</p>
+            </div>
+          )}
+          <button onClick={logout} title={collapsed ? 'Keluar' : undefined}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: collapsed ? 'center' : 'flex-start', gap: '9px', padding: collapsed ? '10px' : '9px 12px', borderRadius: '11px', fontSize: '12.5px', fontWeight: 600, color: '#dc2626', background: 'none', border: 'none', cursor: 'pointer', width: '100%' }}>
+            <LogOut size={14} strokeWidth={2} />
+            {!collapsed && 'Keluar'}
           </button>
         </div>
       </aside>
@@ -160,9 +186,10 @@ function AdminContent() {
       {/* ── MAIN ── */}
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', position: 'relative', zIndex: 1 }}>
 
-        {/* header — mobile: hamburger + tanggal, desktop: tanggal saja */}
-        <header style={{ background: C.white, borderBottom: `1.5px solid ${C.border}`, padding: '0 20px', height: '57px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <button className="lg:hidden" onClick={() => setSidebarOpen(true)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', marginRight: '8px' }}>
+        {/* header */}
+        <header style={{ background: C.white, borderBottom: `1.5px solid ${C.border}`, padding: '0 20px', height: '57px', display: 'flex', alignItems: 'center', gap: '12px', justifyContent: 'space-between' }}>
+          {/* mobile: hamburger */}
+          <button className="lg:hidden" onClick={() => setSidebarOpen(true)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px' }}>
             <Menu size={20} color="#6b7c6e" />
           </button>
           <TanggalHari />
@@ -645,6 +672,8 @@ function PesertaPage() {
   const [assignRoom, setAssignRoom] = useState('');
   const [savingAssign, setSavingAssign] = useState(false);
   const [allRooms, setAllRooms] = useState<Room[]>([]);
+  const [confirmDelPeserta, setConfirmDelPeserta] = useState<any | null>(null);
+  const [deletingPeserta, setDeletingPeserta] = useState(false);
 
   const savePeserta = async () => {
     if (!editPeserta?.nisn || !editPeserta?.nama_lengkap) { toast('error', 'NISN dan nama wajib diisi'); return; }
@@ -686,6 +715,21 @@ function PesertaPage() {
     setSavingAssign(false);
     if (r.success) { toast('success', 'Ruangan berhasil diubah'); setAssignTarget(null); fetchPeserta(); }
     else toast('error', r.error || 'Gagal');
+  };
+
+  const deletePeserta = async () => {
+    if (!confirmDelPeserta) return;
+    setDeletingPeserta(true);
+    const sumber = confirmDelPeserta._sumber;
+    let r;
+    if (sumber === 'manual') {
+      r = await DEL(`/api/admin/users/${confirmDelPeserta.id}`);
+    } else {
+      r = await DEL(`/api/admin/pendaftar/${confirmDelPeserta.id}`);
+    }
+    setDeletingPeserta(false);
+    if (r.success) { toast('success', 'Peserta berhasil dihapus'); setConfirmDelPeserta(null); fetchPeserta(); }
+    else toast('error', r.error || 'Gagal menghapus');
   };
 
   const fetchPeserta = useCallback(async () => {
@@ -756,7 +800,7 @@ function PesertaPage() {
               {/* DESKTOP: table */}
               <div className="hidden md:block" style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '12px', overflow: 'hidden' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                  <TableHead cols={[{label:'#'},{label:'Nama'},{label:'NISN'},{label:'No. Daftar'},{label:'Ruang'},{label:'Sesi'},{label:'Tgl Tes'},{label:'Sumber'},{label:'Aksi',center:true}]} />
+                  <TableHead cols={[{label:'#'},{label:'Nama'},{label:'NISN'},{label:'No. Daftar'},{label:'Ruang'},{label:'Sesi'},{label:'Tgl Tes'},{label:'Sumber'},{label:'Aksi',center:true},{label:'',center:true}]} />
                   <tbody>
                     {filtered.map((p, i) => (
                       <tr key={p.id} style={{ borderBottom: i < filtered.length - 1 ? `1px solid ${C.borderLight}` : 'none' }}>
@@ -797,10 +841,16 @@ function PesertaPage() {
                           ? <span style={{ background:'#fffbeb',color:'#b45309',fontSize:'10px',fontWeight:700,padding:'2px 9px',borderRadius:'999px' }}>Manual</span>
                           : <span style={{ background:'#e0f0ff',color:'#1a5fa8',fontSize:'10px',fontWeight:700,padding:'2px 9px',borderRadius:'999px' }}>PMB</span>}
                       </div>
-                      <button onClick={() => { setAssignTarget(p); setAssignRoom((p as any).ruang_tes || ''); }}
-                        style={{ display:'inline-flex',alignItems:'center',gap:'4px',color:C.green,background:C.greenLight,border:`1.5px solid ${C.greenBorder}`,borderRadius:'8px',padding:'5px 10px',fontSize:'11.5px',fontWeight:700,cursor:'pointer',flexShrink:0 }}>
-                        <UserPlus size={12} /> {p.ruang_tes ? 'Pindah' : 'Assign'}
-                      </button>
+                      <div style={{ display:'flex',gap:'6px',flexShrink:0 }}>
+                        <button onClick={() => { setAssignTarget(p); setAssignRoom((p as any).ruang_tes || ''); }}
+                          style={{ display:'inline-flex',alignItems:'center',gap:'4px',color:C.green,background:C.greenLight,border:`1.5px solid ${C.greenBorder}`,borderRadius:'8px',padding:'5px 10px',fontSize:'11.5px',fontWeight:700,cursor:'pointer' }}>
+                          <UserPlus size={12} /> {p.ruang_tes ? 'Pindah' : 'Assign'}
+                        </button>
+                        <button onClick={() => setConfirmDelPeserta(p)}
+                          style={{ width:'32px',height:'32px',display:'inline-flex',alignItems:'center',justifyContent:'center',borderRadius:'8px',background:'#fef2f2',border:'1.5px solid #fecaca',cursor:'pointer',color:'#dc2626' }}>
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -843,6 +893,40 @@ function PesertaPage() {
             <div className="flex gap-2 justify-end pt-1">
               <Button variant="secondary" size="sm" onClick={() => setAssignTarget(null)}>Batal</Button>
               <Button size="sm" loading={savingAssign} onClick={saveAssignRoom}>Simpan</Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Confirm hapus peserta — custom UI */}
+      <Modal open={!!confirmDelPeserta} onClose={() => setConfirmDelPeserta(null)} title="Hapus Peserta?" size="sm">
+        {confirmDelPeserta && (
+          <div>
+            {/* Info peserta */}
+            <div style={{ background: C.bg, border: `1.5px solid ${C.borderMid}`, borderRadius: '12px', padding: '12px 14px', marginBottom: '16px' }}>
+              <p style={{ color: C.text, fontSize: '13.5px', fontWeight: 800, marginBottom: '2px' }}>{confirmDelPeserta.nama_lengkap}</p>
+              <p style={{ color: C.textMuted, fontSize: '11.5px', fontFamily: 'monospace' }}>{confirmDelPeserta.nisn}</p>
+              <div style={{ marginTop: '8px', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                {confirmDelPeserta.ruang_tes && <span style={{ background:'#e0f0ff',color:'#1a5fa8',fontSize:'10px',fontWeight:700,padding:'2px 8px',borderRadius:'999px' }}>{confirmDelPeserta.ruang_tes}</span>}
+                {confirmDelPeserta._sumber === 'manual'
+                  ? <span style={{ background:'#fffbeb',color:'#b45309',fontSize:'10px',fontWeight:700,padding:'2px 8px',borderRadius:'999px' }}>Manual</span>
+                  : <span style={{ background:'#e0f0ff',color:'#1a5fa8',fontSize:'10px',fontWeight:700,padding:'2px 8px',borderRadius:'999px' }}>PMB</span>}
+              </div>
+            </div>
+            <p style={{ color: '#dc2626', fontSize: '12.5px', fontWeight: 600, marginBottom: '18px', lineHeight: 1.5 }}>
+              {confirmDelPeserta._sumber === 'manual'
+                ? 'Akun peserta ini akan dihapus permanen dan tidak dapat dikembalikan.'
+                : 'Data peserta ini akan dihapus dari sistem CBT. Data di PMB tidak terpengaruh.'}
+            </p>
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+              <button onClick={() => setConfirmDelPeserta(null)}
+                style={{ padding:'9px 18px',fontSize:'12.5px',fontWeight:700,color:C.textMid,background:C.bg,border:`1.5px solid ${C.borderMid}`,borderRadius:'10px',cursor:'pointer' }}>
+                Batal
+              </button>
+              <button onClick={deletePeserta} disabled={deletingPeserta}
+                style={{ display:'inline-flex',alignItems:'center',gap:'6px',padding:'9px 18px',fontSize:'12.5px',fontWeight:700,color:'#fff',background:'#dc2626',border:'none',borderRadius:'10px',cursor:'pointer',opacity:deletingPeserta?0.6:1 }}>
+                {deletingPeserta ? <><Spinner size={13} /> Menghapus...</> : <><Trash2 size={13} /> Ya, Hapus</>}
+              </button>
             </div>
           </div>
         )}
