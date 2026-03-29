@@ -192,8 +192,9 @@ admin.put('/users/:id', async (c) => {
 
 admin.delete('/users/:id', async (c) => {
   const id = c.req.param('id');
-  // Coba hapus dari kedua tabel (salah satu pasti ada)
   await c.env.DB.batch([
+    c.env.DB.prepare('DELETE FROM cbt_exam_sessions WHERE user_id=? AND user_type=?').bind(id, 'cbt_user'),
+    c.env.DB.prepare('DELETE FROM cbt_exam_results WHERE user_id=? AND user_type=?').bind(id, 'cbt_user'),
     c.env.DB.prepare('DELETE FROM cbt_users WHERE id=?').bind(id),
     c.env.DB.prepare('DELETE FROM admins WHERE id=?').bind(id),
   ]);
@@ -221,9 +222,14 @@ admin.get('/pendaftar', async (c) => {
   return c.json(ok(results));
 });
 
-// Hapus peserta dari tabel pendaftar PMB
+// Hapus peserta dari tabel pendaftar PMB + sesi ujiannya
 admin.delete('/pendaftar/:id', async (c) => {
-  await c.env.DB.prepare('DELETE FROM pendaftar WHERE id = ?').bind(c.req.param('id')).run();
+  const id = c.req.param('id');
+  await c.env.DB.batch([
+    c.env.DB.prepare('DELETE FROM cbt_exam_sessions WHERE user_id=? AND user_type=?').bind(id, 'pendaftar'),
+    c.env.DB.prepare('DELETE FROM cbt_exam_results WHERE user_id=? AND user_type=?').bind(id, 'pendaftar'),
+    c.env.DB.prepare('DELETE FROM pendaftar WHERE id = ?').bind(id),
+  ]);
   return c.json(ok(null, 'Peserta berhasil dihapus'));
 });
 
@@ -465,6 +471,66 @@ admin.get('/exams/:examId/sessions', async (c) => {
      ORDER BY r.room_name, full_name`
   ).bind(c.req.param('examId')).all();
   return c.json(ok(results));
+});
+
+// Update jalur peserta pendaftar
+admin.put('/pendaftar/:id/jalur', async (c) => {
+  const { jalur } = await c.req.json<{ jalur: string }>();
+  await c.env.DB.prepare('UPDATE pendaftar SET jalur = ? WHERE id = ?').bind(jalur, c.req.param('id')).run();
+  return c.json(ok(null, 'Jalur berhasil diperbarui'));
+});
+
+// ══════════════════════════════════════════════════════════════
+// SETTINGS — key-value config
+// ══════════════════════════════════════════════════════════════
+
+admin.get('/settings', async (c) => {
+  const { results } = await c.env.DB.prepare('SELECT key, value FROM cbt_settings').all();
+  const map: Record<string, string> = {};
+  for (const r of results as any[]) map[r.key] = r.value;
+  return c.json(ok(map));
+});
+
+admin.put('/settings', async (c) => {
+  const body = await c.req.json<Record<string, string>>();
+  const stmts = Object.entries(body).map(([key, value]) =>
+    c.env.DB.prepare('INSERT OR REPLACE INTO cbt_settings (key, value, updated_at) VALUES (?,?,?)').bind(key, value, now())
+  );
+  if (stmts.length) await c.env.DB.batch(stmts);
+  return c.json(ok(null, 'Pengaturan disimpan'));
+});
+
+// ══════════════════════════════════════════════════════════════
+// EXAM ASSIGNMENTS — assign ujian ke peserta tertentu
+// ══════════════════════════════════════════════════════════════
+
+admin.get('/exams/:examId/assignments', async (c) => {
+  const { results } = await c.env.DB.prepare(
+    `SELECT ea.*, COALESCE(p.nama_lengkap, cu.nama_lengkap) as full_name,
+       COALESCE(p.nisn, cu.nisn, cu.username) as nisn
+     FROM cbt_exam_assignments ea
+     LEFT JOIN pendaftar p ON ea.user_id = p.id AND ea.user_type = 'pendaftar'
+     LEFT JOIN cbt_users cu ON ea.user_id = cu.id AND ea.user_type = 'cbt_user'
+     WHERE ea.exam_id = ? ORDER BY full_name`
+  ).bind(c.req.param('examId')).all();
+  return c.json(ok(results));
+});
+
+admin.post('/exams/:examId/assignments', async (c) => {
+  const { users } = await c.req.json<{ users: { user_id: string; user_type: string }[] }>();
+  const examId = c.req.param('examId');
+  const stmts = users.map(u =>
+    c.env.DB.prepare('INSERT OR IGNORE INTO cbt_exam_assignments (id, exam_id, user_id, user_type) VALUES (?,?,?,?)')
+      .bind(newId(), examId, u.user_id, u.user_type)
+  );
+  for (let i = 0; i < stmts.length; i += 100) await c.env.DB.batch(stmts.slice(i, i + 100));
+  return c.json(ok({ added: users.length }, 'Peserta di-assign'));
+});
+
+admin.delete('/exams/:examId/assignments/:id', async (c) => {
+  await c.env.DB.prepare('DELETE FROM cbt_exam_assignments WHERE id=? AND exam_id=?')
+    .bind(c.req.param('id'), c.req.param('examId')).run();
+  return c.json(ok(null, 'Assignment dihapus'));
 });
 
 export default admin;

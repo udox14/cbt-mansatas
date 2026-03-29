@@ -152,7 +152,7 @@ function ProctorContent() {
                     {sessions.map((s: any, i: number) => {
                       const isOnline  = s.live_status === 'online';
                       const isDone    = s.live_status === 'selesai';
-                      const isOffline = !isOnline && !isDone;
+                      const isLocked  = s.live_status === 'dikunci';
                       return (
                         <tr key={s.id} style={{ borderBottom: i < sessions.length - 1 ? `1px solid ${C.borderLight}` : 'none' }}>
                           <td style={{ padding: '10px 14px' }}>
@@ -161,21 +161,28 @@ function ProctorContent() {
                           </td>
                           <td style={{ padding: '10px 14px', textAlign: 'center' }}>
                             <span style={{
-                              background: isDone ? '#f1f1f0' : isOnline ? C.greenLight : '#fef2f2',
-                              color: isDone ? '#6b7c6e' : isOnline ? '#2d6644' : '#dc2626',
+                              background: isDone ? '#f1f1f0' : isLocked ? '#fffbeb' : isOnline ? C.greenLight : '#fef2f2',
+                              color: isDone ? '#6b7c6e' : isLocked ? '#b45309' : isOnline ? '#2d6644' : '#dc2626',
                               fontSize: '10px', fontWeight: 700, padding: '3px 9px', borderRadius: '999px',
                             }}>
-                              {isDone ? 'Selesai' : isOnline ? 'Online' : 'Offline'}
+                              {isDone ? 'Selesai' : isLocked ? 'Dikunci' : isOnline ? 'Online' : 'Offline'}
                             </span>
                           </td>
                           <td style={{ padding: '10px 14px', textAlign: 'center', color: C.textMuted, fontFamily: 'monospace', fontWeight: 600 }}>{s.answered_count}/{s.total_questions}</td>
                           <td style={{ padding: '10px 14px', textAlign: 'center', fontWeight: s.cheat_warnings > 0 ? 700 : 400, color: s.cheat_warnings > 0 ? '#dc2626' : C.textFaint }}>{s.cheat_warnings}</td>
                           <td style={{ padding: '10px 14px', textAlign: 'center' }}>
-                            {!isDone && (
-                              <button onClick={() => setResetTarget(s)} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: C.green, fontSize: '11px', fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer' }}>
-                                <RefreshCw size={11} strokeWidth={2.5} /> Reset
-                              </button>
-                            )}
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                              {isLocked && (
+                                <button onClick={() => handleUnlock(s)} style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', color: '#b45309', fontSize: '11px', fontWeight: 700, background: '#fffbeb', border: '1.5px solid #fde68a', borderRadius: '8px', padding: '4px 10px', cursor: 'pointer' }}>
+                                  Buka Kunci
+                                </button>
+                              )}
+                              {!isDone && !isLocked && (
+                                <button onClick={() => setResetTarget(s)} style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', color: C.green, fontSize: '11px', fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer' }}>
+                                  <RefreshCw size={11} strokeWidth={2.5} /> Reset
+                                </button>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       );

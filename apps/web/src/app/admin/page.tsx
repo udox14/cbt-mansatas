@@ -12,7 +12,7 @@ import { exportExamResults } from '@/lib/export';
 import {
   ClipboardList, Users, School, Shield, LogOut, Menu,
   Plus, FileDown, RefreshCw, Pencil, Trash2, Upload,
-  Image, Volume2, X, UserPlus, ChevronLeft, ArrowRight,
+  Image, Volume2, X, UserPlus, ChevronLeft, ArrowRight, Settings,
 } from 'lucide-react';
 
 // ── TYPES ────────────────────────────────────────────────────
@@ -22,8 +22,8 @@ interface Pendaftar { id: string; nisn: string; nama_lengkap: string; no_pendaft
 interface Exam { id: string; title: string; description: string | null; duration_minutes: number; active_status: string; question_count: number; is_score_visible: number; randomize_questions: number; randomize_options: number; rules_text: string | null; completion_message: string; passing_score: number; target_jalur: string | null }
 interface Question { id: string; question_text: string; question_type: string; question_order: number; image_url: string | null; audio_url: string | null; options: QOption[] }
 interface QOption { id?: string; option_label: string; option_text: string; image_url: string | null; is_correct: number }
-type Page = 'exams' | 'peserta' | 'rooms' | 'pelaksana';
-type ExamTab = 'soal' | 'token' | 'monitor' | 'hasil';
+type Page = 'exams' | 'peserta' | 'rooms' | 'pelaksana' | 'settings';
+type ExamTab = 'soal' | 'token' | 'monitor' | 'hasil' | 'peserta';
 
 const C = {
   bg: '#f4f6f4', white: '#fff', border: '#e0e5e0', borderLight: '#edf0ed', borderMid: '#d4dbd4',
@@ -50,6 +50,7 @@ const StatusBadge = ({ status }: { status: string }) => {
 
 const EXAM_TABS: { key: ExamTab; label: string }[] = [
   { key: 'soal', label: 'Soal' }, { key: 'token', label: 'Token' },
+  { key: 'peserta', label: 'Peserta' },
   { key: 'monitor', label: 'Monitor' }, { key: 'hasil', label: 'Hasil' },
 ];
 
@@ -106,6 +107,7 @@ function AdminContent() {
     { key: 'peserta',   label: 'Peserta Tes',       icon: <Users size={14} strokeWidth={2} /> },
     { key: 'rooms',     label: 'Ruangan & Proktor', icon: <School size={14} strokeWidth={2} /> },
     { key: 'pelaksana', label: 'Pelaksana Tes',     icon: <Shield size={14} strokeWidth={2} /> },
+    { key: 'settings',  label: 'Pengaturan',        icon: <Settings size={14} strokeWidth={2} /> },
   ];
   const nav = (p: Page) => { setPage(p); setSidebarOpen(false); localStorage.setItem('admin_page', p); };
 
@@ -200,6 +202,7 @@ function AdminContent() {
           {page === 'peserta'   && <PesertaPage />}
           {page === 'rooms'     && <RoomsPage />}
           {page === 'pelaksana' && <PelaksanaPage />}
+          {page === 'settings'  && <SettingsPage />}
         </main>
 
         <footer style={{ textAlign: 'center', padding: '12px', color: '#a8b3a8', fontSize: '11px', fontWeight: 500, borderTop: `1px solid ${C.borderLight}` }}>
@@ -308,6 +311,7 @@ function ExamsPage() {
       <div style={{ flex: 1, padding: '16px 20px', overflow: 'auto' }}>
         {activeTab === 'soal'    && <QuestionsView examId={selectedExam.id} />}
         {activeTab === 'token'   && <TokensView examId={selectedExam.id} />}
+        {activeTab === 'peserta' && <AssignmentsView examId={selectedExam.id} />}
         {activeTab === 'monitor' && <MonitorView examId={selectedExam.id} />}
         {activeTab === 'hasil'   && <ResultsView examId={selectedExam.id} />}
       </div>
@@ -715,6 +719,169 @@ function ResultsView({ examId }: { examId: string }) {
   );
 }
 
+// ── ASSIGNMENTS VIEW — Assign peserta ke ujian ───────────────
+function AssignmentsView({ examId }: { examId: string }) {
+  const { toast } = useToast();
+  const [assignments, setAssignments] = useState<any[]>([]);
+  const [candidates, setCandidates] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showAdd, setShowAdd] = useState(false);
+  const [search, setSearch] = useState('');
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  const fetchData = useCallback(async () => {
+    const r = await GET(`/api/admin/exams/${examId}/assignments`);
+    if (r.success) setAssignments(r.data || []);
+    setLoading(false);
+  }, [examId]);
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  const openAdd = async () => {
+    setShowAdd(true); setSearch(''); setSelected(new Set());
+    // Fetch all students (pendaftar + cbt_users student)
+    const [pmb, manual] = await Promise.all([
+      GET<any[]>('/api/admin/pendaftar'),
+      GET<any[]>('/api/admin/users?role=student'),
+    ]);
+    const pmbList = (pmb.success ? (pmb.data || []) : []).map((p: any) => ({
+      id: p.id, name: p.nama_lengkap, nisn: p.nisn, jalur: p.jalur || '', user_type: 'pendaftar',
+    }));
+    const manualList = (manual.success ? (manual.data || []) : []).map((u: any) => ({
+      id: u.id, name: u.full_name, nisn: u.nisn || u.username, jalur: '', user_type: 'cbt_user',
+    }));
+    // Exclude already assigned
+    const assignedIds = new Set(assignments.map((a: any) => `${a.user_id}:${a.user_type}`));
+    setCandidates([...pmbList, ...manualList].filter(c => !assignedIds.has(`${c.id}:${c.user_type}`)));
+  };
+
+  const toggleSelect = (key: string) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
+
+  const selectAll = () => {
+    const visible = filteredCandidates.map(c => `${c.id}:${c.user_type}`);
+    setSelected(prev => {
+      const next = new Set(prev);
+      const allSelected = visible.every(k => next.has(k));
+      if (allSelected) visible.forEach(k => next.delete(k));
+      else visible.forEach(k => next.add(k));
+      return next;
+    });
+  };
+
+  const saveAssignments = async () => {
+    const users = Array.from(selected).map(k => {
+      const [user_id, user_type] = k.split(':');
+      return { user_id, user_type };
+    });
+    if (!users.length) { toast('error', 'Pilih minimal 1 peserta'); return; }
+    const r = await POST(`/api/admin/exams/${examId}/assignments`, { users });
+    if (r.success) { toast('success', `${users.length} peserta di-assign`); setShowAdd(false); fetchData(); }
+    else toast('error', r.error || 'Gagal');
+  };
+
+  const removeAssignment = async (id: string) => {
+    await DEL(`/api/admin/exams/${examId}/assignments/${id}`);
+    toast('success', 'Dihapus');
+    fetchData();
+  };
+
+  const filteredCandidates = candidates.filter(c => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return c.name?.toLowerCase().includes(q) || c.nisn?.toLowerCase().includes(q) || c.jalur?.toLowerCase().includes(q);
+  });
+
+  if (loading) return <div className="py-12 text-center"><Spinner /></div>;
+
+  return (
+    <div className="space-y-3">
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <p style={{ color: C.textMid, fontSize: '11px', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Peserta di-assign — {assignments.length} orang</p>
+          <p style={{ color: C.textFaint, fontSize: '10.5px', marginTop: '2px' }}>Peserta yang di-assign bisa mengakses ujian ini terlepas dari filter jalur.</p>
+        </div>
+        <button onClick={openAdd}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: C.green, color: '#fff', fontSize: '12px', fontWeight: 700, padding: '8px 14px', borderRadius: '10px', border: 'none', cursor: 'pointer' }}>
+          <Plus size={13} strokeWidth={2.5} /> Tambah Peserta
+        </button>
+      </div>
+
+      {assignments.length === 0
+        ? <EmptyState title="Belum ada peserta di-assign" />
+        : (
+          <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '12px', overflow: 'hidden' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+              <TableHead cols={[{label:'#'},{label:'Nama'},{label:'NISN'},{label:'Tipe'},{label:'Aksi',center:true}]} />
+              <tbody>
+                {assignments.map((a: any, i: number) => (
+                  <tr key={a.id} style={{ borderBottom: i < assignments.length - 1 ? `1px solid ${C.borderLight}` : 'none' }}>
+                    <td style={{ padding: '10px 14px', color: C.textMuted }}>{i + 1}</td>
+                    <td style={{ padding: '10px 14px', color: C.text, fontWeight: 700 }}>{a.full_name || '—'}</td>
+                    <td style={{ padding: '10px 14px', color: C.textMuted, fontFamily: 'monospace' }}>{a.nisn || '—'}</td>
+                    <td style={{ padding: '10px 14px' }}>
+                      <span style={{ background: a.user_type === 'pendaftar' ? '#e2ebe3' : '#fffbeb', color: a.user_type === 'pendaftar' ? '#2d6644' : '#b45309', fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '999px' }}>
+                        {a.user_type === 'pendaftar' ? 'PMB' : 'Manual'}
+                      </span>
+                    </td>
+                    <td style={{ padding: '10px 14px', textAlign: 'center' }}>
+                      <button onClick={() => removeAssignment(a.id)}
+                        style={{ color: '#dc2626', fontSize: '11px', fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer' }}>
+                        <Trash2 size={13} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+      {/* Modal tambah peserta */}
+      <Modal open={showAdd} onClose={() => setShowAdd(false)} title="Assign Peserta ke Ujian" size="lg">
+        <div className="space-y-3">
+          <Input placeholder="Cari nama, NISN, atau jalur..." value={search} onChange={e => setSearch(e.target.value)} />
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <p style={{ color: C.textMuted, fontSize: '11px' }}>{filteredCandidates.length} peserta tersedia · {selected.size} dipilih</p>
+            <button onClick={selectAll} style={{ color: C.green, fontSize: '11px', fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer' }}>
+              {filteredCandidates.length > 0 && filteredCandidates.every(c => selected.has(`${c.id}:${c.user_type}`)) ? 'Batal Semua' : 'Pilih Semua'}
+            </button>
+          </div>
+          <div style={{ maxHeight: '320px', overflow: 'auto', border: `1.5px solid ${C.borderMid}`, borderRadius: '12px' }}>
+            {filteredCandidates.length === 0
+              ? <p style={{ padding: '20px', textAlign: 'center', color: C.textFaint, fontSize: '12px' }}>Tidak ada peserta</p>
+              : filteredCandidates.map(c => {
+                  const key = `${c.id}:${c.user_type}`;
+                  const checked = selected.has(key);
+                  return (
+                    <div key={key} onClick={() => toggleSelect(key)}
+                      style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 14px', cursor: 'pointer', borderBottom: `1px solid ${C.borderLight}`, background: checked ? C.greenLight : 'transparent' }}>
+                      <div style={{ width: '18px', height: '18px', borderRadius: '5px', border: `2px solid ${checked ? C.green : C.borderMid}`, background: checked ? C.green : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        {checked && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p style={{ color: C.text, fontSize: '12px', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</p>
+                        <p style={{ color: C.textFaint, fontSize: '10px', fontFamily: 'monospace' }}>{c.nisn}</p>
+                      </div>
+                      {c.jalur && <span style={{ background: '#f0e6ff', color: '#6d28d9', fontSize: '9px', fontWeight: 700, padding: '2px 7px', borderRadius: '999px', flexShrink: 0 }}>{c.jalur}</span>}
+                    </div>
+                  );
+                })}
+          </div>
+          <div className="flex gap-2 justify-end pt-1">
+            <Button variant="secondary" size="sm" onClick={() => setShowAdd(false)}>Batal</Button>
+            <Button size="sm" onClick={saveAssignments}>Assign {selected.size} Peserta</Button>
+          </div>
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
 // ── PESERTA PAGE ──────────────────────────────────────────────
 // Hanya menampilkan peserta jalur REGULER MURNI (jalur yang membutuhkan tes)
 function PesertaPage() {
@@ -727,8 +894,10 @@ function PesertaPage() {
   const [savingPeserta, setSavingPeserta] = useState(false);
   const [assignTarget, setAssignTarget] = useState<any | null>(null);
   const [assignRoom, setAssignRoom] = useState('');
+  const [assignJalur, setAssignJalur] = useState('');
   const [savingAssign, setSavingAssign] = useState(false);
   const [allRooms, setAllRooms] = useState<Room[]>([]);
+  const [allJalur, setAllJalur] = useState<string[]>([]);
   const [confirmDelPeserta, setConfirmDelPeserta] = useState<any | null>(null);
   const [deletingPeserta, setDeletingPeserta] = useState(false);
 
@@ -764,13 +933,17 @@ function PesertaPage() {
         room_id: (allRooms.find(r => r.room_name === assignRoom))?.id || null,
       });
     } else {
-      // pendaftar PMB: update ruang_tes via PUT /api/admin/pendaftar/:id/ruang
-      r = await PUT(`/api/admin/pendaftar/${assignTarget.id}/ruang`, {
-        ruang_tes: assignRoom || null,
-      });
+      // pendaftar PMB: update ruang_tes + jalur
+      const [r1, r2] = await Promise.all([
+        PUT(`/api/admin/pendaftar/${assignTarget.id}/ruang`, { ruang_tes: assignRoom || null }),
+        assignJalur !== (assignTarget.jalur || '')
+          ? PUT(`/api/admin/pendaftar/${assignTarget.id}/jalur`, { jalur: assignJalur })
+          : Promise.resolve({ success: true } as any),
+      ]);
+      r = r1.success && r2.success ? r1 : { success: false, error: r1.error || r2.error };
     }
     setSavingAssign(false);
-    if (r.success) { toast('success', 'Ruangan berhasil diubah'); setAssignTarget(null); fetchPeserta(); }
+    if (r.success) { toast('success', 'Data berhasil diubah'); setAssignTarget(null); fetchPeserta(); }
     else toast('error', r.error || 'Gagal');
   };
 
@@ -790,15 +963,17 @@ function PesertaPage() {
   };
 
   const fetchPeserta = useCallback(async () => {
-    // Ambil dari dua sumber: pendaftar PMB (jalur REGULER) + cbt_users (role student)
-    const [pmb, manual, rooms] = await Promise.all([
-      GET<Pendaftar[]>('/api/admin/pendaftar?jalur=' + encodeURIComponent(JALUR_TES)),
+    // Ambil dari semua sumber: semua pendaftar PMB + cbt_users (role student) + jalur list
+    const [pmb, manual, rooms, jalur] = await Promise.all([
+      GET<Pendaftar[]>('/api/admin/pendaftar'),
       GET<any[]>('/api/admin/users?role=student'),
       GET<Room[]>('/api/admin/rooms'),
+      GET<string[]>('/api/admin/pendaftar/jalur'),
     ]);
     const pmbData: Pendaftar[] = pmb.success ? (pmb.data || []) : [];
     const roomList = rooms.success ? (rooms.data || []) : [];
     if (rooms.success) setAllRooms(roomList);
+    if (jalur.success) setAllJalur(jalur.data || []);
     // Map cbt_users student ke format Pendaftar
     const manualData: Pendaftar[] = (manual.success ? (manual.data || []) : []).map((u: any) => ({
       id: u.id, nisn: u.nisn || u.username, nama_lengkap: u.full_name,
@@ -825,6 +1000,8 @@ function PesertaPage() {
   const [filterSumber, setFilterSumber] = useState('');
   const [filterTgl, setFilterTgl] = useState('');
   const [filterJk, setFilterJk] = useState('');
+  const [filterJalur, setFilterJalur] = useState('');
+  const jalurOpts = Array.from(new Set(data.map((p:any) => p.jalur).filter(Boolean))).sort() as string[];
 
   const filtered = data.filter((p: any) => {
     if (filterRoom   && p.ruang_tes     !== filterRoom)   return false;
@@ -832,6 +1009,7 @@ function PesertaPage() {
     if (filterSumber && p._sumber       !== filterSumber) return false;
     if (filterTgl    && p.tanggal_tes   !== filterTgl)    return false;
     if (filterJk     && (p.jenis_kelamin || '').toUpperCase() !== filterJk) return false;
+    if (filterJalur  && (p.jalur || '').toUpperCase() !== filterJalur.toUpperCase()) return false;
     return true;
   });
 
@@ -886,8 +1064,12 @@ function PesertaPage() {
             <option value="L">Laki-laki</option>
             <option value="P">Perempuan</option>
           </select>
-          {(filterRoom || filterSesi || filterTgl || filterSumber || filterJk) && (
-            <button onClick={() => { setFilterRoom(''); setFilterSesi(''); setFilterTgl(''); setFilterSumber(''); setFilterJk(''); }}
+          <select value={filterJalur} onChange={e => setFilterJalur(e.target.value)} style={selStyle(filterJalur)}>
+            <option value="">Semua Jalur</option>
+            {jalurOpts.map(j => <option key={j} value={j}>{j}</option>)}
+          </select>
+          {(filterRoom || filterSesi || filterTgl || filterSumber || filterJk || filterJalur) && (
+            <button onClick={() => { setFilterRoom(''); setFilterSesi(''); setFilterTgl(''); setFilterSumber(''); setFilterJk(''); setFilterJalur(''); }}
               style={{ fontSize: '11.5px', fontWeight: 700, color: '#dc2626', background: '#fef2f2', border: '1.5px solid #fecaca', borderRadius: '10px', padding: '7px 12px', cursor: 'pointer' }}>
               Reset
             </button>
@@ -901,7 +1083,7 @@ function PesertaPage() {
               {/* DESKTOP: table */}
               <div className="hidden md:block" style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '12px', overflow: 'hidden' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                  <TableHead cols={[{label:'#'},{label:'Nama'},{label:'NISN'},{label:'JK',center:true},{label:'Ruang'},{label:'Sesi'},{label:'Tgl Tes'},{label:'Sumber'},{label:'Aksi',center:true},{label:'',center:true}]} />
+                  <TableHead cols={[{label:'#'},{label:'Nama'},{label:'NISN'},{label:'JK',center:true},{label:'Jalur'},{label:'Ruang'},{label:'Sesi'},{label:'Tgl Tes'},{label:'Sumber'},{label:'Aksi',center:true},{label:'',center:true}]} />
                   <tbody>
                     {filtered.map((p, i) => (
                       <tr key={p.id} style={{ borderBottom: i < filtered.length - 1 ? `1px solid ${C.borderLight}` : 'none' }}>
@@ -909,6 +1091,11 @@ function PesertaPage() {
                         <td style={{ padding: '10px 14px', color: C.text, fontWeight: 700 }}>{p.nama_lengkap}</td>
                         <td style={{ padding: '10px 14px', color: C.textMuted, fontFamily: 'monospace' }}>{p.nisn}</td>
                         <td style={{ padding: '10px 14px', textAlign: 'center', color: C.textMuted, fontWeight: 600 }}>{p.jenis_kelamin ? (p.jenis_kelamin === 'L' || p.jenis_kelamin?.toUpperCase() === 'LAKI-LAKI' ? 'L' : 'P') : '—'}</td>
+                        <td style={{ padding: '10px 14px' }}>
+                          {p.jalur
+                            ? <span style={{ background: '#f0e6ff', color: '#6d28d9', fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '999px' }}>{p.jalur}</span>
+                            : <span style={{ color: C.borderMid }}>—</span>}
+                        </td>
                         <td style={{ padding: '10px 14px' }}>
                           {p.ruang_tes
                             ? <span style={{ background: '#e0f0ff', color: '#1a5fa8', fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '999px' }}>{p.ruang_tes}</span>
@@ -922,7 +1109,7 @@ function PesertaPage() {
                             : <span style={{ background:'#e2ebe3',color:'#2d6644',fontSize:'10px',fontWeight:700,padding:'2px 8px',borderRadius:'999px' }}>PMB</span>}
                         </td>
                         <td style={{ padding: '10px 14px', textAlign: 'center' }}>
-                          <button onClick={() => { setAssignTarget(p); setAssignRoom((p as any).ruang_tes || ''); }}
+                          <button onClick={() => { setAssignTarget(p); setAssignRoom((p as any).ruang_tes || ''); setAssignJalur((p as any).jalur || ''); }}
                             style={{ display:'inline-flex',alignItems:'center',gap:'4px',color:C.green,fontSize:'11px',fontWeight:700,background:'none',border:'none',cursor:'pointer' }}>
                             <UserPlus size={12} /> {p.ruang_tes ? 'Pindah' : 'Assign'}
                           </button>
@@ -965,7 +1152,7 @@ function PesertaPage() {
                     </div>
                     {/* Row 3: actions — full width, consistent */}
                     <div style={{ display: 'flex', gap: '6px' }}>
-                      <button onClick={() => { setAssignTarget(p); setAssignRoom(p.ruang_tes || ''); }}
+                      <button onClick={() => { setAssignTarget(p); setAssignRoom(p.ruang_tes || ''); setAssignJalur((p as any).jalur || ''); }}
                         style={{ flex: 1, display:'inline-flex',alignItems:'center',justifyContent:'center',gap:'5px',color:C.green,background:C.greenLight,border:`1.5px solid ${C.greenBorder}`,borderRadius:'9px',padding:'7px',fontSize:'12px',fontWeight:700,cursor:'pointer' }}>
                         <UserPlus size={13} /> {p.ruang_tes ? 'Pindah Ruangan' : 'Assign Ruangan'}
                       </button>
@@ -999,19 +1186,31 @@ function PesertaPage() {
         )}
       </Modal>
 
-      {/* Modal assign ruangan */}
-      <Modal open={!!assignTarget} onClose={() => setAssignTarget(null)} title={`${assignTarget?.ruang_tes ? 'Pindah Ruangan' : 'Assign Ruangan'} — ${assignTarget?.nama_lengkap}`} size="sm">
+      {/* Modal assign ruangan + jalur */}
+      <Modal open={!!assignTarget} onClose={() => setAssignTarget(null)} title={`Edit Peserta — ${assignTarget?.nama_lengkap}`} size="sm">
         {assignTarget && (
           <div className="space-y-3">
-            <Select label="Pilih Ruangan" value={assignRoom} onChange={e => setAssignRoom(e.target.value)}
+            <Select label="Ruangan" value={assignRoom} onChange={e => setAssignRoom(e.target.value)}
               options={[
                 { value: '', label: '— Tanpa Ruangan —' },
                 ...allRooms.map(r => ({ value: r.room_name, label: r.room_name })),
               ]} />
-            {assignTarget.ruang_tes && (
-              <p style={{ color: C.textMuted, fontSize: '11.5px' }}>
-                Ruangan saat ini: <strong style={{ color: C.text }}>{assignTarget.ruang_tes}</strong>
-              </p>
+            {(assignTarget as any)._sumber !== 'manual' && (
+              <div>
+                <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: C.textMid, letterSpacing: '0.04em', textTransform: 'uppercase', marginBottom: '6px' }}>Jalur / Tag</label>
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                  {allJalur.map(j => (
+                    <button key={j} type="button" onClick={() => setAssignJalur(j)}
+                      style={{ padding: '5px 12px', fontSize: '11.5px', fontWeight: 700, borderRadius: '999px', cursor: 'pointer',
+                        border: `1.5px solid ${assignJalur === j ? '#1a5fa8' : C.borderMid}`,
+                        background: assignJalur === j ? '#e0f0ff' : C.white,
+                        color: assignJalur === j ? '#1a5fa8' : C.textMuted }}>
+                      {j}
+                    </button>
+                  ))}
+                  <Input value={assignJalur} onChange={e => setAssignJalur(e.target.value)} className="!py-1 !px-2 !text-xs" style={{ maxWidth: '140px' }} />
+                </div>
+              </div>
             )}
             <div className="flex gap-2 justify-end pt-1">
               <Button variant="secondary" size="sm" onClick={() => setAssignTarget(null)}>Batal</Button>
@@ -1419,6 +1618,122 @@ function PelaksanaPage() {
       <Confirm open={!!confirmDel} onClose={() => setConfirmDel(null)} onConfirm={del}
         title={`Hapus ${tab === 'proktor' ? 'Proktor' : 'Admin'}?`}
         message={`Akun "${confirmDel?.full_name}" akan dihapus permanen.`} />
+    </div>
+  );
+}
+
+// ── SETTINGS PAGE — Landing Page Editor ──────────────────────
+function SettingsPage() {
+  const { toast } = useToast();
+  const [settings, setSettings] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const defaults: Record<string, string> = {
+    landing_badge: 'Penerimaan Murid Baru 2025/2026',
+    landing_title_1: 'Ujian Seleksi',
+    landing_title_2: 'Penerimaan',
+    landing_title_3: 'Murid Baru',
+    landing_subtitle: 'Sistem CBT resmi MAN 1 Tasikmalaya. Aman, terstruktur, dan hasil tersedia langsung setelah ujian.',
+    landing_login_hint: 'NISN & tanggal lahir (DDMMYYYY) sebagai password',
+    landing_trust: 'Data terintegrasi langsung dari sistem pendaftaran PMB.',
+  };
+
+  useEffect(() => {
+    GET<Record<string, string>>('/api/admin/settings').then(r => {
+      if (r.success) setSettings({ ...defaults, ...(r.data || {}) });
+      else setSettings({ ...defaults });
+      setLoading(false);
+    });
+  }, []);
+
+  const upd = (key: string, val: string) => setSettings(prev => ({ ...prev, [key]: val }));
+
+  const save = async () => {
+    setSaving(true);
+    const r = await PUT('/api/admin/settings', settings);
+    setSaving(false);
+    toast(r.success ? 'success' : 'error', r.success ? 'Tersimpan!' : r.error || 'Gagal');
+  };
+
+  if (loading) return <div className="py-12 text-center"><Spinner /></div>;
+
+  const EditableText = ({ k, style: s, className: cn }: { k: string; style?: React.CSSProperties; className?: string }) => (
+    <span contentEditable suppressContentEditableWarning
+      className={cn}
+      style={{ ...s, outline: 'none', borderBottom: '2px dashed rgba(45,122,79,0.3)', cursor: 'text', minWidth: '20px', display: 'inline-block' }}
+      onBlur={e => upd(k, e.currentTarget.textContent || '')}
+      dangerouslySetInnerHTML={{ __html: settings[k] || '' }} />
+  );
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ background: C.white, borderBottom: `1.5px solid ${C.border}`, padding: '14px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <p style={{ color: C.text, fontSize: '15px', fontWeight: 800 }}>Pengaturan Landing Page</p>
+          <p style={{ color: C.textMuted, fontSize: '11px', marginTop: '1px' }}>Klik teks di preview untuk mengedit langsung</p>
+        </div>
+        <Button size="sm" loading={saving} onClick={save}>Simpan Perubahan</Button>
+      </div>
+
+      <div style={{ flex: 1, padding: '20px', overflow: 'auto', display: 'flex', justifyContent: 'center' }}>
+        {/* LIVE PREVIEW */}
+        <div style={{ width: '100%', maxWidth: '400px', background: '#f4f6f4', borderRadius: '24px', border: `2px solid ${C.borderMid}`, padding: '0', overflow: 'hidden', position: 'relative' }}>
+
+          {/* dot texture */}
+          <div style={{ position: 'absolute', inset: 0, backgroundImage: 'radial-gradient(circle,#c4ccc4 1px,transparent 1px)', backgroundSize: '26px 26px', opacity: 0.4, pointerEvents: 'none' }} />
+
+          <div style={{ position: 'relative', zIndex: 1, padding: '32px 24px 24px' }}>
+            {/* Nav */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '9px', marginBottom: '20px' }}>
+              <img src="/kemenag.png" alt="" width={36} height={36} style={{ objectFit: 'contain' }} />
+              <div>
+                <p style={{ color: '#1e2e22', fontSize: '11px', fontWeight: 800, letterSpacing: '0.01em' }}>MAN 1 TASIKMALAYA</p>
+                <p style={{ color: '#7a9e86', fontSize: '9.5px', fontWeight: 600, fontStyle: 'italic' }}>Bangkit · Maju · Juara</p>
+              </div>
+            </div>
+
+            <div style={{ height: '1px', background: 'linear-gradient(to right,transparent,#c4cec4,transparent)', marginBottom: '24px' }} />
+
+            {/* Badge */}
+            <div style={{ marginBottom: '16px' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: '#e2ebe3', border: '1.5px solid #c4d4c7', color: '#2d6644', fontSize: '10px', fontWeight: 700, letterSpacing: '0.09em', padding: '5px 12px', borderRadius: '999px', textTransform: 'uppercase' }}>
+                <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: '#2d7a4f' }} />
+                <EditableText k="landing_badge" />
+              </span>
+            </div>
+
+            {/* Titles */}
+            <div style={{ marginBottom: '12px' }}>
+              <p style={{ lineHeight: 1.06 }}><EditableText k="landing_title_1" style={{ color: '#1e2e22', fontSize: '28px', fontWeight: 900, letterSpacing: '-1px' }} /></p>
+              <p style={{ lineHeight: 1.06 }}><EditableText k="landing_title_2" style={{ color: '#2d7a4f', fontSize: '28px', fontWeight: 900, letterSpacing: '-1px' }} /></p>
+              <p style={{ lineHeight: 1.06 }}><EditableText k="landing_title_3" style={{ color: '#6b7c6e', fontSize: '28px', fontWeight: 900, letterSpacing: '-1px' }} /></p>
+            </div>
+
+            {/* Subtitle */}
+            <p style={{ marginBottom: '20px', maxWidth: '280px' }}>
+              <EditableText k="landing_subtitle" style={{ color: '#8a9e8d', fontSize: '12px', fontWeight: 500, lineHeight: '1.6' }} />
+            </p>
+
+            {/* CTA mock */}
+            <div style={{ background: '#2d7a4f', padding: '13px 18px', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+              <span style={{ color: '#fff', fontSize: '14px', fontWeight: 800 }}>Masuk ke Ujian</span>
+              <span style={{ width: '30px', height: '30px', background: 'rgba(255,255,255,0.15)', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <ArrowRight size={14} color="#fff" strokeWidth={2.5} />
+              </span>
+            </div>
+            <p style={{ textAlign: 'center', marginBottom: '16px' }}>
+              <EditableText k="landing_login_hint" style={{ color: '#a8b9aa', fontSize: '10px', fontWeight: 500 }} />
+            </p>
+
+            {/* Trust */}
+            <div style={{ background: '#fff', border: '1.5px solid #d4dbd4', borderRadius: '12px', padding: '10px 12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ color: '#2d7a4f', flexShrink: 0, fontSize: '13px' }}>✓</span>
+              <EditableText k="landing_trust" style={{ color: '#8a9e8d', fontSize: '10px', fontWeight: 500, lineHeight: '1.4' }} />
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

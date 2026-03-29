@@ -3,15 +3,35 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { ShieldCheck, Clock, Monitor, CheckCircle2 } from 'lucide-react';
 
+const API = 'https://cbtmansatas.drudox.workers.dev';
+
 const FEATURES = [
   { icon: ShieldCheck, title: 'Anti-Kecurangan', desc: 'Deteksi pindah tab',    green: true  },
   { icon: Clock,       title: 'Auto-Save',        desc: 'Jawaban aman tersimpan', green: false },
   { icon: Monitor,     title: 'Berbasis Web',      desc: 'Tanpa install aplikasi', green: false },
 ];
 
+const DEFAULTS: Record<string, string> = {
+  landing_badge: 'Penerimaan Murid Baru 2025/2026',
+  landing_title_1: 'Ujian Seleksi',
+  landing_title_2: 'Penerimaan',
+  landing_title_3: 'Murid Baru',
+  landing_subtitle: 'Sistem CBT resmi MAN 1 Tasikmalaya. Aman, terstruktur, dan hasil tersedia langsung setelah ujian.',
+  landing_login_hint: 'NISN & tanggal lahir (DDMMYYYY) sebagai password',
+  landing_trust: 'Data terintegrasi langsung dari sistem pendaftaran PMB.',
+};
+
 export default function LandingPage() {
   const [mounted, setMounted] = useState(false);
-  useEffect(() => { const t = setTimeout(() => setMounted(true), 60); return () => clearTimeout(t); }, []);
+  const [s, setS] = useState(DEFAULTS);
+
+  useEffect(() => {
+    const t = setTimeout(() => setMounted(true), 60);
+    fetch(`${API}/api/settings`).then(r => r.json()).then(r => {
+      if (r.success && r.data) setS(prev => ({ ...prev, ...r.data }));
+    }).catch(() => {});
+    return () => clearTimeout(t);
+  }, []);
 
   const fade = (delay: number) =>
     `transition-all duration-500 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`;
@@ -48,19 +68,19 @@ export default function LandingPage() {
           <span className="inline-flex items-center gap-1.5 font-bold uppercase"
             style={{ background: '#e2ebe3', border: '1.5px solid #c4d4c7', color: '#2d6644', fontSize: '11px', letterSpacing: '0.09em', padding: '6px 14px', borderRadius: '999px' }}>
             <span className="w-1.5 h-1.5 rounded-full" style={{ background: '#2d7a4f' }} />
-            Penerimaan Murid Baru 2025/2026
+            {s.landing_badge}
           </span>
         </div>
 
         {/* Headline */}
         <div className={`${fade(0)} mb-3`} style={style(80)}>
-          <p className="font-black leading-[1.06]" style={{ color: '#1e2e22', fontSize: 'clamp(2.1rem,9vw,2.6rem)', letterSpacing: '-1.2px' }}>Ujian Seleksi</p>
-          <p className="font-black leading-[1.06]" style={{ color: '#2d7a4f', fontSize: 'clamp(2.1rem,9vw,2.6rem)', letterSpacing: '-1.2px' }}>Penerimaan</p>
-          <p className="font-black leading-[1.06]" style={{ color: '#6b7c6e', fontSize: 'clamp(2.1rem,9vw,2.6rem)', letterSpacing: '-1.2px' }}>Murid Baru</p>
+          <p className="font-black leading-[1.06]" style={{ color: '#1e2e22', fontSize: 'clamp(2.1rem,9vw,2.6rem)', letterSpacing: '-1.2px' }}>{s.landing_title_1}</p>
+          <p className="font-black leading-[1.06]" style={{ color: '#2d7a4f', fontSize: 'clamp(2.1rem,9vw,2.6rem)', letterSpacing: '-1.2px' }}>{s.landing_title_2}</p>
+          <p className="font-black leading-[1.06]" style={{ color: '#6b7c6e', fontSize: 'clamp(2.1rem,9vw,2.6rem)', letterSpacing: '-1.2px' }}>{s.landing_title_3}</p>
         </div>
 
         <p className={`${fade(0)} mb-8 leading-relaxed max-w-xs`} style={{ ...style(140), color: '#8a9e8d', fontSize: '13.5px', fontWeight: 500 }}>
-          Sistem CBT resmi MAN 1 Tasikmalaya. Aman, terstruktur, dan hasil tersedia langsung setelah ujian.
+          {s.landing_subtitle}
         </p>
 
         {/* CTA */}
@@ -75,7 +95,7 @@ export default function LandingPage() {
           </Link>
         </div>
         <p className={`${fade(0)} text-center mb-8`} style={{ ...style(200), color: '#a8b9aa', fontSize: '11px', fontWeight: 500 }}>
-          NISN &amp; tanggal lahir (DDMMYYYY) sebagai password
+          {s.landing_login_hint}
         </p>
 
         {/* Feature cards */}
@@ -95,7 +115,7 @@ export default function LandingPage() {
         <div className={`${fade(0)} flex items-center gap-2.5 mb-8`} style={{ ...style(320), background: '#fff', border: '1.5px solid #d4dbd4', borderRadius: '14px', padding: '11px 14px' }}>
           <CheckCircle2 size={13} strokeWidth={2.2} color="#2d7a4f" className="shrink-0" />
           <p style={{ color: '#8a9e8d', fontSize: '11px', fontWeight: 500, lineHeight: 1.4 }}>
-            Data terintegrasi langsung dari sistem pendaftaran PMB.
+            {s.landing_trust}
           </p>
         </div>
       </main>

@@ -34,11 +34,20 @@ student.get('/exams', async (c) => {
     ).bind(user.sub).first<any>() || null;
   }
 
-  // Filter berdasarkan target_jalur
+  // Cek exam assignments per-user
+  const { results: assignments } = await c.env.DB.prepare(
+    'SELECT exam_id FROM cbt_exam_assignments WHERE user_id = ? AND user_type = ?'
+  ).bind(user.sub, userType).all();
+  const assignedExamIds = new Set((assignments as any[]).map(a => a.exam_id));
+
+  // Filter: cek assignment dulu, lalu target_jalur
   const filtered = (results as any[]).filter(exam => {
-    if (!exam.target_jalur) return true; // NULL = semua boleh
-    if (!jadwalData?.jalur) return true; // cbt_user tanpa jalur = boleh semua
-    // target_jalur berisi comma-separated, cek apakah jalur siswa ada di dalamnya (case-insensitive)
+    // Cek apakah ujian ini punya assignment list
+    // Kalau user sudah di-assign langsung → selalu tampil
+    if (assignedExamIds.has(exam.id)) return true;
+    // target_jalur filter
+    if (!exam.target_jalur) return true;
+    if (!jadwalData?.jalur) return true;
     const targets = exam.target_jalur.split(',').map((t: string) => t.trim().toLowerCase());
     return targets.includes(jadwalData.jalur.trim().toLowerCase());
   });
@@ -283,13 +292,13 @@ student.post('/sessions/:sessionId/cheat', async (c) => {
   if (!session) return c.json(err('Sesi tidak ditemukan'), 404);
 
   const newW = (session.cheat_warnings || 0) + 1;
-  const autoSubmit = newW >= 3;
+  const shouldLock = newW >= 3;
+  // 3x pelanggaran → KUNCI sesi (bukan auto submit), proktor bisa buka
   await c.env.DB.prepare(
-    `UPDATE cbt_exam_sessions SET cheat_warnings=?, status=?, ${autoSubmit ? 'finished_at=?,' : ''} last_heartbeat=? WHERE id=?`
-  ).bind(newW, autoSubmit ? 'force_submitted' : 'active', ...(autoSubmit ? [now()] : []), now(), sessionId).run();
+    `UPDATE cbt_exam_sessions SET cheat_warnings=?, is_time_locked=?, last_heartbeat=? WHERE id=?`
+  ).bind(newW, shouldLock ? 1 : 0, now(), sessionId).run();
 
-  if (autoSubmit) await computeScore(c.env.DB, sessionId, session.exam_id, session.user_id, session.user_type);
-  return c.json(ok({ warnings: newW, auto_submitted: autoSubmit }));
+  return c.json(ok({ warnings: newW, locked: shouldLock }));
 });
 
 // ── POST submit ───────────────────────────────────────────────

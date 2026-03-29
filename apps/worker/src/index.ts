@@ -55,6 +55,18 @@ app.get('/r2/*', async (c) => {
   return new Response(object.body, { headers });
 });
 
+// ── Public Settings (untuk landing page) ─────────────────────
+app.get('/api/settings', async (c) => {
+  try {
+    const { results } = await c.env.DB.prepare(
+      "SELECT key, value FROM cbt_settings WHERE key LIKE 'landing_%'"
+    ).all();
+    const map: Record<string, string> = {};
+    for (const r of results as any[]) map[r.key] = r.value;
+    return c.json({ success: true, data: map });
+  } catch { return c.json({ success: true, data: {} }); }
+});
+
 // ── 404 Fallback ─────────────────────────────────────────────
 
 app.notFound((c) => {

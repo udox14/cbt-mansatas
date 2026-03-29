@@ -41,7 +41,7 @@ proctor.get('/sessions', async (c) => {
     JOIN cbt_exams e ON e.id = es.exam_id
     LEFT JOIN pendaftar p ON es.user_id = p.id AND es.user_type = 'pendaftar'
     LEFT JOIN cbt_users cu ON es.user_id = cu.id AND es.user_type = 'cbt_user'
-    WHERE es.room_id = ?`;
+    WHERE es.room_id = ? AND (p.id IS NOT NULL OR cu.id IS NOT NULL)`;
   const params: any[] = [user.room_id];
   if (examId) { sql += ' AND es.exam_id = ?'; params.push(examId); }
   sql += ' ORDER BY full_name';
