@@ -1,4 +1,4 @@
-const API = process.env.NEXT_PUBLIC_API_URL || 'https://cbtmansatas.drudox.workers.dev';
+const API = '';
 
 interface ApiRes<T = any> { success: boolean; data?: T; message?: string; error?: string }
 
