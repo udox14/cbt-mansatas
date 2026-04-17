@@ -1,0 +1,100 @@
+name: Deploy to Cloudflare
+
+on:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  # ─────────────────────────────────────────────────────────────
+  # Step 1: Deteksi perubahan — tentukan apa yang perlu deploy
+  # ─────────────────────────────────────────────────────────────
+  detect-changes:
+    name: 🔍 Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      deploy_web: ${{ steps.filter.outputs.web }}
+      deploy_worker: ${{ steps.filter.outputs.worker }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2   # perlu 2 commit untuk bisa diff
+
+      - name: Filter changed paths
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            web:
+              - 'apps/web/**'
+            worker:
+              - 'apps/worker/**'
+
+  # ─────────────────────────────────────────────────────────────
+  # Step 2a: Deploy Worker (hanya jika apps/worker berubah)
+  # ─────────────────────────────────────────────────────────────
+  deploy-worker:
+    name: 🚀 Deploy Worker
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.deploy_worker == 'true'
+    defaults:
+      run:
+        working-directory: apps/worker
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: apps/worker/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Deploy Worker ke Cloudflare
+        run: npx wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+  # ─────────────────────────────────────────────────────────────
+  # Step 2b: Deploy Web / Pages (hanya jika apps/web berubah)
+  # ─────────────────────────────────────────────────────────────
+  deploy-web:
+    name: 🌐 Deploy Web (Pages)
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.deploy_web == 'true'
+    defaults:
+      run:
+        working-directory: apps/web
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Next.js (static export)
+        run: npm run build
+
+      - name: Deploy ke Cloudflare Pages
+        run: npx wrangler pages deploy out --project-name=cbtmansatas --branch=main
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

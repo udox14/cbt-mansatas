@@ -4,7 +4,7 @@ compatibility_date = "2024-06-01"
 
 [vars]
 JWT_SECRET = "8aa2b78e51e9585d6c75135c46fb14d61f40d81ada5993b83b5f0bac0660342c"
-CORS_ORIGIN = "https://cbtmansatas.pages.dev"
+CORS_ORIGIN = "https://cbtmansatas.pages.dev,https://pmb.man1tasikmalaya.sch.id"
 
 # Bind ke database PMB EXISTING — JANGAN buat baru!
 [[d1_databases]]
