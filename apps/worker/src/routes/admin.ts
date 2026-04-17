@@ -10,15 +10,18 @@ import { hashPassword, generateToken, newId, ok, err, now } from '../utils/helpe
 const admin = new Hono<{ Bindings: Env }>();
 admin.use('*', authMiddleware, requireRole('admin'));
 
+// Jalur yang tidak ikut CBT — selalu dikecualikan dari semua query CBT
+const EXCLUDE_JALUR_COND = "UPPER(jalur) NOT LIKE '%PRESTASI%'";
+
 // ══════════════════════════════════════════════════════════════
 // ROOMS — auto-sync dari pendaftar.ruang_tes
 // ══════════════════════════════════════════════════════════════
 
 admin.get('/rooms', async (c) => {
-  // Rooms + jumlah pendaftar + proktor yang di-assign
+  // Rooms + jumlah pendaftar non-Prestasi + proktor yang di-assign
   const { results } = await c.env.DB.prepare(
     `SELECT r.*,
-       (SELECT COUNT(*) FROM pendaftar p WHERE p.ruang_tes = r.room_name) as jumlah_peserta,
+       (SELECT COUNT(*) FROM pendaftar p WHERE p.ruang_tes = r.room_name AND ${EXCLUDE_JALUR_COND}) as jumlah_peserta,
        (SELECT GROUP_CONCAT(cu.nama_lengkap, ', ') FROM cbt_users cu WHERE cu.room_id = r.id AND cu.role = 'proctor') as proctor_names
      FROM cbt_rooms r ORDER BY r.room_name`
   ).all();
@@ -27,9 +30,9 @@ admin.get('/rooms', async (c) => {
 
 // Sync ruangan dari data pendaftar — buat otomatis dari ruang_tes
 admin.post('/rooms/sync', async (c) => {
-  // Ambil semua ruang_tes unik dari pendaftar
+  // Ambil semua ruang_tes unik dari pendaftar — excludes jalur Prestasi
   const { results: rooms } = await c.env.DB.prepare(
-    `SELECT DISTINCT ruang_tes FROM pendaftar WHERE ruang_tes IS NOT NULL AND ruang_tes != '' ORDER BY ruang_tes`
+    `SELECT DISTINCT ruang_tes FROM pendaftar WHERE ruang_tes IS NOT NULL AND ruang_tes != '' AND ${EXCLUDE_JALUR_COND} ORDER BY ruang_tes`
   ).all();
 
   let created = 0;
@@ -207,16 +210,14 @@ admin.delete('/users/:id', async (c) => {
 
 admin.get('/pendaftar', async (c) => {
   const room  = c.req.query('ruang_tes');
-  const jalur = c.req.query('jalur'); // e.g. jalur=REGULER+MURNI
+  const jalur = c.req.query('jalur');
   let sql = `SELECT id, nisn, nama_lengkap, no_pendaftaran, ruang_tes, jalur, asal_sekolah,
             jenis_kelamin, tanggal_lahir, tanggal_tes, sesi_tes,
             status_verifikasi, status_kelulusan
-     FROM pendaftar`;
-  const conditions: string[] = [];
+     FROM pendaftar WHERE ${EXCLUDE_JALUR_COND}`;
   const params: string[] = [];
-  if (room)  { conditions.push('ruang_tes = ?'); params.push(room); }
-  if (jalur) { conditions.push('LOWER(jalur) = LOWER(?)'); params.push(jalur); }
-  if (conditions.length) sql += ' WHERE ' + conditions.join(' AND ');
+  if (room)  { sql += ' AND ruang_tes = ?'; params.push(room); }
+  if (jalur) { sql += ' AND LOWER(jalur) = LOWER(?)'; params.push(jalur); }
   sql += ' ORDER BY ruang_tes, nama_lengkap';
   const { results } = await c.env.DB.prepare(sql).bind(...params).all();
   return c.json(ok(results));
@@ -242,7 +243,7 @@ admin.put('/pendaftar/:id/ruang', async (c) => {
   return c.json(ok(null, 'Ruangan berhasil diperbarui'));
 });
 
-// Statistik pendaftar
+// Statistik pendaftar (exclude Prestasi)
 admin.get('/pendaftar/stats', async (c) => {
   const { results } = await c.env.DB.prepare(
     `SELECT
@@ -250,15 +251,15 @@ admin.get('/pendaftar/stats', async (c) => {
        COUNT(ruang_tes) as assigned_room,
        COUNT(DISTINCT ruang_tes) as total_rooms,
        COUNT(tanggal_tes) as has_schedule
-     FROM pendaftar`
+     FROM pendaftar WHERE ${EXCLUDE_JALUR_COND}`
   ).first<any>();
   return c.json(ok(results));
 });
 
-// Daftar jalur unik dari pendaftar
+// Daftar jalur unik dari pendaftar (exclude Prestasi)
 admin.get('/pendaftar/jalur', async (c) => {
   const { results } = await c.env.DB.prepare(
-    `SELECT DISTINCT jalur FROM pendaftar WHERE jalur IS NOT NULL AND jalur != '' ORDER BY jalur`
+    `SELECT DISTINCT jalur FROM pendaftar WHERE jalur IS NOT NULL AND jalur != '' AND ${EXCLUDE_JALUR_COND} ORDER BY jalur`
   ).all();
   return c.json(ok(results.map((r: any) => r.jalur)));
 });
@@ -288,13 +289,17 @@ admin.post('/exams', async (c) => {
   const id = newId();
   await c.env.DB.prepare(
     `INSERT INTO cbt_exams (id, title, description, duration_minutes, rules_text, completion_message,
-     is_score_visible, randomize_questions, randomize_options, active_status, passing_score, created_by, target_jalur)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`
+     is_score_visible, randomize_questions, randomize_options, active_status, passing_score, created_by,
+     target_jalur, cheat_limit, cheat_action, enforce_fullscreen)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
   ).bind(id, b.title, b.description || null, b.duration_minutes || 60,
     b.rules_text || null, b.completion_message || 'Ujian telah selesai. Terima kasih.',
     b.is_score_visible ? 1 : 0, b.randomize_questions ? 1 : 0,
     b.randomize_options ? 1 : 0, b.active_status || 'draft', b.passing_score || 0, user.sub,
-    b.target_jalur || null
+    b.target_jalur || null,
+    b.cheat_limit || 3,
+    b.cheat_action || 'lock',
+    b.enforce_fullscreen ? 1 : 0
   ).run();
   return c.json(ok({ id }, 'Ujian dibuat'), 201);
 });
@@ -304,10 +309,13 @@ admin.put('/exams/:id', async (c) => {
   await c.env.DB.prepare(
     `UPDATE cbt_exams SET title=?, description=?, duration_minutes=?, rules_text=?,
      completion_message=?, is_score_visible=?, randomize_questions=?, randomize_options=?,
-     active_status=?, passing_score=?, target_jalur=?, updated_at=? WHERE id=?`
+     active_status=?, passing_score=?, target_jalur=?,
+     cheat_limit=?, cheat_action=?, enforce_fullscreen=?, updated_at=? WHERE id=?`
   ).bind(b.title, b.description, b.duration_minutes, b.rules_text, b.completion_message,
     b.is_score_visible ? 1 : 0, b.randomize_questions ? 1 : 0, b.randomize_options ? 1 : 0,
-    b.active_status, b.passing_score || 0, b.target_jalur || null, now(), c.req.param('id')
+    b.active_status, b.passing_score || 0, b.target_jalur || null,
+    b.cheat_limit || 3, b.cheat_action || 'lock', b.enforce_fullscreen ? 1 : 0,
+    now(), c.req.param('id')
   ).run();
   return c.json(ok(null, 'Ujian diperbarui'));
 });

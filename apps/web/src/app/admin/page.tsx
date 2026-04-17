@@ -19,7 +19,7 @@ import {
 interface Room { id: string; room_name: string; capacity: number; jumlah_peserta?: number }
 interface Proctor { id: string; username: string; full_name: string; role: string; room_id: string | null; room_name?: string }
 interface Pendaftar { id: string; nisn: string; nama_lengkap: string; no_pendaftaran: string; ruang_tes: string; jalur: string; asal_sekolah: string; jenis_kelamin: string; tanggal_lahir: string; tanggal_tes: string; sesi_tes: string }
-interface Exam { id: string; title: string; description: string | null; duration_minutes: number; active_status: string; question_count: number; is_score_visible: number; randomize_questions: number; randomize_options: number; rules_text: string | null; completion_message: string; passing_score: number; target_jalur: string | null }
+interface Exam { id: string; title: string; description: string | null; duration_minutes: number; active_status: string; question_count: number; is_score_visible: number; randomize_questions: number; randomize_options: number; rules_text: string | null; completion_message: string; passing_score: number; target_jalur: string | null; cheat_limit: number; cheat_action: string; enforce_fullscreen: number }
 interface Question { id: string; question_text: string; question_type: string; question_order: number; image_url: string | null; audio_url: string | null; options: QOption[] }
 interface QOption { id?: string; option_label: string; option_text: string; image_url: string | null; is_correct: number }
 type Page = 'exams' | 'peserta' | 'rooms' | 'pelaksana' | 'settings';
@@ -355,12 +355,35 @@ function ExamsPage() {
               <RichEditor value={editExam.rules_text || ''} onChange={v => setEditExam({ ...editExam, rules_text: v })} minHeight={80} /></div>
             <Input label="Pesan Selesai" value={editExam.completion_message || ''} onChange={e => setEditExam({ ...editExam, completion_message: e.target.value })} />
             <div className="flex flex-wrap gap-4 text-xs text-gray-600">
-              {[{ k: 'randomize_questions', l: 'Acak Soal' }, { k: 'randomize_options', l: 'Acak Opsi' }, { k: 'is_score_visible', l: 'Tampilkan Skor' }].map(c => (
+              {[{ k: 'randomize_questions', l: 'Acak Soal' }, { k: 'randomize_options', l: 'Acak Opsi' }, { k: 'is_score_visible', l: 'Tampilkan Skor' }, { k: 'enforce_fullscreen', l: 'Wajib Fullscreen' }].map(c => (
                 <label key={c.k} className="flex items-center gap-1.5 cursor-pointer">
                   <input type="checkbox" checked={!!(editExam as any)[c.k]} onChange={e => setEditExam({ ...editExam, [c.k]: e.target.checked ? 1 : 0 })} className="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
                   {c.l}
                 </label>
               ))}
+            </div>
+            {/* ── Anti-Cheat ── */}
+            <div style={{ background: '#fffbeb', border: '1.5px solid #fde68a', borderRadius: '12px', padding: '14px' }}>
+              <p style={{ color: '#92400e', fontSize: '11px', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', marginBottom: '10px' }}>⚠ Pengaturan Anti-Cheat</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: '#b45309', marginBottom: '5px' }}>Batas Pelanggaran</label>
+                  <input type="number" min={1} max={20} value={(editExam as any).cheat_limit ?? 3}
+                    onChange={e => setEditExam({ ...editExam, cheat_limit: parseInt(e.target.value) || 3 })}
+                    style={{ width: '100%', padding: '8px 10px', fontSize: '13px', fontWeight: 700, border: '1.5px solid #fde68a', borderRadius: '9px', outline: 'none', background: '#fff', color: '#1e2e22' }} />
+                  <p style={{ fontSize: '10px', color: '#92400e', marginTop: '3px' }}>Berapa kali pelanggaran sebelum aksi dieksekusi</p>
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: '#b45309', marginBottom: '5px' }}>Aksi Saat Batas Tercapai</label>
+                  <select value={(editExam as any).cheat_action ?? 'lock'}
+                    onChange={e => setEditExam({ ...editExam, cheat_action: e.target.value })}
+                    style={{ width: '100%', padding: '8px 10px', fontSize: '12.5px', fontWeight: 600, border: '1.5px solid #fde68a', borderRadius: '9px', outline: 'none', background: '#fff', color: '#1e2e22' }}>
+                    <option value="lock">🔒 Kunci Sesi (Proktor buka)</option>
+                    <option value="auto_submit">📤 Submit Otomatis</option>
+                  </select>
+                  <p style={{ fontSize: '10px', color: '#92400e', marginTop: '3px' }}>"Kunci" = proktor bisa buka kembali sesi</p>
+                </div>
+              </div>
             </div>
             <div className="flex gap-2 justify-end pt-2">
               <Button variant="secondary" size="sm" onClick={() => setEditExam(null)}>Batal</Button>
@@ -460,12 +483,35 @@ function ExamsPage() {
               <RichEditor value={editExam.rules_text || ''} onChange={v => setEditExam({ ...editExam, rules_text: v })} minHeight={80} /></div>
             <Input label="Pesan Selesai" value={editExam.completion_message || ''} onChange={e => setEditExam({ ...editExam, completion_message: e.target.value })} />
             <div className="flex flex-wrap gap-4 text-xs text-gray-600">
-              {[{ k: 'randomize_questions', l: 'Acak Soal' }, { k: 'randomize_options', l: 'Acak Opsi' }, { k: 'is_score_visible', l: 'Tampilkan Skor' }].map(c => (
+              {[{ k: 'randomize_questions', l: 'Acak Soal' }, { k: 'randomize_options', l: 'Acak Opsi' }, { k: 'is_score_visible', l: 'Tampilkan Skor' }, { k: 'enforce_fullscreen', l: 'Wajib Fullscreen' }].map(c => (
                 <label key={c.k} className="flex items-center gap-1.5 cursor-pointer">
                   <input type="checkbox" checked={!!(editExam as any)[c.k]} onChange={e => setEditExam({ ...editExam, [c.k]: e.target.checked ? 1 : 0 })} className="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
                   {c.l}
                 </label>
               ))}
+            </div>
+            {/* ── Anti-Cheat ── */}
+            <div style={{ background: '#fffbeb', border: '1.5px solid #fde68a', borderRadius: '12px', padding: '14px' }}>
+              <p style={{ color: '#92400e', fontSize: '11px', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', marginBottom: '10px' }}>⚠ Pengaturan Anti-Cheat</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: '#b45309', marginBottom: '5px' }}>Batas Pelanggaran</label>
+                  <input type="number" min={1} max={20} value={(editExam as any).cheat_limit ?? 3}
+                    onChange={e => setEditExam({ ...editExam, cheat_limit: parseInt(e.target.value) || 3 })}
+                    style={{ width: '100%', padding: '8px 10px', fontSize: '13px', fontWeight: 700, border: '1.5px solid #fde68a', borderRadius: '9px', outline: 'none', background: '#fff', color: '#1e2e22' }} />
+                  <p style={{ fontSize: '10px', color: '#92400e', marginTop: '3px' }}>Berapa kali pelanggaran sebelum aksi dieksekusi</p>
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: '#b45309', marginBottom: '5px' }}>Aksi Saat Batas Tercapai</label>
+                  <select value={(editExam as any).cheat_action ?? 'lock'}
+                    onChange={e => setEditExam({ ...editExam, cheat_action: e.target.value })}
+                    style={{ width: '100%', padding: '8px 10px', fontSize: '12.5px', fontWeight: 600, border: '1.5px solid #fde68a', borderRadius: '9px', outline: 'none', background: '#fff', color: '#1e2e22' }}>
+                    <option value="lock">🔒 Kunci Sesi (Proktor buka)</option>
+                    <option value="auto_submit">📤 Submit Otomatis</option>
+                  </select>
+                  <p style={{ fontSize: '10px', color: '#92400e', marginTop: '3px' }}>"Kunci" = proktor bisa buka kembali sesi</p>
+                </div>
+              </div>
             </div>
             <div className="flex gap-2 justify-end pt-2">
               <Button variant="secondary" size="sm" onClick={() => setEditExam(null)}>Batal</Button>

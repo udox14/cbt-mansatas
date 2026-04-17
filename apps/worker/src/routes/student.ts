@@ -220,7 +220,16 @@ student.get('/sessions/:sessionId/questions', async (c) => {
     'SELECT question_id, selected_option_id, essay_answer, is_doubtful FROM cbt_student_answers WHERE session_id=?'
   ).bind(c.req.param('sessionId')).all();
 
-  return c.json(ok({ questions: ordered, answers }));
+  // Ambil konfigurasi anti-cheat dari ujian
+  const examCfg = await c.env.DB.prepare(
+    'SELECT cheat_limit, cheat_action, enforce_fullscreen FROM cbt_exams WHERE id=?'
+  ).bind(session.exam_id).first<any>();
+
+  return c.json(ok({ questions: ordered, answers,
+    cheat_limit: examCfg?.cheat_limit ?? 3,
+    cheat_action: examCfg?.cheat_action ?? 'lock',
+    enforce_fullscreen: !!(examCfg?.enforce_fullscreen),
+  }));
 });
 
 // ── POST batch save jawaban ───────────────────────────────────
@@ -286,19 +295,58 @@ student.post('/sessions/:sessionId/heartbeat', async (c) => {
 student.post('/sessions/:sessionId/cheat', async (c) => {
   const user = c.get('user');
   const sessionId = c.req.param('sessionId');
+  const body = await c.req.json<{ violation_type?: string }>().catch(() => ({} as { violation_type?: string }));
+  const violationType = body.violation_type || 'tab_switch';
+
+  // JOIN dengan exam agar dapat konfigurasi sekaligus
   const session = await c.env.DB.prepare(
-    'SELECT * FROM cbt_exam_sessions WHERE id=? AND user_id=?'
+    `SELECT es.*, e.cheat_limit, e.cheat_action
+     FROM cbt_exam_sessions es
+     JOIN cbt_exams e ON e.id = es.exam_id
+     WHERE es.id = ? AND es.user_id = ?`
   ).bind(sessionId, user.sub).first<any>();
   if (!session) return c.json(err('Sesi tidak ditemukan'), 404);
 
+  const cheatLimit  = session.cheat_limit  ?? 3;
+  const cheatAction = session.cheat_action ?? 'lock';
   const newW = (session.cheat_warnings || 0) + 1;
-  const shouldLock = newW >= 3;
-  // 3x pelanggaran → KUNCI sesi (bukan auto submit), proktor bisa buka
-  await c.env.DB.prepare(
-    `UPDATE cbt_exam_sessions SET cheat_warnings=?, is_time_locked=?, last_heartbeat=? WHERE id=?`
-  ).bind(newW, shouldLock ? 1 : 0, now(), sessionId).run();
+  const limitReached = newW >= cheatLimit;
 
-  return c.json(ok({ warnings: newW, locked: shouldLock }));
+  // Catat log pelanggaran dengan timestamp
+  await c.env.DB.prepare(
+    'INSERT INTO cbt_cheat_logs (id, session_id, violation_type, happened_at) VALUES (?,?,?,?)'
+  ).bind(newId(), sessionId, violationType, now()).run();
+
+  let actionTaken: string | null = null;
+
+  if (limitReached) {
+    if (cheatAction === 'auto_submit') {
+      // Auto-submit: tandai force_submitted & hitung skor
+      await c.env.DB.prepare(
+        `UPDATE cbt_exam_sessions SET cheat_warnings=?, status='force_submitted', finished_at=?, last_heartbeat=? WHERE id=?`
+      ).bind(newW, now(), now(), sessionId).run();
+      try { await computeScore(c.env.DB, sessionId, session.exam_id, session.user_id, session.user_type); } catch {}
+      actionTaken = 'auto_submit';
+    } else {
+      // Lock: kunci sesi, proktor bisa buka kembali
+      await c.env.DB.prepare(
+        `UPDATE cbt_exam_sessions SET cheat_warnings=?, is_time_locked=1, last_heartbeat=? WHERE id=?`
+      ).bind(newW, now(), sessionId).run();
+      actionTaken = 'lock';
+    }
+  } else {
+    await c.env.DB.prepare(
+      `UPDATE cbt_exam_sessions SET cheat_warnings=?, last_heartbeat=? WHERE id=?`
+    ).bind(newW, now(), sessionId).run();
+  }
+
+  return c.json(ok({
+    warnings: newW,
+    limit: cheatLimit,
+    action_taken: actionTaken,
+    locked: actionTaken === 'lock',
+    force_submitted: actionTaken === 'auto_submit',
+  }));
 });
 
 // ── POST submit ───────────────────────────────────────────────

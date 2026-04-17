@@ -7,6 +7,11 @@ import type { Env } from '../types';
 import { authMiddleware, requireRole } from '../middleware/auth';
 import { ok, err, now } from '../utils/helpers';
 
+const VIOLATION_LABELS: Record<string, string> = {
+  tab_switch:       'Pindah Tab / Minimize Window',
+  fullscreen_exit:  'Keluar Fullscreen',
+};
+
 const proctor = new Hono<{ Bindings: Env }>();
 proctor.use('*', authMiddleware, requireRole('proctor'));
 
@@ -83,6 +88,29 @@ proctor.post('/sessions/:id/unlock', async (c) => {
     `UPDATE cbt_exam_sessions SET is_time_locked = 0, last_heartbeat = ? WHERE id = ?`
   ).bind(now(), c.req.param('id')).run();
   return c.json(ok(null, 'Sesi berhasil dibuka'));
+});
+
+// ── GET cheat logs per sesi ───────────────────────────────────
+proctor.get('/sessions/:id/cheat-logs', async (c) => {
+  const user = c.get('user');
+  // Verifikasi sesi milik ruangan proktor ini
+  const session = await c.env.DB.prepare(
+    'SELECT id FROM cbt_exam_sessions WHERE id = ? AND room_id = ?'
+  ).bind(c.req.param('id'), user.room_id).first();
+  if (!session) return c.json(err('Sesi tidak ditemukan di ruangan Anda'), 404);
+
+  const { results } = await c.env.DB.prepare(
+    'SELECT id, violation_type, happened_at FROM cbt_cheat_logs WHERE session_id = ? ORDER BY happened_at ASC'
+  ).bind(c.req.param('id')).all();
+
+  const enriched = (results as any[]).map((row, idx) => ({
+    no: idx + 1,
+    violation_type: row.violation_type,
+    violation_label: VIOLATION_LABELS[row.violation_type] || row.violation_type,
+    happened_at: row.happened_at,
+  }));
+
+  return c.json(ok(enriched));
 });
 
 export default proctor;

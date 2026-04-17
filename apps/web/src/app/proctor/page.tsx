@@ -2,8 +2,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { GET, POST } from '@/lib/api';
-import { LoadingScreen, EmptyState, ToastProvider, useToast, Confirm, Spinner } from '@/components/ui';
-import { LogOut, Wifi, WifiOff, CheckCircle2, RefreshCw } from 'lucide-react';
+import { LoadingScreen, EmptyState, ToastProvider, useToast, Confirm, Spinner, Modal } from '@/components/ui';
+import { LogOut, Wifi, WifiOff, CheckCircle2, RefreshCw, ClipboardList } from 'lucide-react';
 
 const C = {
   bg: '#f4f6f4', white: '#fff', border: '#e0e5e0', borderLight: '#edf0ed', borderMid: '#d4dbd4',
@@ -22,6 +22,9 @@ function ProctorContent() {
   const [sessions, setSessions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [resetTarget, setResetTarget] = useState<any>(null);
+  const [logTarget, setLogTarget]   = useState<any>(null);  // sesi yang dibuka log-nya
+  const [cheatLogs, setCheatLogs]   = useState<any[]>([]);
+  const [loadingLog, setLoadingLog] = useState(false);
 
   const fetchData = useCallback(async () => {
     const [t, s] = await Promise.all([GET('/api/proctor/token'), GET('/api/proctor/sessions')]);
@@ -49,6 +52,15 @@ function ProctorContent() {
     await POST(`/api/proctor/sessions/${session.id}/unlock`);
     toast('success', `Sesi ${session.full_name} berhasil dibuka`);
     fetchData();
+  };
+
+  const openLog = async (session: any) => {
+    setLogTarget(session);
+    setCheatLogs([]);
+    setLoadingLog(true);
+    const r = await GET(`/api/proctor/sessions/${session.id}/cheat-logs`);
+    if (r.success) setCheatLogs(r.data || []);
+    setLoadingLog(false);
   };
 
   if (authLoading || loading) return <LoadingScreen />;
@@ -143,7 +155,7 @@ function ProctorContent() {
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
                   <thead>
                     <tr style={{ background: C.bg, borderBottom: `1.5px solid ${C.borderMid}` }}>
-                      {['Peserta', 'Status', 'Progres', 'Pelanggaran', 'Aksi'].map((h, i) => (
+                    {['Peserta', 'Status', 'Progres', 'Pelanggaran', 'Aksi'].map((h, i) => (
                         <th key={h} style={{ padding: '9px 14px', textAlign: i === 0 ? 'left' : 'center', color: C.textMid, fontSize: '10.5px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>{h}</th>
                       ))}
                     </tr>
@@ -172,6 +184,13 @@ function ProctorContent() {
                           <td style={{ padding: '10px 14px', textAlign: 'center', fontWeight: s.cheat_warnings > 0 ? 700 : 400, color: s.cheat_warnings > 0 ? '#dc2626' : C.textFaint }}>{s.cheat_warnings}</td>
                           <td style={{ padding: '10px 14px', textAlign: 'center' }}>
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                              {/* Tombol log pelanggaran */}
+                              <button onClick={() => openLog(s)}
+                                style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', color: '#1a5fa8', fontSize: '11px', fontWeight: 700, background: '#e0f0ff', border: '1.5px solid #bfdbfe', borderRadius: '8px', padding: '4px 8px', cursor: 'pointer' }}
+                                title="Lihat log pelanggaran">
+                                <ClipboardList size={11} strokeWidth={2.5} />
+                                {s.cheat_warnings > 0 ? s.cheat_warnings : ''}
+                              </button>
                               {isLocked && (
                                 <button onClick={() => handleUnlock(s)} style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', color: '#b45309', fontSize: '11px', fontWeight: 700, background: '#fffbeb', border: '1.5px solid #fde68a', borderRadius: '8px', padding: '4px 10px', cursor: 'pointer' }}>
                                   Buka Kunci
@@ -201,6 +220,59 @@ function ProctorContent() {
       <Confirm open={!!resetTarget} onClose={() => setResetTarget(null)} onConfirm={handleReset}
         title="Reset Sesi?" danger={false} confirmText="Reset"
         message={`Reset device lock untuk ${resetTarget?.full_name}?`} />
+
+      {/* ── MODAL: Log Pelanggaran ── */}
+      <Modal open={!!logTarget} onClose={() => setLogTarget(null)} title={`Log Pelanggaran — ${logTarget?.full_name || ''}`}>
+        {loadingLog ? (
+          <div style={{ padding: '24px', textAlign: 'center' }}><Spinner size={20} /></div>
+        ) : cheatLogs.length === 0 ? (
+          <div style={{ padding: '20px', textAlign: 'center', color: C.textFaint, fontSize: '13px' }}>
+            ✅ Tidak ada pelanggaran tercatat untuk peserta ini.
+          </div>
+        ) : (
+          <div>
+            <div style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ background: '#fef2f2', color: '#dc2626', fontSize: '11px', fontWeight: 700, padding: '3px 10px', borderRadius: '999px' }}>
+                {cheatLogs.length}x pelanggaran
+              </span>
+            </div>
+            <div style={{ border: `1.5px solid ${C.borderMid}`, borderRadius: '12px', overflow: 'hidden' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                <thead>
+                  <tr style={{ background: C.bg, borderBottom: `1.5px solid ${C.borderMid}` }}>
+                    {['No', 'Jenis Pelanggaran', 'Waktu (WIB)'].map((h, i) => (
+                      <th key={h} style={{ padding: '8px 12px', textAlign: i === 0 ? 'center' : 'left', color: C.textMid, fontSize: '10.5px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {cheatLogs.map((log: any, i: number) => {
+                    const dt = new Date(log.happened_at);
+                    const timeStr = isNaN(dt.getTime()) ? log.happened_at
+                      : dt.toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                    return (
+                      <tr key={i} style={{ borderBottom: i < cheatLogs.length - 1 ? `1px solid ${C.borderLight}` : 'none' }}>
+                        <td style={{ padding: '9px 12px', textAlign: 'center', color: '#dc2626', fontWeight: 800, fontSize: '13px' }}>{log.no}</td>
+                        <td style={{ padding: '9px 12px', color: C.text, fontWeight: 600 }}>
+                          <span style={{
+                            display: 'inline-flex', alignItems: 'center', gap: '5px',
+                            background: log.violation_type === 'fullscreen_exit' ? '#fffbeb' : '#fef2f2',
+                            color: log.violation_type === 'fullscreen_exit' ? '#b45309' : '#dc2626',
+                            fontSize: '11px', fontWeight: 700, padding: '3px 9px', borderRadius: '999px'
+                          }}>
+                            {log.violation_type === 'fullscreen_exit' ? '🖥' : '🔀'} {log.violation_label}
+                          </span>
+                        </td>
+                        <td style={{ padding: '9px 12px', color: C.textMuted, fontFamily: 'monospace', fontSize: '11.5px' }}>{timeStr}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

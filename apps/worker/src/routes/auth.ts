@@ -85,13 +85,18 @@ auth.post('/login', async (c) => {
 
   // ── 3. Cek tabel pendaftar (PMB existing, login pakai NISN + tanggal lahir) ──
   const pendaftar = await c.env.DB.prepare(
-    'SELECT id, nisn, nama_lengkap, tanggal_lahir, ruang_tes, no_pendaftaran FROM pendaftar WHERE nisn = ?'
+    'SELECT id, nisn, nama_lengkap, tanggal_lahir, ruang_tes, no_pendaftaran, jalur FROM pendaftar WHERE nisn = ?'
   ).bind(uname).first<any>();
   // #region agent log
   fetch('http://127.0.0.1:7906/ingest/9b78c9e9-cb35-4229-9d79-ce7a9a0c95ac',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'cc151f'},body:JSON.stringify({sessionId:'cc151f',runId:'pre-fix',hypothesisId:'H3',location:'apps/worker/src/routes/auth.ts:85',message:'Pendaftar lookup result',data:{username:uname,found:!!pendaftar},timestamp:Date.now()})}).catch(()=>{});
   // #endregion
 
   if (pendaftar) {
+    // Jalur Prestasi tidak mengikuti CBT — tolak login
+    if (pendaftar.jalur && pendaftar.jalur.toUpperCase().includes('PRESTASI')) {
+      return c.json(err('Jalur Prestasi tidak mengikuti Computer Based Test (CBT). Hubungi panitia jika ada pertanyaan.'), 403);
+    }
+
     // Password = tanggal lahir format DDMMYYYY (misal: 22122002)
     // tanggal_lahir di DB bisa format: "2002-12-22", "22-12-2002", "22/12/2002", dll
     const tgl = pendaftar.tanggal_lahir || '';

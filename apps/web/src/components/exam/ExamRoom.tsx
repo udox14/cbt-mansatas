@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { GET, POST } from '@/lib/api';
 import { Modal, Spinner } from '@/components/ui';
-import { Clock, ChevronLeft, ChevronRight, Minus, Plus, Send, AlertTriangle } from 'lucide-react';
+import { Clock, ChevronLeft, ChevronRight, Minus, Plus, Send, AlertTriangle, Maximize } from 'lucide-react';
 
 interface Question {
   index: number; id: string; question_text: string; question_type: string;
@@ -20,6 +20,47 @@ const C = {
   green: '#2d7a4f', greenLight: '#e2ebe3', greenBorder: '#b5d9c4',
 };
 
+// ── Komponen Toast Peringatan ─────────────────────────────────
+// Muncul di atas header (full width), auto-dismiss 15 detik, dengan progress bar
+interface CheatToastProps { msg: string; onDismiss: () => void }
+function CheatToast({ msg, onDismiss }: CheatToastProps) {
+  const [progress, setProgress] = useState(100);
+  useEffect(() => {
+    const total = 15000;
+    const interval = 100;
+    let elapsed = 0;
+    const t = setInterval(() => {
+      elapsed += interval;
+      setProgress(Math.max(0, 100 - (elapsed / total) * 100));
+      if (elapsed >= total) { clearInterval(t); onDismiss(); }
+    }, interval);
+    return () => clearInterval(t);
+  }, [onDismiss]);
+
+  return (
+    <div style={{
+      position: 'sticky', top: 0, zIndex: 50,
+      background: '#991b1b',
+      boxShadow: '0 2px 12px rgba(153,27,27,0.35)',
+    }}>
+      <div style={{ padding: '10px 16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <AlertTriangle size={15} color="#fca5a5" strokeWidth={2.5} style={{ flexShrink: 0 }} />
+        <span style={{ flex: 1, color: '#fff', fontSize: '13px', fontWeight: 700, lineHeight: 1.4 }}>{msg}</span>
+        <button
+          onClick={onDismiss}
+          style={{ background: 'rgba(255,255,255,0.15)', border: 'none', borderRadius: '6px', color: '#fca5a5', fontSize: '11px', fontWeight: 700, padding: '3px 8px', cursor: 'pointer', flexShrink: 0 }}
+        >
+          Tutup
+        </button>
+      </div>
+      {/* Progress bar countdown */}
+      <div style={{ height: '3px', background: 'rgba(255,255,255,0.15)' }}>
+        <div style={{ height: '100%', background: '#fca5a5', width: `${progress}%`, transition: 'width 0.1s linear' }} />
+      </div>
+    </div>
+  );
+}
+
 export default function ExamRoom({ sessionId, startedAt, durationMinutes, onFinish }: ExamRoomProps) {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [answers, setAnswers] = useState<Map<string, Answer>>(new Map());
@@ -31,15 +72,48 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, onFini
   const [fontSize, setFontSize] = useState(16);
   const [timeLeft, setTimeLeft] = useState(0);
   const [cheatCount, setCheatCount] = useState(0);
-  const [cheatMsg, setCheatMsg] = useState('');
+  // Konfigurasi anti-cheat dari server
+  const [cheatLimit, setCheatLimit] = useState(3);
+  const [cheatAction, setCheatAction] = useState<'lock' | 'auto_submit'>('lock');
+  const [enforceFullscreen, setEnforceFullscreen] = useState(false);
+  // Toast peringatan
+  const [toasts, setToasts] = useState<{ id: number; msg: string }[]>([]);
+  // Pesan kunci permanen (bukan toast)
+  const [lockedMsg, setLockedMsg] = useState('');
+  const toastIdRef = useRef(0);
   const dirtyRef = useRef(new Set<string>());
   const submittedRef = useRef(false);
+  const cheatCountRef = useRef(0);
+  const wakeLockRef = useRef<WakeLockSentinel | null>(null);
 
-  // Load questions + saved answers
+  // ── Screen Wake Lock: cegah layar mati selama ujian ─────────
+  const requestWakeLock = useCallback(async () => {
+    if (!('wakeLock' in navigator)) return;
+    try {
+      wakeLockRef.current = await (navigator as any).wakeLock.request('screen');
+    } catch {
+      // Browser tidak support atau izin ditolak — abaikan saja
+    }
+  }, []);
+
+  const addToast = useCallback((msg: string) => {
+    const id = ++toastIdRef.current;
+    setToasts(prev => [...prev, { id, msg }]);
+    return id;
+  }, []);
+  const removeToast = useCallback((id: number) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  }, []);
+
+  // Load questions + saved answers + config anti-cheat
   useEffect(() => {
     const saved = localStorage.getItem(`cbt_font_${sessionId}`);
     if (saved) setFontSize(parseInt(saved));
-    GET<{ questions: Question[]; answers: any[] }>(`/api/student/sessions/${sessionId}/questions`).then(r => {
+    // Aktifkan wake lock secepatnya
+    requestWakeLock();
+    GET<{ questions: Question[]; answers: any[]; cheat_limit: number; cheat_action: string; enforce_fullscreen: boolean }>(
+      `/api/student/sessions/${sessionId}/questions`
+    ).then(r => {
       if (r.success && r.data) {
         setQuestions(r.data.questions);
         const m = new Map<string, Answer>();
@@ -50,10 +124,28 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, onFini
         setAnswers(m);
         const pos = localStorage.getItem(`cbt_pos_${sessionId}`);
         if (pos) setCurrent(parseInt(pos) || 0);
+        // Konfigurasi anti-cheat
+        const limit = r.data.cheat_limit ?? 3;
+        const action = (r.data.cheat_action ?? 'lock') as 'lock' | 'auto_submit';
+        const fs = !!r.data.enforce_fullscreen;
+        setCheatLimit(limit);
+        setCheatAction(action);
+        setEnforceFullscreen(fs);
+        // Minta fullscreen jika diwajibkan
+        if (fs && document.fullscreenEnabled && !document.fullscreenElement) {
+          document.documentElement.requestFullscreen().catch(() => {});
+        }
       }
       setLoading(false);
     });
-  }, [sessionId]);
+    // Release wake lock saat komponen unmount
+    return () => {
+      if (wakeLockRef.current) {
+        wakeLockRef.current.release().catch(() => {});
+        wakeLockRef.current = null;
+      }
+    };
+  }, [sessionId, requestWakeLock]);
 
   // Countdown timer
   useEffect(() => {
@@ -68,14 +160,14 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, onFini
     return () => clearInterval(iv);
   }, [startedAt, durationMinutes]);
 
-  // Auto-sync answers + heartbeat (cek time_locked dari server)
+  // Auto-sync answers + heartbeat
   useEffect(() => {
     const s = setInterval(() => flushAnswers(), 15000);
     const h = setInterval(async () => {
       const r = await POST(`/api/student/sessions/${sessionId}/heartbeat`);
       if (r.data?.time_locked && !submittedRef.current) {
-        setCheatMsg('Waktu ujian Anda telah berakhir. Ujian dikunci oleh sistem.');
-        submittedRef.current = true; // prevent further actions
+        setLockedMsg('Waktu ujian Anda telah berakhir. Ujian dikunci oleh sistem.');
+        submittedRef.current = true;
       }
     }, 15000);
     return () => { clearInterval(s); clearInterval(h); };
@@ -91,28 +183,60 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, onFini
     if (!r.success) ids.forEach(id => dirtyRef.current.add(id));
   }, [answers, sessionId]);
 
-  // Anti-cheat
+  // ── Fungsi deteksi & laporan pelanggaran ──────────────────────
+  const reportViolation = useCallback(async (violationType: 'tab_switch' | 'fullscreen_exit') => {
+    if (submittedRef.current) return;
+    const n = cheatCountRef.current + 1;
+    cheatCountRef.current = n;
+    setCheatCount(n);
+
+    const r = await POST(`/api/student/sessions/${sessionId}/cheat`, { violation_type: violationType });
+    const limit = r.data?.limit ?? cheatLimit;
+    const actionTaken = r.data?.action_taken;
+    const remaining = limit - n;
+
+    if (actionTaken === 'auto_submit') {
+      setLockedMsg(`${limit}x pelanggaran — ujian otomatis dikumpulkan.`);
+      submittedRef.current = true;
+      await handleSubmit(true);
+    } else if (actionTaken === 'lock') {
+      setLockedMsg(`${limit}x pelanggaran — sesi dikunci. Hubungi pengawas untuk melanjutkan.`);
+      submittedRef.current = true;
+    } else {
+      const typeLabel = violationType === 'fullscreen_exit' ? 'Keluar fullscreen' : 'Meninggalkan halaman';
+      addToast(`⚠️ Peringatan ${n}/${limit}: ${typeLabel}! Sisa ${remaining} kesempatan.`);
+    }
+  }, [sessionId, cheatLimit, addToast]);
+
+  // ── Anti-cheat: visibilitychange + fullscreen + keyboard/ctx ──
   useEffect(() => {
     const vis = () => {
-      if (document.hidden && !submittedRef.current) {
-        const n = cheatCount + 1;
-        setCheatCount(n);
-        POST(`/api/student/sessions/${sessionId}/cheat`);
-        if (n >= 3) { setCheatMsg('3x pelanggaran — ujian otomatis dikirim.'); handleSubmit(true); }
-        else { setCheatMsg(`Peringatan ${n}/3: Jangan tinggalkan halaman ujian!`); setTimeout(() => setCheatMsg(''), 4000); }
+      // Re-acquire wake lock jika halaman kembali visible (setelah notifikasi OS, dll)
+      if (!document.hidden && !submittedRef.current) {
+        if (!wakeLockRef.current || wakeLockRef.current.released) requestWakeLock();
+      }
+      if (document.hidden && !submittedRef.current) reportViolation('tab_switch');
+    };
+    const fsChange = () => {
+      if (!document.fullscreenElement && !submittedRef.current && enforceFullscreen) {
+        reportViolation('fullscreen_exit');
       }
     };
     const ctx = (e: MouseEvent) => e.preventDefault();
-    const key = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && ['c','v','a','x','u','s','p'].includes(e.key.toLowerCase())) e.preventDefault(); };
+    const key = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && ['c','v','a','x','u','s','p'].includes(e.key.toLowerCase())) e.preventDefault();
+    };
     document.addEventListener('visibilitychange', vis);
+    document.addEventListener('fullscreenchange', fsChange);
     document.addEventListener('contextmenu', ctx);
     document.addEventListener('keydown', key);
     return () => {
       document.removeEventListener('visibilitychange', vis);
+      document.removeEventListener('fullscreenchange', fsChange);
       document.removeEventListener('contextmenu', ctx);
       document.removeEventListener('keydown', key);
     };
-  }, [cheatCount, sessionId]);
+  }, [enforceFullscreen, reportViolation]);
 
   const setAnswer = useCallback((qId: string, update: Partial<Answer>) => {
     setAnswers(prev => {
@@ -133,7 +257,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, onFini
   }, [sessionId]);
 
   const handleSubmit = useCallback(async (force = false) => {
-    if (submittedRef.current) return;
+    if (submittedRef.current && !force) return;
     submittedRef.current = true;
     setSubmitting(true);
     setShowConfirm(false);
@@ -170,8 +294,21 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, onFini
   return (
     <div className="no-select" style={{ minHeight: '100vh', background: C.bg, display: 'flex', flexDirection: 'column', fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}>
 
+      {/* ── TOAST PERINGATAN (sticky top, full width, di atas header) ── */}
+      {toasts.map(t => (
+        <CheatToast key={t.id} msg={t.msg} onDismiss={() => removeToast(t.id)} />
+      ))}
+
+      {/* ── PESAN KUNCI PERMANEN ── */}
+      {lockedMsg && (
+        <div style={{ background: '#7f1d1d', padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '8px', position: 'sticky', top: 0, zIndex: 50 }}>
+          <AlertTriangle size={15} color="#fca5a5" strokeWidth={2.5} style={{ flexShrink: 0 }} />
+          <span style={{ color: '#fff', fontSize: '13px', fontWeight: 700 }}>{lockedMsg}</span>
+        </div>
+      )}
+
       {/* ── HEADER ── */}
-      <header style={{ position: 'sticky', top: 0, zIndex: 40, background: C.white, borderBottom: `1.5px solid ${C.border}` }}>
+      <header style={{ position: 'sticky', top: toasts.length > 0 ? 'auto' : 0, zIndex: 40, background: C.white, borderBottom: `1.5px solid ${C.border}` }}>
         <div style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', maxWidth: '680px', margin: '0 auto' }}>
 
           {/* timer pill */}
@@ -198,8 +335,23 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, onFini
             </div>
           </div>
 
-          {/* font controls */}
-          <div style={{ display: 'flex', gap: '3px', flexShrink: 0 }}>
+          {/* pelanggaran counter + fullscreen button */}
+          <div style={{ display: 'flex', gap: '5px', flexShrink: 0, alignItems: 'center' }}>
+            {cheatCount > 0 && (
+              <span style={{ fontSize: '10px', fontWeight: 700, color: '#dc2626', background: '#fef2f2', border: '1.5px solid #fecaca', padding: '4px 8px', borderRadius: '8px', whiteSpace: 'nowrap' }}>
+                ⚠ {cheatCount}/{cheatLimit}
+              </span>
+            )}
+            {enforceFullscreen && !document.fullscreenElement && (
+              <button
+                onClick={() => document.documentElement.requestFullscreen().catch(() => {})}
+                style={{ width: '28px', height: '28px', borderRadius: '8px', background: '#fffbeb', border: '1.5px solid #fde68a', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                title="Masuk fullscreen"
+              >
+                <Maximize size={12} strokeWidth={2.5} color="#b45309" />
+              </button>
+            )}
+            {/* font controls */}
             <button onClick={() => changeFontSize(-2)} style={{ width: '28px', height: '28px', borderRadius: '8px', background: C.bg, border: `1.5px solid ${C.borderMid}`, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
               <Minus size={11} strokeWidth={2.5} color="#6b7c6e" />
             </button>
@@ -209,14 +361,6 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, onFini
           </div>
         </div>
       </header>
-
-      {/* ── CHEAT WARNING ── */}
-      {cheatMsg && (
-        <div className="fade-in" style={{ background: '#dc2626', padding: '9px 16px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '7px', position: 'sticky', top: '53px', zIndex: 39 }}>
-          <AlertTriangle size={13} color="#fff" strokeWidth={2.5} />
-          <span style={{ color: '#fff', fontSize: '12px', fontWeight: 700 }}>{cheatMsg}</span>
-        </div>
-      )}
 
       {/* ── QUESTION ── */}
       <main style={{ flex: 1, padding: '12px', maxWidth: '680px', width: '100%', margin: '0 auto', paddingBottom: '80px' }}>
