@@ -22,10 +22,10 @@ const KemenagLogo = () => (
 
 const BadgeStatus = ({ status }: { status: string | null }) => {
   if (status === 'submitted' || status === 'force_submitted')
-    return <span style={{ background:'#e2ebe3', color:'#2d6644', fontSize:'10px', fontWeight:700, padding:'4px 10px', borderRadius:'999px', whiteSpace:'nowrap' }}>Selesai</span>;
+    return <span style={{ background: '#e2ebe3', color: '#2d6644', fontSize: '10px', fontWeight: 700, padding: '4px 10px', borderRadius: '999px', whiteSpace: 'nowrap' }}>Selesai</span>;
   if (status === 'active')
-    return <span style={{ background:'#e0f0ff', color:'#1a5fa8', fontSize:'10px', fontWeight:700, padding:'4px 10px', borderRadius:'999px', whiteSpace:'nowrap' }}>Berlangsung</span>;
-  return <span style={{ background:'#f1f1f0', color:'#6b7c6e', fontSize:'10px', fontWeight:700, padding:'4px 10px', borderRadius:'999px', whiteSpace:'nowrap' }}>Belum Mulai</span>;
+    return <span style={{ background: '#e0f0ff', color: '#1a5fa8', fontSize: '10px', fontWeight: 700, padding: '4px 10px', borderRadius: '999px', whiteSpace: 'nowrap' }}>Berlangsung</span>;
+  return <span style={{ background: '#f1f1f0', color: '#6b7c6e', fontSize: '10px', fontWeight: 700, padding: '4px 10px', borderRadius: '999px', whiteSpace: 'nowrap' }}>Belum Mulai</span>;
 };
 
 const ActionBtn = ({ label, variant, onClick, disabled }: { label: string; variant: 'primary' | 'resume'; onClick: () => void; disabled?: boolean }) => (
@@ -147,7 +147,7 @@ function StudentContent() {
             <KemenagLogo />
             <div>
               <p className="font-extrabold leading-tight" style={{ color: '#1e2e22', fontSize: '11px', letterSpacing: '0.01em' }}>MAN 1 TASIKMALAYA</p>
-              <p className="font-semibold italic mt-0.5" style={{ color: '#7a9e86', fontSize: '10px', letterSpacing: '0.05em' }}>Bangkit · Maju · Juara</p>
+              <p className="font-semibold italic mt-0.5" style={{ color: '#7a9e86', fontSize: '10px', letterSpacing: '0.05em' }}>Bangkit · Jaya · Juara</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -158,7 +158,7 @@ function StudentContent() {
             <button onClick={logout}
               className="flex items-center justify-center shrink-0"
               style={{ width: '34px', height: '34px', borderRadius: '10px', background: '#fef2f2', border: '1.5px solid #fecaca', cursor: 'pointer' }}>
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#dc2626" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#dc2626" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></svg>
             </button>
           </div>
         </div>
@@ -261,11 +261,11 @@ function StudentContent() {
         {selected?.rules_text
           ? <div className="prose prose-sm max-w-none text-sm" style={{ color: '#4a6655' }} dangerouslySetInnerHTML={{ __html: selected.rules_text }} />
           : <div className="space-y-2 text-sm" style={{ color: '#4a6655' }}>
-              <p>1. Kerjakan ujian dengan jujur dan mandiri.</p>
-              <p>2. Dilarang membuka tab atau aplikasi lain selama ujian.</p>
-              <p>3. Pelanggaran 3 kali akan otomatis mengumpulkan ujian.</p>
-              <p>4. Pastikan koneksi internet stabil.</p>
-            </div>}
+            <p>1. Kerjakan ujian dengan jujur dan mandiri.</p>
+            <p>2. Dilarang membuka tab atau aplikasi lain selama ujian.</p>
+            <p>3. Pelanggaran 3 kali akan otomatis mengumpulkan ujian.</p>
+            <p>4. Pastikan koneksi internet stabil.</p>
+          </div>}
         <div className="mt-5">
           <button onClick={toToken} className="w-full flex items-center justify-between active:scale-[0.98] transition-transform"
             style={{ background: '#2d7a4f', padding: '14px 18px', borderRadius: '14px', border: 'none', cursor: 'pointer' }}>
