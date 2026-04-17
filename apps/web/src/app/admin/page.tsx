@@ -369,16 +369,16 @@ function ExamsPage() {
               </p>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <Input 
-                    type="number" 
-                    label="Batas Pelanggaran" 
+                  <Input
+                    type="number"
+                    label="Batas Pelanggaran"
                     value={String((editExam as any).cheat_limit ?? 3)}
                     onChange={e => setEditExam({ ...editExam, cheat_limit: parseInt(e.target.value) || 3 })}
                   />
                   <p className="text-[10px] text-amber-700 mt-1">Berapa kali pelanggaran sebelum aksi dieksekusi</p>
                 </div>
                 <div>
-                  <Select 
+                  <Select
                     label="Aksi Saat Batas Tercapai"
                     value={(editExam as any).cheat_action ?? 'lock'}
                     onChange={e => setEditExam({ ...editExam, cheat_action: e.target.value })}
@@ -503,16 +503,16 @@ function ExamsPage() {
               </p>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <Input 
-                    type="number" 
-                    label="Batas Pelanggaran" 
+                  <Input
+                    type="number"
+                    label="Batas Pelanggaran"
                     value={String((editExam as any).cheat_limit ?? 3)}
                     onChange={e => setEditExam({ ...editExam, cheat_limit: parseInt(e.target.value) || 3 })}
                   />
                   <p className="text-[10px] text-amber-700 mt-1">Berapa kali pelanggaran sebelum aksi dieksekusi</p>
                 </div>
                 <div>
-                  <Select 
+                  <Select
                     label="Aksi Saat Batas Tercapai"
                     value={(editExam as any).cheat_action ?? 'lock'}
                     onChange={e => setEditExam({ ...editExam, cheat_action: e.target.value })}
@@ -1751,7 +1751,7 @@ function SettingsPage() {
               <img src="/kemenag.png" alt="" width={36} height={36} style={{ objectFit: 'contain' }} />
               <div>
                 <p style={{ color: '#1e2e22', fontSize: '11px', fontWeight: 800, letterSpacing: '0.01em' }}>MAN 1 TASIKMALAYA</p>
-                <p style={{ color: '#7a9e86', fontSize: '9.5px', fontWeight: 600, fontStyle: 'italic' }}>Bangkit ·  · Juara</p>
+                <p style={{ color: '#7a9e86', fontSize: '9.5px', fontWeight: 600, fontStyle: 'italic' }}>Bangkit · Jaya · Juara</p>
               </div>
             </div>
 
