@@ -363,25 +363,31 @@ function ExamsPage() {
               ))}
             </div>
             {/* ── Anti-Cheat ── */}
-            <div style={{ background: '#fffbeb', border: '1.5px solid #fde68a', borderRadius: '12px', padding: '14px' }}>
-              <p style={{ color: '#92400e', fontSize: '11px', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', marginBottom: '10px' }}>⚠ Pengaturan Anti-Cheat</p>
+            <div className="border border-amber-200 bg-amber-50 rounded-lg p-3 space-y-3">
+              <p className="text-xs font-bold text-amber-800 uppercase tracking-wide flex items-center gap-1.5">
+                <Shield size={14} className="text-amber-600" /> Pengaturan Anti-Cheat
+              </p>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: '#b45309', marginBottom: '5px' }}>Batas Pelanggaran</label>
-                  <input type="number" min={1} max={20} value={(editExam as any).cheat_limit ?? 3}
+                  <Input 
+                    type="number" 
+                    label="Batas Pelanggaran" 
+                    value={String((editExam as any).cheat_limit ?? 3)}
                     onChange={e => setEditExam({ ...editExam, cheat_limit: parseInt(e.target.value) || 3 })}
-                    style={{ width: '100%', padding: '8px 10px', fontSize: '13px', fontWeight: 700, border: '1.5px solid #fde68a', borderRadius: '9px', outline: 'none', background: '#fff', color: '#1e2e22' }} />
-                  <p style={{ fontSize: '10px', color: '#92400e', marginTop: '3px' }}>Berapa kali pelanggaran sebelum aksi dieksekusi</p>
+                  />
+                  <p className="text-[10px] text-amber-700 mt-1">Berapa kali pelanggaran sebelum aksi dieksekusi</p>
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: '#b45309', marginBottom: '5px' }}>Aksi Saat Batas Tercapai</label>
-                  <select value={(editExam as any).cheat_action ?? 'lock'}
+                  <Select 
+                    label="Aksi Saat Batas Tercapai"
+                    value={(editExam as any).cheat_action ?? 'lock'}
                     onChange={e => setEditExam({ ...editExam, cheat_action: e.target.value })}
-                    style={{ width: '100%', padding: '8px 10px', fontSize: '12.5px', fontWeight: 600, border: '1.5px solid #fde68a', borderRadius: '9px', outline: 'none', background: '#fff', color: '#1e2e22' }}>
-                    <option value="lock">🔒 Kunci Sesi (Proktor buka)</option>
-                    <option value="auto_submit">📤 Submit Otomatis</option>
-                  </select>
-                  <p style={{ fontSize: '10px', color: '#92400e', marginTop: '3px' }}>"Kunci" = proktor bisa buka kembali sesi</p>
+                    options={[
+                      { value: 'lock', label: '🔒 Kunci Sesi (Proktor buka)' },
+                      { value: 'auto_submit', label: '📤 Submit Otomatis' }
+                    ]}
+                  />
+                  <p className="text-[10px] text-amber-700 mt-1">"Kunci" = proktor bisa buka kembali sesi</p>
                 </div>
               </div>
             </div>
@@ -491,25 +497,31 @@ function ExamsPage() {
               ))}
             </div>
             {/* ── Anti-Cheat ── */}
-            <div style={{ background: '#fffbeb', border: '1.5px solid #fde68a', borderRadius: '12px', padding: '14px' }}>
-              <p style={{ color: '#92400e', fontSize: '11px', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', marginBottom: '10px' }}>⚠ Pengaturan Anti-Cheat</p>
+            <div className="border border-amber-200 bg-amber-50 rounded-lg p-3 space-y-3">
+              <p className="text-xs font-bold text-amber-800 uppercase tracking-wide flex items-center gap-1.5">
+                <Shield size={14} className="text-amber-600" /> Pengaturan Anti-Cheat
+              </p>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: '#b45309', marginBottom: '5px' }}>Batas Pelanggaran</label>
-                  <input type="number" min={1} max={20} value={(editExam as any).cheat_limit ?? 3}
+                  <Input 
+                    type="number" 
+                    label="Batas Pelanggaran" 
+                    value={String((editExam as any).cheat_limit ?? 3)}
                     onChange={e => setEditExam({ ...editExam, cheat_limit: parseInt(e.target.value) || 3 })}
-                    style={{ width: '100%', padding: '8px 10px', fontSize: '13px', fontWeight: 700, border: '1.5px solid #fde68a', borderRadius: '9px', outline: 'none', background: '#fff', color: '#1e2e22' }} />
-                  <p style={{ fontSize: '10px', color: '#92400e', marginTop: '3px' }}>Berapa kali pelanggaran sebelum aksi dieksekusi</p>
+                  />
+                  <p className="text-[10px] text-amber-700 mt-1">Berapa kali pelanggaran sebelum aksi dieksekusi</p>
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: '#b45309', marginBottom: '5px' }}>Aksi Saat Batas Tercapai</label>
-                  <select value={(editExam as any).cheat_action ?? 'lock'}
+                  <Select 
+                    label="Aksi Saat Batas Tercapai"
+                    value={(editExam as any).cheat_action ?? 'lock'}
                     onChange={e => setEditExam({ ...editExam, cheat_action: e.target.value })}
-                    style={{ width: '100%', padding: '8px 10px', fontSize: '12.5px', fontWeight: 600, border: '1.5px solid #fde68a', borderRadius: '9px', outline: 'none', background: '#fff', color: '#1e2e22' }}>
-                    <option value="lock">🔒 Kunci Sesi (Proktor buka)</option>
-                    <option value="auto_submit">📤 Submit Otomatis</option>
-                  </select>
-                  <p style={{ fontSize: '10px', color: '#92400e', marginTop: '3px' }}>"Kunci" = proktor bisa buka kembali sesi</p>
+                    options={[
+                      { value: 'lock', label: '🔒 Kunci Sesi (Proktor buka)' },
+                      { value: 'auto_submit', label: '📤 Submit Otomatis' }
+                    ]}
+                  />
+                  <p className="text-[10px] text-amber-700 mt-1">"Kunci" = proktor bisa buka kembali sesi</p>
                 </div>
               </div>
             </div>
