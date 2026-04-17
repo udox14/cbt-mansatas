@@ -15,6 +15,9 @@ const auth = new Hono<{ Bindings: Env }>();
 
 auth.post('/login', async (c) => {
   const { username, password } = await c.req.json<{ username: string; password: string }>();
+  // #region agent log
+  fetch('http://127.0.0.1:7906/ingest/9b78c9e9-cb35-4229-9d79-ce7a9a0c95ac',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'cc151f'},body:JSON.stringify({sessionId:'cc151f',runId:'pre-fix',hypothesisId:'H2',location:'apps/worker/src/routes/auth.ts:18',message:'Login request received',data:{usernameLength:username?.length||0,origin:c.req.header('origin')||null,host:c.req.header('host')||null},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
   if (!username || !password) return c.json(err('Username dan password wajib diisi'), 400);
 
   const uname = username.trim();
@@ -24,6 +27,9 @@ auth.post('/login', async (c) => {
   const admin = await c.env.DB.prepare(
     'SELECT id, username, password, nama_lengkap FROM admins WHERE username = ?'
   ).bind(uname).first<any>();
+  // #region agent log
+  fetch('http://127.0.0.1:7906/ingest/9b78c9e9-cb35-4229-9d79-ce7a9a0c95ac',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'cc151f'},body:JSON.stringify({sessionId:'cc151f',runId:'pre-fix',hypothesisId:'H3',location:'apps/worker/src/routes/auth.ts:29',message:'Admin lookup result',data:{username:uname,found:!!admin},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
 
   if (admin) {
     // Password admins PMB: cek format PBKDF2 (ada ':') atau plain text
@@ -51,6 +57,9 @@ auth.post('/login', async (c) => {
   const cbtUser = await c.env.DB.prepare(
     'SELECT * FROM cbt_users WHERE username = ? AND is_active = 1'
   ).bind(uname).first<any>();
+  // #region agent log
+  fetch('http://127.0.0.1:7906/ingest/9b78c9e9-cb35-4229-9d79-ce7a9a0c95ac',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'cc151f'},body:JSON.stringify({sessionId:'cc151f',runId:'pre-fix',hypothesisId:'H3',location:'apps/worker/src/routes/auth.ts:58',message:'CBT user lookup result',data:{username:uname,found:!!cbtUser},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
 
   if (cbtUser) {
     // Support both PBKDF2 (ada ':') dan plain text (lama)
@@ -78,6 +87,9 @@ auth.post('/login', async (c) => {
   const pendaftar = await c.env.DB.prepare(
     'SELECT id, nisn, nama_lengkap, tanggal_lahir, ruang_tes, no_pendaftaran FROM pendaftar WHERE nisn = ?'
   ).bind(uname).first<any>();
+  // #region agent log
+  fetch('http://127.0.0.1:7906/ingest/9b78c9e9-cb35-4229-9d79-ce7a9a0c95ac',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'cc151f'},body:JSON.stringify({sessionId:'cc151f',runId:'pre-fix',hypothesisId:'H3',location:'apps/worker/src/routes/auth.ts:85',message:'Pendaftar lookup result',data:{username:uname,found:!!pendaftar},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
 
   if (pendaftar) {
     // Password = tanggal lahir format DDMMYYYY (misal: 22122002)

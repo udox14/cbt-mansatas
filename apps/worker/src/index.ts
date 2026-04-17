@@ -17,12 +17,28 @@ const app = new Hono<{ Bindings: Env }>();
 // ── Global Middleware ────────────────────────────────────────
 
 app.use('*', async (c, next) => {
+  // #region agent log
+  fetch('http://127.0.0.1:7906/ingest/9b78c9e9-cb35-4229-9d79-ce7a9a0c95ac',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'cc151f'},body:JSON.stringify({sessionId:'cc151f',runId:'pre-fix',hypothesisId:'H1',location:'apps/worker/src/index.ts:20',message:'Incoming request context',data:{origin:c.req.header('origin')||null,host:c.req.header('host')||null,path:c.req.path,method:c.req.method,configuredCorsOrigin:c.env.CORS_ORIGIN||null},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
+  const allowedOrigins = (c.env.CORS_ORIGIN || '*')
+    .split(',')
+    .map((v) => v.trim())
+    .filter(Boolean);
+  const reqOrigin = c.req.header('origin');
+
   const corsMiddleware = cors({
-    origin: c.env.CORS_ORIGIN || '*',
+    origin: (origin) => {
+      if (allowedOrigins.includes('*')) return origin || '*';
+      if (!origin) return '';
+      return allowedOrigins.includes(origin) ? origin : '';
+    },
     allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowHeaders: ['Content-Type', 'Authorization'],
     maxAge: 86400,
   });
+  // #region agent log
+  fetch('http://127.0.0.1:7906/ingest/9b78c9e9-cb35-4229-9d79-ce7a9a0c95ac',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'cc151f'},body:JSON.stringify({sessionId:'cc151f',runId:'post-fix',hypothesisId:'H1',location:'apps/worker/src/index.ts:36',message:'CORS decision',data:{origin:reqOrigin||null,allowedOrigins,allowed:reqOrigin?allowedOrigins.includes('*')||allowedOrigins.includes(reqOrigin):true},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
   return corsMiddleware(c, next);
 });
 
@@ -76,6 +92,9 @@ app.notFound((c) => {
 // ── Error Handler ────────────────────────────────────────────
 
 app.onError((e, c) => {
+  // #region agent log
+  fetch('http://127.0.0.1:7906/ingest/9b78c9e9-cb35-4229-9d79-ce7a9a0c95ac',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'cc151f'},body:JSON.stringify({sessionId:'cc151f',runId:'pre-fix',hypothesisId:'H4',location:'apps/worker/src/index.ts:82',message:'Unhandled worker error',data:{path:c.req.path,method:c.req.method,errorMessage:e.message},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
   console.error('Worker Error:', e.message, e.stack);
   return c.json({ success: false, error: 'Terjadi kesalahan server' }, 500);
 });
