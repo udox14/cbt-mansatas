@@ -57,7 +57,7 @@ export default function LoginPage() {
           <img src="/kemenag.png" alt="Kemenag" width={40} height={40} style={{ objectFit: 'contain', flexShrink: 0 }} />
           <div>
             <p className="font-extrabold leading-tight" style={{ color: '#1e2e22', fontSize: '12px', letterSpacing: '0.01em' }}>MAN 1 TASIKMALAYA</p>
-            <p className="font-semibold italic mt-0.5" style={{ color: '#7a9e86', fontSize: '10px', letterSpacing: '0.06em' }}>Bangkit · Maju · Juara</p>
+            <p className="font-semibold italic mt-0.5" style={{ color: '#7a9e86', fontSize: '10px', letterSpacing: '0.06em' }}>Bangkit · Jaya · Juara</p>
           </div>
         </div>
 

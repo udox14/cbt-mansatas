@@ -92,7 +92,7 @@ function ProctorContent() {
             <KemenagLogo />
             <div>
               <p style={{ color: C.text, fontSize: '11px', fontWeight: 800, letterSpacing: '0.01em', lineHeight: 1.2 }}>MAN 1 TASIKMALAYA</p>
-              <p style={{ color: '#7a9e86', fontSize: '9.5px', fontWeight: 600, fontStyle: 'italic', letterSpacing: '0.05em', marginTop: '1px' }}>Bangkit · Maju · Juara</p>
+              <p style={{ color: '#7a9e86', fontSize: '9.5px', fontWeight: 600, fontStyle: 'italic', letterSpacing: '0.05em', marginTop: '1px' }}>Bangkit · Jaya · Juara</p>
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
