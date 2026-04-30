@@ -12,6 +12,291 @@ admin.use('*', authMiddleware, requireRole('admin'));
 
 // Jalur yang tidak ikut CBT — selalu dikecualikan dari semua query CBT
 const EXCLUDE_JALUR_COND = "UPPER(jalur) NOT LIKE '%PRESTASI%'";
+const DEFAULT_AI_MODEL = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
+const SUPPORTED_AI_MODELS = {
+  'llama-hemat': {
+    id: '@cf/meta/llama-3.1-8b-instruct-fp8-fast',
+    label: 'Llama 3.1 8B FP8 Fast',
+    schemaMode: 'response_format',
+  },
+  'llama-terbaik': {
+    id: '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
+    label: 'Llama 3.3 70B FP8 Fast',
+    schemaMode: 'response_format',
+  },
+  'qwen-seimbang': {
+    id: '@cf/qwen/qwen3-30b-a3b-fp8',
+    label: 'Qwen 3 30B A3B FP8',
+    schemaMode: 'response_format',
+  },
+  'mistral-konteks': {
+    id: '@cf/mistralai/mistral-small-3.1-24b-instruct',
+    label: 'Mistral Small 3.1 24B',
+    schemaMode: 'guided_json',
+  },
+} as const;
+
+type DifficultyKey = 'easy' | 'medium' | 'hard';
+
+interface GeneratedQuestionOption {
+  option_label: string;
+  option_text: string;
+  is_correct: number;
+  image_url: string | null;
+}
+
+interface GeneratedQuestion {
+  question_text: string;
+  question_type: 'multiple_choice';
+  question_order: number;
+  image_url: string | null;
+  audio_url: string | null;
+  points: number;
+  options: GeneratedQuestionOption[];
+  ai_meta?: {
+    subject: string;
+    topic: string;
+    difficulty: DifficultyKey;
+    explanation: string;
+  } | null;
+}
+
+interface GenerationBlueprint {
+  subject: string;
+  topic: string;
+  question_count: number;
+  focus?: string;
+}
+
+type SupportedModelKey = keyof typeof SUPPORTED_AI_MODELS;
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function toHtmlFragment(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  return trimmed
+    .split(/\n{2,}/)
+    .map((part) => `<p>${escapeHtml(part).replace(/\n/g, '<br />')}</p>`)
+    .join('');
+}
+
+function normalizeOptionLabel(index: number): string {
+  return String.fromCharCode(65 + index);
+}
+
+function normalizeDifficultyDistribution(
+  input: Partial<Record<DifficultyKey, number>> | undefined,
+  questionCount: number
+): Record<DifficultyKey, number> {
+  const base = {
+    easy: Math.max(1, Math.round(questionCount * 0.3)),
+    medium: Math.max(1, Math.round(questionCount * 0.5)),
+    hard: 0,
+  };
+  base.hard = Math.max(0, questionCount - base.easy - base.medium);
+
+  const provided = {
+    easy: Math.max(0, Number(input?.easy || 0)),
+    medium: Math.max(0, Number(input?.medium || 0)),
+    hard: Math.max(0, Number(input?.hard || 0)),
+  };
+
+  const hasCustom = provided.easy + provided.medium + provided.hard > 0;
+  const dist = hasCustom ? provided : base;
+  const total = dist.easy + dist.medium + dist.hard;
+
+  if (total === questionCount) return dist;
+  if (total === 0) return normalizeDifficultyDistribution(undefined, questionCount);
+
+  const keys: DifficultyKey[] = ['easy', 'medium', 'hard'];
+  const scaled = { easy: 0, medium: 0, hard: 0 } as Record<DifficultyKey, number>;
+  let assigned = 0;
+
+  for (const key of keys) {
+    scaled[key] = Math.floor((dist[key] / total) * questionCount);
+    assigned += scaled[key];
+  }
+
+  let remainder = questionCount - assigned;
+  for (const key of ['medium', 'easy', 'hard'] as DifficultyKey[]) {
+    if (remainder <= 0) break;
+    scaled[key] += 1;
+    remainder -= 1;
+  }
+
+  return scaled;
+}
+
+function buildQuestionSchema(optionCount: number) {
+  return {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      questions: {
+        type: 'array',
+        minItems: 1,
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            question_text: { type: 'string' },
+            subject: { type: 'string' },
+            topic: { type: 'string' },
+            difficulty: { type: 'string', enum: ['easy', 'medium', 'hard'] },
+            explanation: { type: 'string' },
+            options: {
+              type: 'array',
+              minItems: optionCount,
+              maxItems: optionCount,
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  option_text: { type: 'string' },
+                  is_correct: { type: 'boolean' },
+                },
+                required: ['option_text', 'is_correct'],
+              },
+            },
+          },
+          required: ['question_text', 'subject', 'topic', 'difficulty', 'options'],
+        },
+      },
+    },
+    required: ['questions'],
+  };
+}
+
+function normalizeGeneratedQuestions(
+  rawQuestions: any[],
+  optionCount: number,
+  points: number,
+  existingCount: number
+): GeneratedQuestion[] {
+  return rawQuestions
+    .map((raw, index) => {
+      const rawOptions: any[] = Array.isArray(raw?.options) ? raw.options.slice(0, optionCount) : [];
+      const options: GeneratedQuestionOption[] = rawOptions
+        .map((opt: any, optIndex: number) => ({
+          option_label: normalizeOptionLabel(optIndex),
+          option_text: toHtmlFragment(String(opt?.option_text || '')),
+          is_correct: opt?.is_correct ? 1 : 0,
+          image_url: null,
+        }))
+        .filter((opt: GeneratedQuestionOption) => opt.option_text);
+
+      if (!options.length) return null;
+      if (!options.some((opt) => opt.is_correct)) options[0].is_correct = 1;
+
+      const firstCorrect = options.findIndex((opt) => opt.is_correct);
+      options.forEach((opt, optIndex) => {
+        opt.option_label = normalizeOptionLabel(optIndex);
+        opt.is_correct = optIndex === (firstCorrect >= 0 ? firstCorrect : 0) ? 1 : 0;
+      });
+
+      const questionText = toHtmlFragment(String(raw?.question_text || ''));
+      if (!questionText) return null;
+
+      return {
+        question_text: questionText,
+        question_type: 'multiple_choice' as const,
+        question_order: existingCount + index + 1,
+        image_url: null,
+        audio_url: null,
+        points,
+        options,
+        ai_meta: {
+          subject: String(raw?.subject || ''),
+          topic: String(raw?.topic || ''),
+          difficulty: (['easy', 'medium', 'hard'].includes(String(raw?.difficulty)) ? raw.difficulty : 'medium') as DifficultyKey,
+          explanation: String(raw?.explanation || ''),
+        },
+      };
+    })
+    .filter(Boolean) as GeneratedQuestion[];
+}
+
+async function insertQuestionsForExam(env: Env, examId: string, questions: GeneratedQuestion[]) {
+  for (const q of questions) {
+    const qId = newId();
+    await env.DB.prepare(
+      `INSERT INTO cbt_questions (id, exam_id, question_text, question_type, question_order, image_url, audio_url, points) VALUES (?,?,?,?,?,?,?,?)`
+    ).bind(qId, examId, q.question_text, q.question_type || 'multiple_choice', q.question_order || 0, q.image_url || null, q.audio_url || null, q.points || 1).run();
+    if (q.options?.length) {
+      const stmts = q.options.map((o: any, i: number) =>
+        env.DB.prepare('INSERT INTO cbt_question_options (id, question_id, option_label, option_text, image_url, is_correct, option_order) VALUES (?,?,?,?,?,?,?)')
+          .bind(newId(), qId, o.option_label, o.option_text, o.image_url || null, o.is_correct ? 1 : 0, i)
+      );
+      await env.DB.batch(stmts);
+    }
+  }
+}
+
+function toBlueprints(body: {
+  subject?: string;
+  topic?: string;
+  question_count?: number;
+  question_focus?: string;
+  blueprints?: GenerationBlueprint[];
+}): GenerationBlueprint[] {
+  if (Array.isArray(body.blueprints) && body.blueprints.length) {
+    return body.blueprints
+      .map((item) => ({
+        subject: String(item.subject || '').trim(),
+        topic: String(item.topic || '').trim(),
+        question_count: Math.max(0, Number(item.question_count || 0)),
+        focus: String(item.focus || '').trim(),
+      }))
+      .filter((item) => item.subject && item.topic && item.question_count > 0);
+  }
+
+  const subject = String(body.subject || '').trim();
+  const topic = String(body.topic || '').trim();
+  const questionCount = Math.max(0, Number(body.question_count || 0));
+  return subject && topic && questionCount > 0
+    ? [{ subject, topic, question_count: questionCount, focus: String(body.question_focus || '').trim() }]
+    : [];
+}
+
+function resolveAiModel(chosenModel?: string | null) {
+  if (chosenModel && SUPPORTED_AI_MODELS[chosenModel as SupportedModelKey]) {
+    return SUPPORTED_AI_MODELS[chosenModel as SupportedModelKey];
+  }
+  const byId = Object.values(SUPPORTED_AI_MODELS).find((item) => item.id === chosenModel);
+  return byId || SUPPORTED_AI_MODELS['llama-terbaik'];
+}
+
+function buildAiRequest(
+  model: { id: string; schemaMode: 'response_format' | 'guided_json' },
+  schema: ReturnType<typeof buildQuestionSchema>,
+  messages: { role: string; content: string }[],
+  maxTokens: number
+) {
+  const base = {
+    messages,
+    temperature: 0.5,
+    max_tokens: maxTokens,
+  } as Record<string, unknown>;
+
+  if (model.schemaMode === 'guided_json') {
+    base.guided_json = schema;
+  } else {
+    base.response_format = {
+      type: 'json_schema',
+      json_schema: schema,
+    };
+  }
+
+  return base;
+}
 
 // ══════════════════════════════════════════════════════════════
 // ROOMS — auto-sync dari pendaftar.ruang_tes
@@ -365,20 +650,210 @@ admin.post('/exams/:examId/questions', async (c) => {
 admin.post('/exams/:examId/questions/bulk', async (c) => {
   const examId = c.req.param('examId');
   const { questions } = await c.req.json<{ questions: any[] }>();
-  for (const q of questions) {
-    const qId = newId();
-    await c.env.DB.prepare(
-      `INSERT INTO cbt_questions (id, exam_id, question_text, question_type, question_order, image_url, audio_url, points) VALUES (?,?,?,?,?,?,?,?)`
-    ).bind(qId, examId, q.question_text, q.question_type || 'multiple_choice', q.question_order || 0, q.image_url || null, q.audio_url || null, q.points || 1).run();
-    if (q.options?.length) {
-      const stmts = q.options.map((o: any, i: number) =>
-        c.env.DB.prepare('INSERT INTO cbt_question_options (id, question_id, option_label, option_text, image_url, is_correct, option_order) VALUES (?,?,?,?,?,?,?)')
-          .bind(newId(), qId, o.option_label, o.option_text, o.image_url || null, o.is_correct ? 1 : 0, i)
-      );
-      await c.env.DB.batch(stmts);
-    }
-  }
+  await insertQuestionsForExam(c.env, examId, questions);
   return c.json(ok({ imported: questions.length }, 'Soal berhasil diimport'));
+});
+
+admin.post('/exams/:examId/questions/generate-ai', async (c) => {
+  if (!c.env.AI?.run) {
+    return c.json(err('Binding Workers AI belum aktif di Worker ini'), 500);
+  }
+
+  const examId = c.req.param('examId');
+  const body = await c.req.json<{
+    subject?: string;
+    topic?: string;
+    question_count?: number;
+    option_count?: number;
+    points?: number;
+    language?: string;
+    question_focus?: string;
+    additional_instructions?: string;
+    difficulty_distribution?: Partial<Record<DifficultyKey, number>>;
+    generation_mode?: 'review' | 'direct_save';
+    blueprints?: GenerationBlueprint[];
+    chosen_model?: string;
+  }>();
+
+  const blueprints = toBlueprints(body).slice(0, 12);
+  const questionCount = Math.min(100, Math.max(1, blueprints.reduce((sum, item) => sum + item.question_count, 0)));
+  const optionCount = Math.min(6, Math.max(3, Number(body.option_count || 0)));
+  const points = Math.min(100, Math.max(1, Number(body.points || 1)));
+  const language = String(body.language || 'Bahasa Indonesia').trim();
+  const additionalInstructions = String(body.additional_instructions || '').trim();
+  const generationMode = body.generation_mode === 'direct_save' ? 'direct_save' : 'review';
+  const selectedModel = resolveAiModel(body.chosen_model || c.env.AI_MODEL || DEFAULT_AI_MODEL);
+
+  if (!blueprints.length) {
+    return c.json(err('Minimal satu paket mapel dan materi wajib diisi'), 400);
+  }
+
+  const exam = await c.env.DB.prepare(
+    'SELECT id, title, description FROM cbt_exams WHERE id=?'
+  ).bind(examId).first<{ id: string; title: string; description: string | null }>();
+
+  if (!exam) return c.json(err('Ujian tidak ditemukan'), 404);
+
+  const currentCountRow = await c.env.DB.prepare(
+    'SELECT COUNT(*) as total FROM cbt_questions WHERE exam_id=?'
+  ).bind(examId).first<{ total: number }>();
+  const existingCount = Number(currentCountRow?.total || 0);
+  const difficultyDistribution = normalizeDifficultyDistribution(body.difficulty_distribution, questionCount);
+  const questionSchema = buildQuestionSchema(optionCount);
+
+  const systemPrompt = [
+    `Anda adalah generator soal ujian profesional untuk ${language}.`,
+    'Hasil wajib valid JSON sesuai schema.',
+    `Buat soal pilihan ganda yang jelas, tidak ambigu, dan hanya memiliki satu jawaban benar dari ${optionCount} opsi.`,
+    'Jangan menambahkan markdown, kode blok, atau teks pengantar di luar JSON.',
+    'Variasikan bentuk soal: konsep, aplikasi, analisis singkat, dan pemahaman konteks.',
+    'Gunakan bahasa yang rapi dan cocok untuk ujian sekolah/madrasah.',
+    'Setiap soal harus membawa subject dan topic yang sesuai dengan paket permintaan.',
+  ].join(' ');
+
+  const userPrompt = [
+    `Judul ujian: ${exam.title}`,
+    exam.description ? `Deskripsi ujian: ${exam.description}` : '',
+    `Jumlah soal: ${questionCount}`,
+    `Jumlah opsi per soal: ${optionCount}`,
+    `Distribusi level: mudah ${difficultyDistribution.easy}, sedang ${difficultyDistribution.medium}, sulit ${difficultyDistribution.hard}`,
+    `Paket soal campuran: ${blueprints.map((item, index) => `${index + 1}. ${item.subject} | ${item.topic} | ${item.question_count} soal${item.focus ? ` | fokus: ${item.focus}` : ''}`).join('\n')}`,
+    additionalInstructions ? `Instruksi tambahan: ${additionalInstructions}` : '',
+    'Setiap opsi harus singkat namun cukup membedakan jawaban benar dan pengecoh.',
+    'Jangan menggunakan opsi "semua jawaban benar" atau "semua jawaban salah".',
+  ].filter(Boolean).join('\n');
+
+  const aiResult = await c.env.AI.run(
+    selectedModel.id,
+    buildAiRequest(
+      selectedModel,
+      questionSchema,
+      [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      Math.min(7000, 500 + questionCount * optionCount * 120)
+    )
+  );
+
+  let parsed: any;
+  try {
+    parsed = typeof aiResult?.response === 'string'
+      ? JSON.parse(aiResult.response)
+      : aiResult?.response;
+  } catch {
+    return c.json(err('Respons AI tidak bisa diproses. Coba generate ulang.'), 502);
+  }
+
+  const generatedQuestions = normalizeGeneratedQuestions(
+    Array.isArray(parsed?.questions) ? parsed.questions : [],
+    optionCount,
+    points,
+    existingCount
+  );
+
+  if (!generatedQuestions.length) {
+    return c.json(err('AI tidak menghasilkan soal yang valid. Coba ubah instruksi atau jumlah soal.'), 502);
+  }
+
+  const generationId = newId();
+  let importedCount = 0;
+  if (generationMode === 'direct_save') {
+    await insertQuestionsForExam(c.env, examId, generatedQuestions);
+    importedCount = generatedQuestions.length;
+  }
+
+  await c.env.DB.prepare(
+    `INSERT INTO cbt_ai_generations
+     (id, exam_id, created_by, generation_mode, status, model_name, request_payload, generated_payload, generated_count, imported_count, imported_at, updated_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
+  ).bind(
+    generationId,
+    examId,
+    c.get('user').sub,
+    generationMode,
+    generationMode === 'direct_save' ? 'imported' : 'draft',
+    selectedModel.id,
+    JSON.stringify({ ...body, blueprints, question_count: questionCount }),
+    JSON.stringify(generatedQuestions),
+    generatedQuestions.length,
+    importedCount,
+    importedCount ? now() : null,
+    now()
+  ).run();
+
+  return c.json(ok({
+    questions: generationMode === 'review' ? generatedQuestions : [],
+    meta: {
+      generation_id: generationId,
+      model: selectedModel.id,
+      model_label: selectedModel.label,
+      generated: generatedQuestions.length,
+      requested: questionCount,
+      difficulty_distribution: difficultyDistribution,
+      option_count: optionCount,
+      status: generationMode === 'direct_save' ? 'imported' : 'draft',
+      imported_count: importedCount,
+      generation_mode: generationMode,
+    },
+  }, generationMode === 'direct_save' ? 'Soal AI berhasil dibuat dan langsung disimpan' : 'Draft soal berhasil dibuat'));
+});
+
+admin.get('/exams/:examId/ai-generations', async (c) => {
+  const { results } = await c.env.DB.prepare(
+    `SELECT id, exam_id, generation_mode, status, model_name, generated_count, imported_count, created_at, imported_at
+     FROM cbt_ai_generations
+     WHERE exam_id=?
+     ORDER BY created_at DESC
+     LIMIT 20`
+  ).bind(c.req.param('examId')).all();
+  return c.json(ok(results));
+});
+
+admin.get('/exams/:examId/ai-generations/:generationId', async (c) => {
+  const row = await c.env.DB.prepare(
+    `SELECT * FROM cbt_ai_generations WHERE id=? AND exam_id=?`
+  ).bind(c.req.param('generationId'), c.req.param('examId')).first<any>();
+  if (!row) return c.json(err('Riwayat generasi tidak ditemukan'), 404);
+
+  return c.json(ok({
+    ...row,
+    request_payload: row.request_payload ? JSON.parse(row.request_payload) : null,
+    generated_payload: row.generated_payload ? JSON.parse(row.generated_payload) : [],
+  }));
+});
+
+admin.post('/exams/:examId/ai-generations/:generationId/import', async (c) => {
+  const examId = c.req.param('examId');
+  const generationId = c.req.param('generationId');
+  const body = await c.req.json<{ questions?: GeneratedQuestion[] }>();
+  const row = await c.env.DB.prepare(
+    `SELECT * FROM cbt_ai_generations WHERE id=? AND exam_id=?`
+  ).bind(generationId, examId).first<any>();
+  if (!row) return c.json(err('Riwayat generasi tidak ditemukan'), 404);
+
+  const questions = Array.isArray(body.questions) && body.questions.length
+    ? body.questions
+    : (row.generated_payload ? JSON.parse(row.generated_payload) : []);
+  if (!questions.length) return c.json(err('Draft soal kosong'), 400);
+
+  const currentCountRow = await c.env.DB.prepare(
+    'SELECT COUNT(*) as total FROM cbt_questions WHERE exam_id=?'
+  ).bind(examId).first<{ total: number }>();
+  const existingCount = Number(currentCountRow?.total || 0);
+  const normalized = questions.map((q: GeneratedQuestion, index: number) => ({
+    ...q,
+    question_order: existingCount + index + 1,
+  }));
+
+  await insertQuestionsForExam(c.env, examId, normalized);
+  await c.env.DB.prepare(
+    `UPDATE cbt_ai_generations
+     SET generated_payload=?, imported_count=?, status='imported', imported_at=?, updated_at=?
+     WHERE id=? AND exam_id=?`
+  ).bind(JSON.stringify(normalized), normalized.length, now(), now(), generationId, examId).run();
+
+  return c.json(ok({ imported: normalized.length }, 'Draft AI berhasil diimpor'));
 });
 
 admin.put('/questions/:id', async (c) => {
