@@ -328,6 +328,11 @@ function estimateNeurons(
   };
 }
 
+async function getTableColumns(env: Env, tableName: string): Promise<Set<string>> {
+  const { results } = await env.DB.prepare(`PRAGMA table_info(${tableName})`).all();
+  return new Set((results as any[]).map((row) => String(row.name)));
+}
+
 // ══════════════════════════════════════════════════════════════
 // ROOMS — auto-sync dari pendaftar.ruang_tes
 // ══════════════════════════════════════════════════════════════
@@ -753,18 +758,23 @@ admin.post('/exams/:examId/questions/generate-ai', async (c) => {
     'Jangan menggunakan opsi "semua jawaban benar" atau "semua jawaban salah".',
   ].filter(Boolean).join('\n');
 
-  const aiResult = await c.env.AI.run(
-    selectedModel.id,
-    buildAiRequest(
-      selectedModel,
-      questionSchema,
-      [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-      Math.min(7000, 500 + questionCount * optionCount * 120)
-    )
-  );
+  let aiResult: any;
+  try {
+    aiResult = await c.env.AI.run(
+      selectedModel.id,
+      buildAiRequest(
+        selectedModel,
+        questionSchema,
+        [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        Math.min(7000, 500 + questionCount * optionCount * 120)
+      )
+    );
+  } catch (error: any) {
+    return c.json(err(`Workers AI gagal memproses model ${selectedModel.label}: ${error?.message || 'unknown error'}`), 502);
+  }
 
   let parsed: any;
   try {
@@ -787,6 +797,7 @@ admin.post('/exams/:examId/questions/generate-ai', async (c) => {
   }
 
   const usageStats = estimateNeurons(selectedModel, aiResult?.usage);
+  const aiGenerationColumns = await getTableColumns(c.env, 'cbt_ai_generations');
 
   const generationId = newId();
   let importedCount = 0;
@@ -795,27 +806,43 @@ admin.post('/exams/:examId/questions/generate-ai', async (c) => {
     importedCount = generatedQuestions.length;
   }
 
-  await c.env.DB.prepare(
-    `INSERT INTO cbt_ai_generations
-     (id, exam_id, created_by, generation_mode, status, model_name, request_payload, generated_payload, generated_count, imported_count, prompt_tokens, completion_tokens, estimated_neurons, imported_at, updated_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
-  ).bind(
-    generationId,
-    examId,
-    c.get('user').sub,
-    generationMode,
-    generationMode === 'direct_save' ? 'imported' : 'draft',
-    selectedModel.id,
-    JSON.stringify({ ...body, blueprints, question_count: questionCount }),
-    JSON.stringify(generatedQuestions),
-    generatedQuestions.length,
-    importedCount,
-    usageStats.prompt_tokens,
-    usageStats.completion_tokens,
-    usageStats.estimated_neurons,
-    importedCount ? now() : null,
-    now()
-  ).run();
+  if (aiGenerationColumns.size > 0) {
+    const baseColumns = [
+      'id', 'exam_id', 'created_by', 'generation_mode', 'status', 'model_name',
+      'request_payload', 'generated_payload', 'generated_count', 'imported_count'
+    ];
+    const baseValues = [
+      generationId,
+      examId,
+      c.get('user').sub,
+      generationMode,
+      generationMode === 'direct_save' ? 'imported' : 'draft',
+      selectedModel.id,
+      JSON.stringify({ ...body, blueprints, question_count: questionCount }),
+      JSON.stringify(generatedQuestions),
+      generatedQuestions.length,
+      importedCount,
+    ];
+    const optionalColumns = [
+      aiGenerationColumns.has('prompt_tokens') ? 'prompt_tokens' : null,
+      aiGenerationColumns.has('completion_tokens') ? 'completion_tokens' : null,
+      aiGenerationColumns.has('estimated_neurons') ? 'estimated_neurons' : null,
+      aiGenerationColumns.has('imported_at') ? 'imported_at' : null,
+      aiGenerationColumns.has('updated_at') ? 'updated_at' : null,
+    ].filter(Boolean) as string[];
+    const optionalValues = [
+      aiGenerationColumns.has('prompt_tokens') ? usageStats.prompt_tokens : undefined,
+      aiGenerationColumns.has('completion_tokens') ? usageStats.completion_tokens : undefined,
+      aiGenerationColumns.has('estimated_neurons') ? usageStats.estimated_neurons : undefined,
+      aiGenerationColumns.has('imported_at') ? (importedCount ? now() : null) : undefined,
+      aiGenerationColumns.has('updated_at') ? now() : undefined,
+    ].filter((value) => value !== undefined);
+    const columns = [...baseColumns, ...optionalColumns];
+    const placeholders = columns.map(() => '?').join(',');
+    await c.env.DB.prepare(
+      `INSERT INTO cbt_ai_generations (${columns.join(', ')}) VALUES (${placeholders})`
+    ).bind(...baseValues, ...optionalValues).run();
+  }
 
   return c.json(ok({
     questions: generationMode === 'review' ? generatedQuestions : [],
@@ -838,6 +865,20 @@ admin.post('/exams/:examId/questions/generate-ai', async (c) => {
 });
 
 admin.get('/ai-usage/today', async (c) => {
+  const aiGenerationColumns = await getTableColumns(c.env, 'cbt_ai_generations');
+  if (!aiGenerationColumns.has('estimated_neurons')) {
+    return c.json(ok({
+      usage_date: new Date().toISOString().slice(0, 10),
+      prompt_tokens: 0,
+      completion_tokens: 0,
+      estimated_neurons: 0,
+      daily_limit: 10000,
+      remaining_neurons: 10000,
+      usage_percent: 0,
+      total_generations: 0,
+      note: 'Tracker neurons harian aktif setelah migrasi kolom usage dijalankan.',
+    }));
+  }
   const usageDate = new Date().toISOString().slice(0, 10);
   const row = await c.env.DB.prepare(
     `SELECT
@@ -870,8 +911,17 @@ admin.get('/ai-usage/today', async (c) => {
 });
 
 admin.get('/exams/:examId/ai-generations', async (c) => {
+  const aiGenerationColumns = await getTableColumns(c.env, 'cbt_ai_generations');
+  const selectColumns = [
+    'id', 'exam_id', 'generation_mode', 'status', 'model_name', 'generated_count', 'imported_count',
+    aiGenerationColumns.has('prompt_tokens') ? 'prompt_tokens' : '0 as prompt_tokens',
+    aiGenerationColumns.has('completion_tokens') ? 'completion_tokens' : '0 as completion_tokens',
+    aiGenerationColumns.has('estimated_neurons') ? 'estimated_neurons' : '0 as estimated_neurons',
+    'created_at',
+    aiGenerationColumns.has('imported_at') ? 'imported_at' : 'NULL as imported_at',
+  ];
   const { results } = await c.env.DB.prepare(
-    `SELECT id, exam_id, generation_mode, status, model_name, generated_count, imported_count, prompt_tokens, completion_tokens, estimated_neurons, created_at, imported_at
+    `SELECT ${selectColumns.join(', ')}
      FROM cbt_ai_generations
      WHERE exam_id=?
      ORDER BY created_at DESC
@@ -897,6 +947,7 @@ admin.post('/exams/:examId/ai-generations/:generationId/import', async (c) => {
   const examId = c.req.param('examId');
   const generationId = c.req.param('generationId');
   const body = await c.req.json<{ questions?: GeneratedQuestion[] }>();
+  const aiGenerationColumns = await getTableColumns(c.env, 'cbt_ai_generations');
   const row = await c.env.DB.prepare(
     `SELECT * FROM cbt_ai_generations WHERE id=? AND exam_id=?`
   ).bind(generationId, examId).first<any>();
@@ -917,11 +968,24 @@ admin.post('/exams/:examId/ai-generations/:generationId/import', async (c) => {
   }));
 
   await insertQuestionsForExam(c.env, examId, normalized);
+  const updateParts = [
+    'generated_payload=?',
+    'imported_count=?',
+    "status='imported'",
+  ];
+  const updateValues: any[] = [JSON.stringify(normalized), normalized.length];
+  if (aiGenerationColumns.has('imported_at')) {
+    updateParts.push('imported_at=?');
+    updateValues.push(now());
+  }
+  if (aiGenerationColumns.has('updated_at')) {
+    updateParts.push('updated_at=?');
+    updateValues.push(now());
+  }
+  updateValues.push(generationId, examId);
   await c.env.DB.prepare(
-    `UPDATE cbt_ai_generations
-     SET generated_payload=?, imported_count=?, status='imported', imported_at=?, updated_at=?
-     WHERE id=? AND exam_id=?`
-  ).bind(JSON.stringify(normalized), normalized.length, now(), now(), generationId, examId).run();
+    `UPDATE cbt_ai_generations SET ${updateParts.join(', ')} WHERE id=? AND exam_id=?`
+  ).bind(...updateValues).run();
 
   return c.json(ok({ imported: normalized.length }, 'Draft AI berhasil diimpor'));
 });
