@@ -58,6 +58,9 @@ interface AiGenerateMeta {
   status: 'draft' | 'imported';
   imported_count: number;
   generation_mode: 'review' | 'direct_save';
+  prompt_tokens: number;
+  completion_tokens: number;
+  estimated_neurons: number;
 }
 interface AiHistoryItem {
   id: string;
@@ -66,15 +69,68 @@ interface AiHistoryItem {
   model_name: string;
   generated_count: number;
   imported_count: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  estimated_neurons: number;
   created_at: string;
   imported_at: string | null;
 }
+interface AiUsageToday {
+  usage_date: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  estimated_neurons: number;
+  daily_limit: number;
+  remaining_neurons: number;
+  usage_percent: number;
+  total_generations: number;
+  note: string;
+}
 const AI_MODEL_OPTIONS = [
-  { value: 'llama-hemat', label: 'Llama 3.1 8B FP8 Fast', hint: 'Paling hemat, cocok untuk draft cepat.' },
-  { value: 'qwen-seimbang', label: 'Qwen 3 30B A3B FP8', hint: 'Seimbang untuk kualitas dan biaya.' },
-  { value: 'mistral-konteks', label: 'Mistral Small 3.1 24B', hint: 'Kuat untuk konteks panjang dan paket campuran.' },
-  { value: 'llama-terbaik', label: 'Llama 3.3 70B FP8 Fast', hint: 'Kualitas tertinggi, usage paling besar.' },
+  {
+    value: 'llama-hemat',
+    label: 'Llama 3.1 8B FP8 Fast',
+    hint: 'Paling hemat, cocok untuk draft cepat.',
+    neuronsInput: '4,119 / 1M input',
+    neuronsOutput: '34,868 / 1M output',
+  },
+  {
+    value: 'qwen-seimbang',
+    label: 'Qwen 3 30B A3B FP8',
+    hint: 'Seimbang untuk kualitas dan biaya.',
+    neuronsInput: '4,625 / 1M input',
+    neuronsOutput: '30,475 / 1M output',
+  },
+  {
+    value: 'deepseek-analitis',
+    label: 'DeepSeek R1 Distill Qwen 32B',
+    hint: 'Bagus untuk reasoning, tapi lebih mahal.',
+    neuronsInput: '45,170 / 1M input',
+    neuronsOutput: '443,756 / 1M output',
+  },
+  {
+    value: 'mistral-konteks',
+    label: 'Mistral Small 3.1 24B',
+    hint: 'Kuat untuk konteks panjang dan paket campuran.',
+    neuronsInput: '31,876 / 1M input',
+    neuronsOutput: '50,488 / 1M output',
+  },
+  {
+    value: 'llama-terbaik',
+    label: 'Llama 3.3 70B FP8 Fast',
+    hint: 'Kualitas tertinggi, usage paling besar.',
+    neuronsInput: '26,668 / 1M input',
+    neuronsOutput: '204,805 / 1M output',
+  },
 ];
+
+function getNeuronCostBadge(input: string) {
+  const value = parseInt(input.replace(/[^\d]/g, ''), 10) || 0;
+  if (value <= 5000) return { label: 'Hemat', bg: '#e8f7ec', color: '#1f7a45', border: '#b8e0c6' };
+  if (value <= 30000) return { label: 'Sedang', bg: '#fff7e6', color: '#a16207', border: '#f3d08b' };
+  if (value <= 100000) return { label: 'Mahal', bg: '#fff1f2', color: '#be123c', border: '#fecdd3' };
+  return { label: 'Sangat Mahal', bg: '#fdf2f8', color: '#9d174d', border: '#f9a8d4' };
+}
 type Page = 'exams' | 'peserta' | 'rooms' | 'pelaksana' | 'settings';
 type ExamTab = 'soal' | 'token' | 'monitor' | 'hasil' | 'peserta';
 
@@ -605,6 +661,7 @@ function QuestionsView({ examId }: { examId: string }) {
   const [aiDraft, setAiDraft] = useState<GeneratedQuestionDraft[]>([]);
   const [aiMeta, setAiMeta] = useState<AiGenerateMeta | null>(null);
   const [aiHistory, setAiHistory] = useState<AiHistoryItem[]>([]);
+  const [aiUsageToday, setAiUsageToday] = useState<AiUsageToday | null>(null);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [editingAiIndex, setEditingAiIndex] = useState<number | null>(null);
   const [editingAiQuestion, setEditingAiQuestion] = useState<GeneratedQuestionDraft | null>(null);
@@ -636,9 +693,16 @@ function QuestionsView({ examId }: { examId: string }) {
     if (r.success) setAiHistory(r.data || []);
     setLoadingHistory(false);
   }, [examId]);
+  const fetchAiUsageToday = useCallback(async () => {
+    const r = await GET<AiUsageToday>('/api/admin/ai-usage/today');
+    if (r.success) setAiUsageToday(r.data || null);
+  }, []);
   useEffect(() => {
-    if (showAiGenerator) fetchAiHistory();
-  }, [showAiGenerator, fetchAiHistory]);
+    if (showAiGenerator) {
+      fetchAiHistory();
+      fetchAiUsageToday();
+    }
+  }, [showAiGenerator, fetchAiHistory, fetchAiUsageToday]);
 
   const saveQ = async () => {
     if (!editQ?.question_text) { toast('error', 'Teks soal wajib'); return; }
@@ -730,6 +794,7 @@ function QuestionsView({ examId }: { examId: string }) {
       } else {
         toast('success', `AI menghasilkan ${r.data.questions?.length || 0} draft soal`);
       }
+      fetchAiUsageToday();
     } else {
       toast('error', r.error || 'Generate soal gagal');
     }
@@ -744,6 +809,7 @@ function QuestionsView({ examId }: { examId: string }) {
       setAiDraft([]);
       setAiMeta(null);
       fetchAiHistory();
+      fetchAiUsageToday();
       fetchQ();
     } else {
       toast('error', r.error || 'Import soal AI gagal');
@@ -763,6 +829,9 @@ function QuestionsView({ examId }: { examId: string }) {
         status: r.data.status,
         imported_count: r.data.imported_count,
         generation_mode: r.data.generation_mode,
+        prompt_tokens: r.data.prompt_tokens || 0,
+        completion_tokens: r.data.completion_tokens || 0,
+        estimated_neurons: r.data.estimated_neurons || 0,
       });
       toast('success', 'Draft riwayat dimuat');
     } else {
@@ -905,12 +974,20 @@ function QuestionsView({ examId }: { examId: string }) {
               options={AI_MODEL_OPTIONS.map((item) => ({ value: item.value, label: item.label }))}
             />
             <div className="mt-3 space-y-2">
-              {AI_MODEL_OPTIONS.map((item) => (
+              {AI_MODEL_OPTIONS.map((item) => {
+                const badge = getNeuronCostBadge(item.neuronsInput);
+                return (
                 <div key={item.value} style={{ padding: '8px 10px', borderRadius: '10px', background: aiForm.chosen_model === item.value ? '#eef7f0' : C.white, border: `1px solid ${aiForm.chosen_model === item.value ? '#b5d9c4' : C.border}` }}>
-                  <p style={{ color: C.text, fontSize: '12px', fontWeight: 700 }}>{item.label}</p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p style={{ color: C.text, fontSize: '12px', fontWeight: 700 }}>{item.label}</p>
+                    <span style={{ background: badge.bg, color: badge.color, border: `1px solid ${badge.border}`, fontSize: '10px', fontWeight: 800, padding: '3px 8px', borderRadius: '999px', whiteSpace: 'nowrap' }}>{badge.label}</span>
+                  </div>
                   <p style={{ color: C.textMuted, fontSize: '11px', marginTop: '2px' }}>{item.hint}</p>
+                  <p style={{ color: '#6b7c6e', fontSize: '10.5px', marginTop: '4px', fontFamily: 'monospace' }}>
+                    Neurons: {item.neuronsInput} · {item.neuronsOutput}
+                  </p>
                 </div>
-              ))}
+              )})}
             </div>
           </div>
 
@@ -933,6 +1010,30 @@ function QuestionsView({ examId }: { examId: string }) {
             <Button size="sm" loading={generatingAi} onClick={generateAiQuestions}><Wand2 size={13} /> {aiForm.generation_mode === 'direct_save' ? 'Generate & Simpan' : 'Generate Draft'}</Button>
           </div>
 
+          {aiUsageToday && (
+            <div style={{ background: '#f8faf8', border: `1.5px solid ${C.borderMid}`, borderRadius: '12px', padding: '14px' }}>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p style={{ color: C.text, fontSize: '12px', fontWeight: 800 }}>Pemakaian Neurons Hari Ini</p>
+                  <p style={{ color: C.textMuted, fontSize: '11px', marginTop: '3px' }}>
+                    {Math.round(aiUsageToday.estimated_neurons).toLocaleString('id-ID')} / {aiUsageToday.daily_limit.toLocaleString('id-ID')} neurons telah digunakan
+                  </p>
+                </div>
+                <span style={{ background: '#eef7f0', color: C.green, fontSize: '10px', fontWeight: 800, padding: '4px 8px', borderRadius: '999px' }}>
+                  {aiUsageToday.usage_percent.toFixed(1)}%
+                </span>
+              </div>
+              <div style={{ marginTop: '10px', height: '10px', background: '#e5e7eb', borderRadius: '999px', overflow: 'hidden' }}>
+                <div style={{ width: `${Math.min(100, aiUsageToday.usage_percent)}%`, height: '100%', background: aiUsageToday.usage_percent >= 80 ? '#dc2626' : aiUsageToday.usage_percent >= 50 ? '#d97706' : C.green, borderRadius: '999px' }} />
+              </div>
+              <div className="mt-2 flex items-center justify-between gap-3" style={{ color: C.textMuted, fontSize: '10.5px' }}>
+                <span>Sisa: {Math.round(aiUsageToday.remaining_neurons).toLocaleString('id-ID')} neurons</span>
+                <span>{aiUsageToday.total_generations} generate hari ini</span>
+              </div>
+              <p style={{ color: C.textFaint, fontSize: '10px', marginTop: '6px' }}>{aiUsageToday.note}</p>
+            </div>
+          )}
+
           {aiMeta && (
             <div style={{ background: '#eef7f0', border: '1.5px solid #b5d9c4', borderRadius: '12px', padding: '12px 14px' }}>
               <p style={{ color: C.text, fontSize: '12px', fontWeight: 800 }}>Hasil AI siap direview</p>
@@ -954,6 +1055,9 @@ function QuestionsView({ examId }: { examId: string }) {
                     <div>
                       <p style={{ color: C.text, fontSize: '12px', fontWeight: 700 }}>{new Date(item.created_at).toLocaleString('id-ID')}</p>
                       <p style={{ color: C.textMuted, fontSize: '11px' }}>{item.generated_count} soal · {item.generation_mode === 'direct_save' ? 'langsung simpan' : 'review dulu'} · status {item.status}</p>
+                      <p style={{ color: '#6b7c6e', fontSize: '10.5px', marginTop: '2px' }}>
+                        ~{Math.round(item.estimated_neurons).toLocaleString('id-ID')} neurons · {item.prompt_tokens.toLocaleString('id-ID')} in · {item.completion_tokens.toLocaleString('id-ID')} out
+                      </p>
                     </div>
                     <Button variant="secondary" size="sm" onClick={() => loadAiHistoryDraft(item.id)}>Muat Draft</Button>
                   </div>

@@ -18,21 +18,36 @@ const SUPPORTED_AI_MODELS = {
     id: '@cf/meta/llama-3.1-8b-instruct-fp8-fast',
     label: 'Llama 3.1 8B FP8 Fast',
     schemaMode: 'response_format',
+    neuronsPerMillionInput: 4119,
+    neuronsPerMillionOutput: 34868,
   },
   'llama-terbaik': {
     id: '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
     label: 'Llama 3.3 70B FP8 Fast',
     schemaMode: 'response_format',
+    neuronsPerMillionInput: 26668,
+    neuronsPerMillionOutput: 204805,
   },
   'qwen-seimbang': {
     id: '@cf/qwen/qwen3-30b-a3b-fp8',
     label: 'Qwen 3 30B A3B FP8',
     schemaMode: 'response_format',
+    neuronsPerMillionInput: 4625,
+    neuronsPerMillionOutput: 30475,
+  },
+  'deepseek-analitis': {
+    id: '@cf/deepseek-ai/deepseek-r1-distill-qwen-32b',
+    label: 'DeepSeek R1 Distill Qwen 32B',
+    schemaMode: 'response_format',
+    neuronsPerMillionInput: 45170,
+    neuronsPerMillionOutput: 443756,
   },
   'mistral-konteks': {
     id: '@cf/mistralai/mistral-small-3.1-24b-instruct',
     label: 'Mistral Small 3.1 24B',
     schemaMode: 'guided_json',
+    neuronsPerMillionInput: 31876,
+    neuronsPerMillionOutput: 50488,
   },
 } as const;
 
@@ -296,6 +311,21 @@ function buildAiRequest(
   }
 
   return base;
+}
+
+function estimateNeurons(
+  model: { neuronsPerMillionInput: number; neuronsPerMillionOutput: number },
+  usage?: { prompt_tokens?: number; completion_tokens?: number }
+) {
+  const promptTokens = Number(usage?.prompt_tokens || 0);
+  const completionTokens = Number(usage?.completion_tokens || 0);
+  const inputNeurons = (promptTokens / 1_000_000) * model.neuronsPerMillionInput;
+  const outputNeurons = (completionTokens / 1_000_000) * model.neuronsPerMillionOutput;
+  return {
+    prompt_tokens: promptTokens,
+    completion_tokens: completionTokens,
+    estimated_neurons: inputNeurons + outputNeurons,
+  };
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -756,6 +786,8 @@ admin.post('/exams/:examId/questions/generate-ai', async (c) => {
     return c.json(err('AI tidak menghasilkan soal yang valid. Coba ubah instruksi atau jumlah soal.'), 502);
   }
 
+  const usageStats = estimateNeurons(selectedModel, aiResult?.usage);
+
   const generationId = newId();
   let importedCount = 0;
   if (generationMode === 'direct_save') {
@@ -765,8 +797,8 @@ admin.post('/exams/:examId/questions/generate-ai', async (c) => {
 
   await c.env.DB.prepare(
     `INSERT INTO cbt_ai_generations
-     (id, exam_id, created_by, generation_mode, status, model_name, request_payload, generated_payload, generated_count, imported_count, imported_at, updated_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
+     (id, exam_id, created_by, generation_mode, status, model_name, request_payload, generated_payload, generated_count, imported_count, prompt_tokens, completion_tokens, estimated_neurons, imported_at, updated_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
   ).bind(
     generationId,
     examId,
@@ -778,6 +810,9 @@ admin.post('/exams/:examId/questions/generate-ai', async (c) => {
     JSON.stringify(generatedQuestions),
     generatedQuestions.length,
     importedCount,
+    usageStats.prompt_tokens,
+    usageStats.completion_tokens,
+    usageStats.estimated_neurons,
     importedCount ? now() : null,
     now()
   ).run();
@@ -795,13 +830,48 @@ admin.post('/exams/:examId/questions/generate-ai', async (c) => {
       status: generationMode === 'direct_save' ? 'imported' : 'draft',
       imported_count: importedCount,
       generation_mode: generationMode,
+      prompt_tokens: usageStats.prompt_tokens,
+      completion_tokens: usageStats.completion_tokens,
+      estimated_neurons: usageStats.estimated_neurons,
     },
   }, generationMode === 'direct_save' ? 'Soal AI berhasil dibuat dan langsung disimpan' : 'Draft soal berhasil dibuat'));
 });
 
+admin.get('/ai-usage/today', async (c) => {
+  const usageDate = new Date().toISOString().slice(0, 10);
+  const row = await c.env.DB.prepare(
+    `SELECT
+       COALESCE(SUM(prompt_tokens), 0) as prompt_tokens,
+       COALESCE(SUM(completion_tokens), 0) as completion_tokens,
+       COALESCE(SUM(estimated_neurons), 0) as estimated_neurons,
+       COUNT(*) as total_generations
+     FROM cbt_ai_generations
+     WHERE substr(created_at, 1, 10) = ?`
+  ).bind(usageDate).first<{
+    prompt_tokens: number;
+    completion_tokens: number;
+    estimated_neurons: number;
+    total_generations: number;
+  }>();
+
+  const dailyLimit = 10000;
+  const used = Number(row?.estimated_neurons || 0);
+  return c.json(ok({
+    usage_date: usageDate,
+    prompt_tokens: Number(row?.prompt_tokens || 0),
+    completion_tokens: Number(row?.completion_tokens || 0),
+    estimated_neurons: used,
+    daily_limit: dailyLimit,
+    remaining_neurons: Math.max(0, dailyLimit - used),
+    usage_percent: dailyLimit ? Math.min(100, (used / dailyLimit) * 100) : 0,
+    total_generations: Number(row?.total_generations || 0),
+    note: 'Estimasi dari usage token respons Workers AI yang dipakai lewat aplikasi ini.',
+  }));
+});
+
 admin.get('/exams/:examId/ai-generations', async (c) => {
   const { results } = await c.env.DB.prepare(
-    `SELECT id, exam_id, generation_mode, status, model_name, generated_count, imported_count, created_at, imported_at
+    `SELECT id, exam_id, generation_mode, status, model_name, generated_count, imported_count, prompt_tokens, completion_tokens, estimated_neurons, created_at, imported_at
      FROM cbt_ai_generations
      WHERE exam_id=?
      ORDER BY created_at DESC

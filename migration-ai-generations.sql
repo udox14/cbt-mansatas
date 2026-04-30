@@ -9,6 +9,9 @@ CREATE TABLE IF NOT EXISTS cbt_ai_generations (
   generated_payload TEXT,
   generated_count INTEGER DEFAULT 0,
   imported_count INTEGER DEFAULT 0,
+  prompt_tokens INTEGER DEFAULT 0,
+  completion_tokens INTEGER DEFAULT 0,
+  estimated_neurons REAL DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now')),
   imported_at TEXT,
   updated_at TEXT DEFAULT (datetime('now'))
