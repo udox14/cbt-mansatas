@@ -5,12 +5,8 @@
 export interface Env {
   DB: D1Database;
   R2: R2Bucket;
-  AI: {
-    run(model: string, input: unknown): Promise<any>;
-  };
   JWT_SECRET: string;
   CORS_ORIGIN: string;
-  AI_MODEL?: string;
 }
 
 export type Role = 'admin' | 'proctor' | 'student';
