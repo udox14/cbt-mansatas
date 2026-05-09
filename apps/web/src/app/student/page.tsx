@@ -6,6 +6,7 @@ import { getDeviceId } from '@/lib/device';
 import { Button, Modal, LoadingScreen, EmptyState, ToastProvider } from '@/components/ui';
 import ExamRoom from '@/components/exam/ExamRoom';
 import { Clock, ArrowRight, Check, KeyRound, CalendarClock, Lock } from 'lucide-react';
+import DOMPurify from 'dompurify';
 
 interface Exam {
   id: string; title: string; description: string | null;
@@ -259,7 +260,7 @@ function StudentContent() {
       {/* MODAL: Tata Tertib */}
       <Modal open={showRules} onClose={() => setShowRules(false)} title="Tata Tertib Ujian">
         {selected?.rules_text
-          ? <div className="prose prose-sm max-w-none text-sm" style={{ color: '#4a6655' }} dangerouslySetInnerHTML={{ __html: selected.rules_text }} />
+          ? <div className="prose prose-sm max-w-none text-sm" style={{ color: '#4a6655' }} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(selected.rules_text) }} />
           : <div className="space-y-2 text-sm" style={{ color: '#4a6655' }}>
             <p>1. Kerjakan ujian dengan jujur dan mandiri.</p>
             <p>2. Dilarang membuka tab atau aplikasi lain selama ujian.</p>

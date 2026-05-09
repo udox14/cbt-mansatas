@@ -6,13 +6,12 @@ import { Hono } from 'hono';
 import type { Env } from '../types';
 import { authMiddleware, requireRole } from '../middleware/auth';
 import { buildRandomMaps, newId, ok, err, now, parseSesiJam, cekJadwal } from '../utils/helpers';
+import { checkRateLimit } from '../utils/ratelimit';
 
 const student = new Hono<{ Bindings: Env }>();
 student.use('*', authMiddleware, requireRole('student'));
 
 // ── GET daftar ujian aktif ────────────────────────────────────
-// Untuk pendaftar PMB: cek jadwal dari sesi_tes & tanggal_tes
-// Return field tambahan: jadwal_status, jadwal_info (jam mulai-selesai, tanggal)
 student.get('/exams', async (c) => {
   const user = c.get('user');
   const userType = user.source === 'pendaftar' ? 'pendaftar' : 'cbt_user';
@@ -42,10 +41,7 @@ student.get('/exams', async (c) => {
 
   // Filter: cek assignment dulu, lalu target_jalur
   const filtered = (results as any[]).filter(exam => {
-    // Cek apakah ujian ini punya assignment list
-    // Kalau user sudah di-assign langsung → selalu tampil
     if (assignedExamIds.has(exam.id)) return true;
-    // target_jalur filter
     if (!exam.target_jalur) return true;
     if (!jadwalData?.jalur) return true;
     const targets = exam.target_jalur.split(',').map((t: string) => t.trim().toLowerCase());
@@ -56,7 +52,6 @@ student.get('/exams', async (c) => {
     let jadwal_status: 'aktif' | 'belum' | 'selesai' | 'no_schedule' = 'no_schedule';
     let jadwal_info: string | null = null;
 
-    // Kalau sesi sudah dikunci proktor secara manual
     if (exam.is_time_locked) {
       jadwal_status = 'selesai';
       jadwal_info = 'Waktu ujian dikunci oleh pengawas';
@@ -64,13 +59,11 @@ student.get('/exams', async (c) => {
       const parsed = parseSesiJam(jadwalData.sesi_tes);
       if (parsed) {
         jadwal_status = cekJadwal(jadwalData.tanggal_tes, parsed.jamMulai, parsed.jamSelesai);
-        // Format info jadwal untuk ditampilkan ke siswa
         const tgl = new Date(jadwalData.tanggal_tes + 'T00:00:00+07:00');
         const tglStr = tgl.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
         jadwal_info = `${tglStr}, ${parsed.jamMulai}–${parsed.jamSelesai} WIB`;
       }
     } else {
-      // cbt_users tanpa jadwal → selalu aktif
       jadwal_status = 'aktif';
     }
 
@@ -84,12 +77,25 @@ student.get('/exams', async (c) => {
 student.post('/exams/:examId/validate-token', async (c) => {
   const examId = c.req.param('examId');
   const user = c.get('user');
-  const { token_code, device_id } = await c.req.json<{ token_code: string; device_id: string }>();
+  let body: { token_code?: string; device_id?: string };
+  try {
+    body = await c.req.json<{ token_code: string; device_id: string }>();
+  } catch {
+    return c.json(err('Request body tidak valid'), 400);
+  }
+
+  const { token_code, device_id } = body;
   const userType = user.source === 'pendaftar' ? 'pendaftar' : 'cbt_user';
 
   if (!user.room_id) return c.json(err('Anda belum di-assign ke ruangan'), 400);
   if (!token_code)   return c.json(err('Token wajib diisi'), 400);
   if (!device_id)    return c.json(err('Device ID diperlukan'), 400);
+
+  // ── H4: Rate limit validate-token per user (3x per 5 menit) ──
+  const rl = await checkRateLimit(c.env.RATE_LIMIT, `token:user:${user.sub}`, 3, 300);
+  if (!rl.allowed) {
+    return c.json(err('Terlalu banyak percobaan token. Coba lagi dalam 5 menit.'), 429);
+  }
 
   // ── Validasi jadwal untuk pendaftar PMB ──
   if (userType === 'pendaftar') {
@@ -107,9 +113,11 @@ student.post('/exams/:examId/validate-token', async (c) => {
     }
   }
 
-  // ── Validasi token ──
+  // ── H5: Validasi token + cek expires_at ──
   const tokenRow = await c.env.DB.prepare(
-    `SELECT * FROM cbt_exam_tokens WHERE exam_id=? AND room_id=? AND token_code=? AND is_active=1`
+    `SELECT * FROM cbt_exam_tokens
+     WHERE exam_id=? AND room_id=? AND token_code=? AND is_active=1
+       AND (expires_at IS NULL OR expires_at > datetime('now'))`
   ).bind(examId, user.room_id, token_code).first();
   if (!tokenRow) return c.json(err('Token tidak valid atau sudah kedaluwarsa'), 401);
 
@@ -119,30 +127,8 @@ student.post('/exams/:examId/validate-token', async (c) => {
   ).bind(examId).first<any>();
   if (!exam) return c.json(err('Ujian tidak tersedia'), 404);
 
-  // ── Cek sesi existing ──
-  const existing = await c.env.DB.prepare(
-    'SELECT * FROM cbt_exam_sessions WHERE exam_id=? AND user_id=? AND user_type=?'
-  ).bind(examId, user.sub, userType).first<any>();
-
-  if (existing) {
-    if (existing.status === 'submitted' || existing.status === 'force_submitted')
-      return c.json(err('Anda sudah menyelesaikan ujian ini'), 400);
-    if (existing.is_time_locked)
-      return c.json(err('Waktu ujian dikunci oleh pengawas. Hubungi pengawas untuk membuka.'), 403);
-    if (existing.device_id && existing.device_id !== device_id)
-      return c.json(err('Sesi terkunci di perangkat lain. Hubungi pengawas untuk reset.'), 403);
-    await c.env.DB.prepare(
-      'UPDATE cbt_exam_sessions SET device_id=?, last_heartbeat=?, is_time_locked=0 WHERE id=?'
-    ).bind(device_id, now(), existing.id).run();
-    return c.json(ok({
-      session_id: existing.id, resumed: true,
-      question_map: JSON.parse(existing.question_map || '[]'),
-      option_map: JSON.parse(existing.option_map || '{}'),
-      started_at: existing.started_at, duration_minutes: exam.duration_minutes,
-    }, 'Sesi dilanjutkan'));
-  }
-
-  // ── Buat sesi baru + randomize ──
+  // ── H3: Anti race-condition — coba INSERT dulu, handle UNIQUE conflict ──
+  const sessionId = newId();
   const { results: questions } = await c.env.DB.prepare(
     'SELECT id FROM cbt_questions WHERE exam_id=? ORDER BY question_order'
   ).bind(examId).all();
@@ -159,20 +145,50 @@ student.post('/exams/:examId/validate-token', async (c) => {
   const qData = qIds.map(id => ({ id, options: optsByQ[id] || [] }));
   const { questionMap, optionMap } = buildRandomMaps(qData, !!exam.randomize_questions, !!exam.randomize_options);
 
-  const sessionId = newId();
-  await c.env.DB.prepare(
-    `INSERT INTO cbt_exam_sessions (id, exam_id, user_id, user_type, room_id, device_id, question_map, option_map, ip_address, user_agent)
-     VALUES (?,?,?,?,?,?,?,?,?,?)`
-  ).bind(sessionId, examId, user.sub, userType, user.room_id, device_id,
-    JSON.stringify(questionMap), JSON.stringify(optionMap),
-    c.req.header('CF-Connecting-IP') || '', c.req.header('User-Agent') || ''
-  ).run();
+  try {
+    await c.env.DB.prepare(
+      `INSERT INTO cbt_exam_sessions (id, exam_id, user_id, user_type, room_id, device_id, question_map, option_map, ip_address, user_agent)
+       VALUES (?,?,?,?,?,?,?,?,?,?)`
+    ).bind(sessionId, examId, user.sub, userType, user.room_id, device_id,
+      JSON.stringify(questionMap), JSON.stringify(optionMap),
+      c.req.header('CF-Connecting-IP') || '', c.req.header('User-Agent') || ''
+    ).run();
 
-  return c.json(ok({
-    session_id: sessionId, resumed: false,
-    question_map: questionMap, option_map: optionMap,
-    started_at: now(), duration_minutes: exam.duration_minutes,
-  }, 'Ujian dimulai'), 201);
+    return c.json(ok({
+      session_id: sessionId, resumed: false,
+      question_map: questionMap, option_map: optionMap,
+      started_at: now(), duration_minutes: exam.duration_minutes,
+    }, 'Ujian dimulai'), 201);
+
+  } catch (e: any) {
+    // UNIQUE constraint → sesi sudah ada (race condition atau double-submit)
+    if (e.message?.includes('UNIQUE') || e.message?.includes('unique')) {
+      const existing = await c.env.DB.prepare(
+        'SELECT * FROM cbt_exam_sessions WHERE exam_id=? AND user_id=? AND user_type=?'
+      ).bind(examId, user.sub, userType).first<any>();
+
+      if (!existing) throw e; // Error lain, re-throw
+
+      if (existing.status === 'submitted' || existing.status === 'force_submitted')
+        return c.json(err('Anda sudah menyelesaikan ujian ini'), 400);
+      if (existing.is_time_locked)
+        return c.json(err('Waktu ujian dikunci oleh pengawas. Hubungi pengawas untuk membuka.'), 403);
+      if (existing.device_id && existing.device_id !== device_id)
+        return c.json(err('Sesi terkunci di perangkat lain. Hubungi pengawas untuk reset.'), 403);
+
+      await c.env.DB.prepare(
+        'UPDATE cbt_exam_sessions SET device_id=?, last_heartbeat=?, is_time_locked=0 WHERE id=?'
+      ).bind(device_id, now(), existing.id).run();
+
+      return c.json(ok({
+        session_id: existing.id, resumed: true,
+        question_map: JSON.parse(existing.question_map || '[]'),
+        option_map: JSON.parse(existing.option_map || '{}'),
+        started_at: existing.started_at, duration_minutes: exam.duration_minutes,
+      }, 'Sesi dilanjutkan'));
+    }
+    throw e;
+  }
 });
 
 // ── GET soal ujian ────────────────────────────────────────────
@@ -191,6 +207,7 @@ student.get('/sessions/:sessionId/questions', async (c) => {
   const oMap: Record<string, string[]> = JSON.parse(session.option_map || '{}');
 
   const { results: questions } = await c.env.DB.prepare(
+    // Tidak mengambil is_correct! — hanya field yang dibutuhkan siswa
     'SELECT id, question_text, question_type, image_url, audio_url, points FROM cbt_questions WHERE exam_id=?'
   ).bind(session.exam_id).all();
   const qById = new Map((questions as any[]).map(q => [q.id, q]));
@@ -198,6 +215,7 @@ student.get('/sessions/:sessionId/questions', async (c) => {
   const qIds = questions.map((q: any) => q.id);
   const ph = qIds.map(() => '?').join(',');
   const { results: options } = await c.env.DB.prepare(
+    // Tidak mengambil is_correct! — hanya field yang dibutuhkan siswa
     `SELECT id, question_id, option_label, option_text, image_url FROM cbt_question_options WHERE question_id IN (${ph})`
   ).bind(...qIds).all();
   const oByQ = new Map<string, any[]>();
@@ -220,7 +238,6 @@ student.get('/sessions/:sessionId/questions', async (c) => {
     'SELECT question_id, selected_option_id, essay_answer, is_doubtful FROM cbt_student_answers WHERE session_id=?'
   ).bind(c.req.param('sessionId')).all();
 
-  // Ambil konfigurasi anti-cheat dari ujian
   const examCfg = await c.env.DB.prepare(
     'SELECT cheat_limit, cheat_action, enforce_fullscreen FROM cbt_exams WHERE id=?'
   ).bind(session.exam_id).first<any>();
@@ -236,15 +253,38 @@ student.get('/sessions/:sessionId/questions', async (c) => {
 student.post('/sessions/:sessionId/answers', async (c) => {
   const user = c.get('user');
   const sessionId = c.req.param('sessionId');
-  const { answers } = await c.req.json<{ answers: any[] }>();
+  let body: { answers?: any[] };
+  try {
+    body = await c.req.json<{ answers: any[] }>();
+  } catch {
+    return c.json(err('Request body tidak valid'), 400);
+  }
+  const { answers } = body;
 
   const session = await c.env.DB.prepare(
-    'SELECT id, status, is_time_locked FROM cbt_exam_sessions WHERE id=? AND user_id=?'
+    'SELECT id, status, is_time_locked, started_at, exam_id FROM cbt_exam_sessions WHERE id=? AND user_id=?'
   ).bind(sessionId, user.sub).first<any>();
   if (!session || session.status === 'submitted' || session.status === 'force_submitted')
     return c.json(err('Sesi tidak aktif'), 400);
   if (session.is_time_locked)
     return c.json(err('Waktu ujian dikunci'), 403);
+
+  // ── M7: Server-side timer check ──
+  const exam = await c.env.DB.prepare(
+    'SELECT duration_minutes FROM cbt_exams WHERE id=?'
+  ).bind(session.exam_id).first<any>();
+  if (exam) {
+    const startMs = new Date(session.started_at).getTime();
+    const durationMs = (exam.duration_minutes + 1) * 60 * 1000; // +1 menit grace period
+    if (Date.now() > startMs + durationMs) {
+      // Auto-lock sesi yang sudah habis waktu
+      await c.env.DB.prepare(
+        'UPDATE cbt_exam_sessions SET is_time_locked=1 WHERE id=?'
+      ).bind(sessionId).run();
+      return c.json(err('Waktu ujian sudah habis'), 403);
+    }
+  }
+
   if (!answers?.length) return c.json(ok(null));
 
   const stmts = answers.map((a: any) =>
@@ -261,13 +301,11 @@ student.post('/sessions/:sessionId/answers', async (c) => {
 });
 
 // ── POST heartbeat ────────────────────────────────────────────
-// Sekaligus cek jadwal — kalau sudah lewat waktunya, kunci otomatis
 student.post('/sessions/:sessionId/heartbeat', async (c) => {
   const user = c.get('user');
   const sessionId = c.req.param('sessionId');
   const userType = user.source === 'pendaftar' ? 'pendaftar' : 'cbt_user';
 
-  // Update heartbeat
   await c.env.DB.prepare(
     'UPDATE cbt_exam_sessions SET last_heartbeat=? WHERE id=? AND user_id=?'
   ).bind(now(), sessionId, user.sub).run();
@@ -298,7 +336,6 @@ student.post('/sessions/:sessionId/cheat', async (c) => {
   const body = await c.req.json<{ violation_type?: string }>().catch(() => ({} as { violation_type?: string }));
   const violationType = body.violation_type || 'tab_switch';
 
-  // JOIN dengan exam agar dapat konfigurasi sekaligus
   const session = await c.env.DB.prepare(
     `SELECT es.*, e.cheat_limit, e.cheat_action
      FROM cbt_exam_sessions es
@@ -312,7 +349,6 @@ student.post('/sessions/:sessionId/cheat', async (c) => {
   const newW = (session.cheat_warnings || 0) + 1;
   const limitReached = newW >= cheatLimit;
 
-  // Catat log pelanggaran dengan timestamp
   await c.env.DB.prepare(
     'INSERT INTO cbt_cheat_logs (id, session_id, violation_type, happened_at) VALUES (?,?,?,?)'
   ).bind(newId(), sessionId, violationType, now()).run();
@@ -321,14 +357,12 @@ student.post('/sessions/:sessionId/cheat', async (c) => {
 
   if (limitReached) {
     if (cheatAction === 'auto_submit') {
-      // Auto-submit: tandai force_submitted & hitung skor
       await c.env.DB.prepare(
         `UPDATE cbt_exam_sessions SET cheat_warnings=?, status='force_submitted', finished_at=?, last_heartbeat=? WHERE id=?`
       ).bind(newW, now(), now(), sessionId).run();
       try { await computeScore(c.env.DB, sessionId, session.exam_id, session.user_id, session.user_type); } catch {}
       actionTaken = 'auto_submit';
     } else {
-      // Lock: kunci sesi, proktor bisa buka kembali
       await c.env.DB.prepare(
         `UPDATE cbt_exam_sessions SET cheat_warnings=?, is_time_locked=1, last_heartbeat=? WHERE id=?`
       ).bind(newW, now(), sessionId).run();
@@ -394,10 +428,17 @@ async function computeScore(db: D1Database, sessionId: string, examId: string, u
   }
   const unanswered = total - correct - wrong;
   const score = total > 0 ? Math.round((correct / total) * 10000) / 100 : 0;
+
+  // ── M1: Gunakan ON CONFLICT update agar tidak duplikasi row ──
   await db.prepare(
-    `INSERT OR REPLACE INTO cbt_exam_results (id, session_id, exam_id, user_id, user_type, total_questions, total_correct, total_wrong, total_unanswered, score)
-     VALUES (?,?,?,?,?,?,?,?,?,?)`
+    `INSERT INTO cbt_exam_results (id, session_id, exam_id, user_id, user_type, total_questions, total_correct, total_wrong, total_unanswered, score)
+     VALUES (?,?,?,?,?,?,?,?,?,?)
+     ON CONFLICT(session_id) DO UPDATE SET
+       total_questions=excluded.total_questions, total_correct=excluded.total_correct,
+       total_wrong=excluded.total_wrong, total_unanswered=excluded.total_unanswered,
+       score=excluded.score, computed_at=datetime('now')`
   ).bind(newId(), sessionId, examId, userId, userType, total, correct, wrong, unanswered, score).run();
+
   return { total_questions: total, total_correct: correct, total_wrong: wrong, total_unanswered: unanswered, score };
 }
 

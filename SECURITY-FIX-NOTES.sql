@@ -1,0 +1,49 @@
+-- ============================================================
+-- PANDUAN PASCA-DEPLOYMENT SECURITY FIX
+-- ============================================================
+-- Jalankan langkah-langkah ini SEBELUM deploy ulang worker!
+--
+-- 1. BUAT KV NAMESPACE untuk rate limiting:
+--    wrangler kv:namespace create RATE_LIMIT
+--    → Salin "id" yang keluar, masukkan ke wrangler.toml
+--
+-- 2. ROTASI JWT_SECRET (wajib karena secret lama terekspos!):
+--    wrangler secret put JWT_SECRET
+--    → Masukkan secret baru: gunakan output dari:
+--       node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+--    → Semua user yang sedang login AKAN ter-logout (normal)
+--
+-- 3. HASH PASSWORD ADMIN LAMA (jika ada admin yang passwordnya plain-text):
+--    Jalankan query ini di Cloudflare D1 Console untuk melihat admin:
+--       SELECT id, username, password FROM admins;
+--    Password yang sudah di-hash akan terlihat seperti: "abc123def456:7890abcd..."
+--    Password yang masih plain-text terlihat seperti: "passwordbiasa"
+--    → Untuk admin dengan plain-text, ganti lewat UI admin CBT (fitur edit user)
+--      sehingga password baru akan otomatis ter-hash.
+--
+-- 4. TIDAK ADA PERUBAHAN SKEMA DATABASE pada update ini.
+--    Semua perubahan ada di application logic saja.
+--
+-- ============================================================
+-- RINGKASAN PERUBAHAN KEAMANAN (v2.0)
+-- ============================================================
+-- CRITICAL:
+--   ✅ JWT_SECRET dipindah ke Cloudflare Secret (tidak di wrangler.toml)
+--   ✅ Password admin sekarang di-hash PBKDF2 (sama seperti proktor/student)
+--   ✅ Rate limiting login: 5x/menit per IP, 10x/5menit per username
+-- HIGH:
+--   ✅ Debug/agent logging dihapus dari production
+--   ✅ XSS: DOMPurify sanitize semua HTML dari soal/opsi/tata tertib
+--   ✅ Race condition sesi ujian diperbaiki dengan try/catch UNIQUE
+--   ✅ Rate limiting validate-token: 3x/5menit per user
+--   ✅ Token expires_at sekarang dicek saat validasi
+-- MEDIUM:
+--   ✅ computeScore: ON CONFLICT UPDATE (tidak duplikasi row)
+--   ✅ Validasi input exam: title, duration, cheat_limit, active_status
+--   ✅ flushAnswers: stale closure diperbaiki dengan answersRef
+--   ✅ Server-side timer check di endpoint /answers
+-- LOW:
+--   ✅ Delete pendaftar dari CBT dinonaktifkan (proteksi data PMB)
+--   ✅ shuffle() menggunakan crypto.getRandomValues() (CSPRNG)
+--   ✅ Path traversal check pada R2 endpoint
+-- ============================================================

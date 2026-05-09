@@ -41,8 +41,8 @@ export async function signJWT(
     exp: now + expiresInHours * 3600,
   };
 
-  const h = base64url(encoder.encode(JSON.stringify(header)));
-  const p = base64url(encoder.encode(JSON.stringify(fullPayload)));
+  const h = base64url(encoder.encode(JSON.stringify(header)).buffer as ArrayBuffer);
+  const p = base64url(encoder.encode(JSON.stringify(fullPayload)).buffer as ArrayBuffer);
   const data = encoder.encode(`${h}.${p}`);
 
   const key = await getKey(secret);

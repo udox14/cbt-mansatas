@@ -3,6 +3,10 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { GET, POST } from '@/lib/api';
 import { Modal, Spinner } from '@/components/ui';
 import { Clock, ChevronLeft, ChevronRight, Minus, Plus, Send, AlertTriangle, Maximize } from 'lucide-react';
+import DOMPurify from 'dompurify';
+
+// Helper: sanitize HTML sebelum render
+const sanitize = (html: string) => DOMPurify.sanitize(html, { USE_PROFILES: { html: true } });
 
 interface Question {
   index: number; id: string; question_text: string; question_type: string;
@@ -85,6 +89,8 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, onFini
   const submittedRef = useRef(false);
   const cheatCountRef = useRef(0);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
+  // ── M4: answersRef selalu up-to-date (fix stale closure) ──
+  const answersRef = useRef<Map<string, Answer>>(new Map());
 
   // ── Screen Wake Lock: cegah layar mati selama ujian ─────────
   const requestWakeLock = useCallback(async () => {
@@ -122,6 +128,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, onFini
         const local = localStorage.getItem(`cbt_answers_${sessionId}`);
         if (local) { try { for (const a of JSON.parse(local) as Answer[]) m.set(a.question_id, a); } catch {} }
         setAnswers(m);
+        answersRef.current = m; // sync ref
         const pos = localStorage.getItem(`cbt_pos_${sessionId}`);
         if (pos) setCurrent(parseInt(pos) || 0);
         // Konfigurasi anti-cheat
@@ -173,15 +180,17 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, onFini
     return () => { clearInterval(s); clearInterval(h); };
   }, [sessionId]);
 
+  // ── M4: flushAnswers menggunakan answersRef agar tidak stale closure ──
   const flushAnswers = useCallback(async () => {
     if (dirtyRef.current.size === 0) return;
     const batch: Answer[] = [];
-    dirtyRef.current.forEach(qId => { const a = answers.get(qId); if (a) batch.push(a); });
+    const currentAnswers = answersRef.current;
+    dirtyRef.current.forEach(qId => { const a = currentAnswers.get(qId); if (a) batch.push(a); });
     const ids = new Set(dirtyRef.current);
     dirtyRef.current.clear();
     const r = await POST(`/api/student/sessions/${sessionId}/answers`, { answers: batch });
     if (!r.success) ids.forEach(id => dirtyRef.current.add(id));
-  }, [answers, sessionId]);
+  }, [sessionId]); // tidak depend on answers lagi
 
   // ── Fungsi deteksi & laporan pelanggaran ──────────────────────
   const reportViolation = useCallback(async (violationType: 'tab_switch' | 'fullscreen_exit') => {
@@ -242,7 +251,9 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, onFini
     setAnswers(prev => {
       const m = new Map(prev);
       const ex = m.get(qId) || { question_id: qId };
-      m.set(qId, { ...ex, ...update });
+      const next = { ...ex, ...update };
+      m.set(qId, next);
+      answersRef.current = m; // sync ref agar flushAnswers selalu up-to-date
       localStorage.setItem(`cbt_answers_${sessionId}`, JSON.stringify(Array.from(m.values())));
       dirtyRef.current.add(qId);
       return m;
@@ -387,9 +398,9 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, onFini
             </label>
           </div>
 
-          {/* soal text */}
+          {/* soal text — H2: sanitize HTML sebelum render */}
           <div className="exam-text" style={{ padding: '16px 14px 12px', color: C.text, lineHeight: 1.75, '--exam-font-size': `${fontSize}px` } as any}
-            dangerouslySetInnerHTML={{ __html: q.question_text }} />
+            dangerouslySetInnerHTML={{ __html: sanitize(q.question_text) }} />
 
           {/* media */}
           {q.image_url && (
@@ -430,7 +441,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, onFini
                     <span style={{ flex: 1, fontSize: `${fontSize}px`, color: C.text, fontWeight: 500, paddingTop: '2px' }}>
                       {o.image_url
                         ? <img src={`${API_URL}${o.image_url}`} alt={o.option_label} style={{ maxWidth: '100%', borderRadius: '8px' }} />
-                        : <span dangerouslySetInnerHTML={{ __html: o.option_text }} />}
+                        : <span dangerouslySetInnerHTML={{ __html: sanitize(o.option_text) }} />}
                     </span>
                   </button>
                 );

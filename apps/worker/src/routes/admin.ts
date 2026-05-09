@@ -136,16 +136,18 @@ admin.post('/users', async (c) => {
   const { username, password, role, room_id, nisn } = body;
   const nama = body.full_name || body.nama_lengkap;
   if (!username || !password || !nama || !role) return c.json(err('Data tidak lengkap'), 400);
+  if (!['admin', 'proctor', 'student'].includes(role)) return c.json(err('Role tidak valid'), 400);
+  if (password.length < 6) return c.json(err('Password minimal 6 karakter'), 400);
   try {
     const id = newId();
+    // ── C2: Semua password di-hash — termasuk admin ──
+    const hash = await hashPassword(password);
     if (role === 'admin') {
-      // Admin disimpan ke tabel admins (tabel PMB existing) — password plain text
+      // Admin disimpan ke tabel admins (tabel PMB existing) — PBKDF2 hash
       await c.env.DB.prepare(
         'INSERT INTO admins (id, username, password, nama_lengkap) VALUES (?,?,?,?)'
-      ).bind(id, username, password, nama).run();
+      ).bind(id, username, hash, nama).run();
     } else {
-      // Proktor & student ke cbt_users dengan password hash PBKDF2
-      const hash = await hashPassword(password);
       await c.env.DB.prepare(
         'INSERT INTO cbt_users (id, username, password_hash, nama_lengkap, role, room_id, nisn) VALUES (?,?,?,?,?,?,?)'
       ).bind(id, username, hash, nama, role, room_id || null, nisn || null).run();
@@ -176,17 +178,23 @@ admin.put('/users/:id', async (c) => {
   const body = await c.req.json();
   const nama = body.full_name || body.nama_lengkap;
   const id = c.req.param('id');
+  // ── C2: Hash password pada update juga ──
   if (body.role === 'admin') {
-    // Update ke tabel admins
     let sql = 'UPDATE admins SET nama_lengkap=?';
     const params: any[] = [nama];
-    if (body.password) { sql += ', password=?'; params.push(body.password); }
+    if (body.password) {
+      if (body.password.length < 6) return c.json(err('Password minimal 6 karakter'), 400);
+      sql += ', password=?'; params.push(await hashPassword(body.password));
+    }
     sql += ' WHERE id=?'; params.push(id);
     await c.env.DB.prepare(sql).bind(...params).run();
   } else {
     let sql = 'UPDATE cbt_users SET nama_lengkap=?, role=?, room_id=?, nisn=?, is_active=?, updated_at=?';
     const params: any[] = [nama, body.role, body.room_id || null, body.nisn || null, body.is_active ?? 1, now()];
-    if (body.password) { sql += ', password_hash=?'; params.push(await hashPassword(body.password)); }
+    if (body.password) {
+      if (body.password.length < 6) return c.json(err('Password minimal 6 karakter'), 400);
+      sql += ', password_hash=?'; params.push(await hashPassword(body.password));
+    }
     sql += ' WHERE id=?'; params.push(id);
     await c.env.DB.prepare(sql).bind(...params).run();
   }
@@ -223,15 +231,11 @@ admin.get('/pendaftar', async (c) => {
   return c.json(ok(results));
 });
 
-// Hapus peserta dari tabel pendaftar PMB + sesi ujiannya
+// ── L4: Endpoint hapus pendaftar dinonaktifkan ──
+// Berbahaya karena menghapus data dari tabel PMB utama (shared database).
+// Gunakan dashboard PMB langsung jika benar-benar diperlukan.
 admin.delete('/pendaftar/:id', async (c) => {
-  const id = c.req.param('id');
-  await c.env.DB.batch([
-    c.env.DB.prepare('DELETE FROM cbt_exam_sessions WHERE user_id=? AND user_type=?').bind(id, 'pendaftar'),
-    c.env.DB.prepare('DELETE FROM cbt_exam_results WHERE user_id=? AND user_type=?').bind(id, 'pendaftar'),
-    c.env.DB.prepare('DELETE FROM pendaftar WHERE id = ?').bind(id),
-  ]);
-  return c.json(ok(null, 'Peserta berhasil dihapus'));
+  return c.json(err('Penghapusan peserta dinonaktifkan dari CBT untuk melindungi data PMB. Gunakan sistem PMB utama.'), 403);
 });
 
 // Update ruang_tes peserta pendaftar PMB
@@ -286,35 +290,62 @@ admin.get('/exams/:id', async (c) => {
 admin.post('/exams', async (c) => {
   const b = await c.req.json();
   const user = c.get('user');
+
+  // ── M2: Validasi input ──
+  if (!b.title || typeof b.title !== 'string' || b.title.trim().length === 0)
+    return c.json(err('Judul ujian wajib diisi'), 400);
+  const duration = Number(b.duration_minutes);
+  if (!Number.isInteger(duration) || duration < 1 || duration > 600)
+    return c.json(err('Durasi ujian harus antara 1–600 menit'), 400);
+  const cheatLimit = Number(b.cheat_limit ?? 3);
+  if (!Number.isInteger(cheatLimit) || cheatLimit < 1 || cheatLimit > 50)
+    return c.json(err('Cheat limit harus antara 1–50'), 400);
+  if (b.cheat_action && !['lock', 'auto_submit'].includes(b.cheat_action))
+    return c.json(err('Cheat action tidak valid'), 400);
+  if (b.active_status && !['draft', 'active', 'finished'].includes(b.active_status))
+    return c.json(err('Status tidak valid'), 400);
+
   const id = newId();
   await c.env.DB.prepare(
     `INSERT INTO cbt_exams (id, title, description, duration_minutes, rules_text, completion_message,
      is_score_visible, randomize_questions, randomize_options, active_status, passing_score, created_by,
      target_jalur, cheat_limit, cheat_action, enforce_fullscreen)
      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
-  ).bind(id, b.title, b.description || null, b.duration_minutes || 60,
+  ).bind(id, b.title.trim(), b.description || null, duration,
     b.rules_text || null, b.completion_message || 'Ujian telah selesai. Terima kasih.',
     b.is_score_visible ? 1 : 0, b.randomize_questions ? 1 : 0,
     b.randomize_options ? 1 : 0, b.active_status || 'draft', b.passing_score || 0, user.sub,
-    b.target_jalur || null,
-    b.cheat_limit || 3,
-    b.cheat_action || 'lock',
-    b.enforce_fullscreen ? 1 : 0
+    b.target_jalur || null, cheatLimit, b.cheat_action || 'lock', b.enforce_fullscreen ? 1 : 0
   ).run();
   return c.json(ok({ id }, 'Ujian dibuat'), 201);
 });
 
 admin.put('/exams/:id', async (c) => {
   const b = await c.req.json();
+
+  // ── M2: Validasi input ──
+  if (!b.title || typeof b.title !== 'string' || b.title.trim().length === 0)
+    return c.json(err('Judul ujian wajib diisi'), 400);
+  const duration = Number(b.duration_minutes);
+  if (!Number.isInteger(duration) || duration < 1 || duration > 600)
+    return c.json(err('Durasi ujian harus antara 1–600 menit'), 400);
+  const cheatLimit = Number(b.cheat_limit ?? 3);
+  if (!Number.isInteger(cheatLimit) || cheatLimit < 1 || cheatLimit > 50)
+    return c.json(err('Cheat limit harus antara 1–50'), 400);
+  if (b.cheat_action && !['lock', 'auto_submit'].includes(b.cheat_action))
+    return c.json(err('Cheat action tidak valid'), 400);
+  if (b.active_status && !['draft', 'active', 'finished'].includes(b.active_status))
+    return c.json(err('Status tidak valid'), 400);
+
   await c.env.DB.prepare(
     `UPDATE cbt_exams SET title=?, description=?, duration_minutes=?, rules_text=?,
      completion_message=?, is_score_visible=?, randomize_questions=?, randomize_options=?,
      active_status=?, passing_score=?, target_jalur=?,
      cheat_limit=?, cheat_action=?, enforce_fullscreen=?, updated_at=? WHERE id=?`
-  ).bind(b.title, b.description, b.duration_minutes, b.rules_text, b.completion_message,
+  ).bind(b.title.trim(), b.description, duration, b.rules_text, b.completion_message,
     b.is_score_visible ? 1 : 0, b.randomize_questions ? 1 : 0, b.randomize_options ? 1 : 0,
     b.active_status, b.passing_score || 0, b.target_jalur || null,
-    b.cheat_limit || 3, b.cheat_action || 'lock', b.enforce_fullscreen ? 1 : 0,
+    cheatLimit, b.cheat_action || 'lock', b.enforce_fullscreen ? 1 : 0,
     now(), c.req.param('id')
   ).run();
   return c.json(ok(null, 'Ujian diperbarui'));
@@ -365,19 +396,26 @@ admin.post('/exams/:examId/questions', async (c) => {
 admin.post('/exams/:examId/questions/bulk', async (c) => {
   const examId = c.req.param('examId');
   const { questions } = await c.req.json<{ questions: any[] }>();
+  if (!questions?.length) return c.json(err('Data soal kosong'), 400);
+
+  // ── P2: Batch semua insert dalam satu batch call (jauh lebih efisien) ──
+  const allStmts: D1PreparedStatement[] = [];
   for (const q of questions) {
     const qId = newId();
-    await c.env.DB.prepare(
+    allStmts.push(c.env.DB.prepare(
       `INSERT INTO cbt_questions (id, exam_id, question_text, question_type, question_order, image_url, audio_url, points) VALUES (?,?,?,?,?,?,?,?)`
-    ).bind(qId, examId, q.question_text, q.question_type || 'multiple_choice', q.question_order || 0, q.image_url || null, q.audio_url || null, q.points || 1).run();
+    ).bind(qId, examId, q.question_text, q.question_type || 'multiple_choice', q.question_order || 0, q.image_url || null, q.audio_url || null, q.points || 1));
     if (q.options?.length) {
-      const stmts = q.options.map((o: any, i: number) =>
-        c.env.DB.prepare('INSERT INTO cbt_question_options (id, question_id, option_label, option_text, image_url, is_correct, option_order) VALUES (?,?,?,?,?,?,?)')
-          .bind(newId(), qId, o.option_label, o.option_text, o.image_url || null, o.is_correct ? 1 : 0, i)
-      );
-      await c.env.DB.batch(stmts);
+      for (let i = 0; i < q.options.length; i++) {
+        const o = q.options[i];
+        allStmts.push(c.env.DB.prepare(
+          'INSERT INTO cbt_question_options (id, question_id, option_label, option_text, image_url, is_correct, option_order) VALUES (?,?,?,?,?,?,?)'
+        ).bind(newId(), qId, o.option_label, o.option_text, o.image_url || null, o.is_correct ? 1 : 0, i));
+      }
     }
   }
+  // Batch max 100 statements per call
+  for (let i = 0; i < allStmts.length; i += 100) { await c.env.DB.batch(allStmts.slice(i, i + 100)); }
   return c.json(ok({ imported: questions.length }, 'Soal berhasil diimport'));
 });
 

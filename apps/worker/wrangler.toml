@@ -3,7 +3,9 @@ main = "src/index.ts"
 compatibility_date = "2024-06-01"
 
 [vars]
-JWT_SECRET = "8aa2b78e51e9585d6c75135c46fb14d61f40d81ada5993b83b5f0bac0660342c"
+# ⚠️  JWT_SECRET TIDAK boleh di sini!
+# Jalankan sekali: wrangler secret put JWT_SECRET
+# Lalu masukkan secret baru yang kuat (random 64 hex chars)
 CORS_ORIGIN = "https://cbtmansatas.pages.dev,https://cbt.man1tasikmalaya.sch.id"
 
 # Bind ke database PMB EXISTING — JANGAN buat baru!
@@ -16,3 +18,9 @@ database_id = "b28a3f9e-331d-4bd2-9b85-95b12d6f313f"
 [[r2_buckets]]
 binding = "R2"
 bucket_name = "cbt-media"
+
+# KV untuk rate limiting (login & token validation)
+# Buat dengan: wrangler kv:namespace create RATE_LIMIT
+[[kv_namespaces]]
+binding = "RATE_LIMIT"
+id = "e32aa93b3aae4ccdbdad04049e3f628c"

@@ -7,6 +7,7 @@ export interface Env {
   R2: R2Bucket;
   JWT_SECRET: string;
   CORS_ORIGIN: string;
+  RATE_LIMIT: KVNamespace;
 }
 
 export type Role = 'admin' | 'proctor' | 'student';
