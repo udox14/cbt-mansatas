@@ -84,8 +84,9 @@ proctor.post('/sessions/:id/unlock', async (c) => {
   if (!session) return c.json(err('Sesi tidak ditemukan di ruangan Anda'), 404);
   if (session.status === 'submitted' || session.status === 'force_submitted')
     return c.json(err('Ujian sudah selesai, tidak bisa dibuka'), 400);
+  // Reset cheat_warnings juga agar peserta tidak langsung kena lock lagi setelah dibuka
   await c.env.DB.prepare(
-    `UPDATE cbt_exam_sessions SET is_time_locked = 0, last_heartbeat = ? WHERE id = ?`
+    `UPDATE cbt_exam_sessions SET is_time_locked = 0, cheat_warnings = 0, last_heartbeat = ? WHERE id = ?`
   ).bind(now(), c.req.param('id')).run();
   return c.json(ok(null, 'Sesi berhasil dibuka'));
 });

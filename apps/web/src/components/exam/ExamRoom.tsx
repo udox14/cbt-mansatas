@@ -4,6 +4,7 @@ import { GET, POST } from '@/lib/api';
 import { Modal, Spinner } from '@/components/ui';
 import { Clock, ChevronLeft, ChevronRight, Minus, Plus, Send, AlertTriangle, Maximize } from 'lucide-react';
 import DOMPurify from 'dompurify';
+import { useAntiCheatAlarm } from '@/hooks/useAntiCheatAlarm';
 
 // Helper: sanitize HTML sebelum render
 const sanitize = (html: string) => DOMPurify.sanitize(html, { USE_PROFILES: { html: true } });
@@ -14,7 +15,7 @@ interface Question {
   options: { id: string; option_label: string; option_text: string; image_url: string | null }[];
 }
 interface Answer { question_id: string; selected_option_id?: string; essay_answer?: string; is_doubtful?: boolean }
-interface ExamRoomProps { sessionId: string; startedAt: string; durationMinutes: number; onFinish: (result: any) => void }
+interface ExamRoomProps { sessionId: string; startedAt: string; durationMinutes: number; studentName: string; onFinish: (result: any) => void }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 
@@ -23,6 +24,44 @@ const C = {
   text: '#1e2e22', textMid: '#4a6655', textMuted: '#8a9e8d', textFaint: '#a8b9aa',
   green: '#2d7a4f', greenLight: '#e2ebe3', greenBorder: '#b5d9c4',
 };
+
+// ── Komponen Watermark Nama Peserta ──────────────────────────
+// Fixed overlay diagonal, muncul di screenshot sebagai deterrent
+function WatermarkOverlay({ name }: { name: string }) {
+  const text = name.toUpperCase();
+  // Buat grid 6x10 teks watermark yang mengisi seluruh layar
+  const items = Array.from({ length: 60 });
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 35,
+      pointerEvents: 'none', userSelect: 'none',
+      overflow: 'hidden',
+      display: 'grid',
+      gridTemplateColumns: 'repeat(6, 1fr)',
+      gridTemplateRows: 'repeat(10, 1fr)',
+    }}>
+      {items.map((_, i) => (
+        <div key={i} style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          transform: 'rotate(-35deg)',
+          opacity: 0.055,
+          textAlign: 'center',
+        }}>
+          <span style={{
+            fontSize: '11px',
+            fontWeight: 800,
+            color: '#1a2e1a',
+            letterSpacing: '0.08em',
+            lineHeight: 1.6,
+            whiteSpace: 'nowrap',
+          }}>
+            {text}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 // ── Komponen Toast Peringatan ─────────────────────────────────
 // Muncul di atas header (full width), auto-dismiss 15 detik, dengan progress bar
@@ -65,7 +104,8 @@ function CheatToast({ msg, onDismiss }: CheatToastProps) {
   );
 }
 
-export default function ExamRoom({ sessionId, startedAt, durationMinutes, onFinish }: ExamRoomProps) {
+export default function ExamRoom({ sessionId, startedAt, durationMinutes, studentName, onFinish }: ExamRoomProps) {
+  const { playAlarm } = useAntiCheatAlarm();
   const [questions, setQuestions] = useState<Question[]>([]);
   const [answers, setAnswers] = useState<Map<string, Answer>>(new Map());
   const [current, setCurrent] = useState(0);
@@ -80,6 +120,8 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, onFini
   const [cheatLimit, setCheatLimit] = useState(3);
   const [cheatAction, setCheatAction] = useState<'lock' | 'auto_submit'>('lock');
   const [enforceFullscreen, setEnforceFullscreen] = useState(false);
+  // Bug-1 fix: track fullscreen sebagai React state agar tombol render reaktif
+  const [isFullscreen, setIsFullscreen] = useState(false);
   // Toast peringatan
   const [toasts, setToasts] = useState<{ id: number; msg: string }[]>([]);
   // Pesan kunci permanen (bukan toast)
@@ -87,8 +129,14 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, onFini
   const toastIdRef = useRef(0);
   const dirtyRef = useRef(new Set<string>());
   const submittedRef = useRef(false);
+  // Bug-3 fix: pisahkan 'dikunci oleh pelanggaran' dari 'sudah disubmit'
+  // isCheatLockedRef=true berarti sesi dikunci proktor, BISA dipulihkan
+  const isCheatLockedRef = useRef(false);
   const cheatCountRef = useRef(0);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
+  // Bug-2 fix: cooldown 4 detik antar-pelanggaran
+  const lastViolationTimeRef = useRef(0);
+  const VIOLATION_COOLDOWN_MS = 4000;
   // ── M4: answersRef selalu up-to-date (fix stale closure) ──
   const answersRef = useRef<Map<string, Answer>>(new Map());
 
@@ -172,11 +220,21 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, onFini
     const s = setInterval(() => flushAnswers(), 15000);
     const h = setInterval(async () => {
       const r = await POST(`/api/student/sessions/${sessionId}/heartbeat`);
-      if (r.data?.time_locked && !submittedRef.current) {
+      if (r.data?.time_locked && !submittedRef.current && !isCheatLockedRef.current) {
+        // Dikunci oleh sistem waktu (bukan pelanggaran)
         setLockedMsg('Waktu ujian Anda telah berakhir. Ujian dikunci oleh sistem.');
         submittedRef.current = true;
       }
-    }, 15000);
+      // Bug-3 fix: deteksi proktor sudah membuka kunci pelanggaran
+      if (isCheatLockedRef.current && !r.data?.time_locked) {
+        isCheatLockedRef.current = false;
+        submittedRef.current = false;
+        cheatCountRef.current = 0;
+        setCheatCount(0);
+        lastViolationTimeRef.current = Date.now() + 3000; // cooldown 3s setelah unlock
+        setLockedMsg('');
+      }
+    }, 8000); // lebih cepat (8s) agar unlock terasa responsif
     return () => { clearInterval(s); clearInterval(h); };
   }, [sessionId]);
 
@@ -194,7 +252,13 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, onFini
 
   // ── Fungsi deteksi & laporan pelanggaran ──────────────────────
   const reportViolation = useCallback(async (violationType: 'tab_switch' | 'fullscreen_exit') => {
-    if (submittedRef.current) return;
+    if (submittedRef.current || isCheatLockedRef.current) return;
+
+    // Bug-2 fix: cooldown — abaikan pelanggaran dalam 4 detik setelah pelanggaran terakhir
+    const now = Date.now();
+    if (now - lastViolationTimeRef.current < VIOLATION_COOLDOWN_MS) return;
+    lastViolationTimeRef.current = now;
+
     const n = cheatCountRef.current + 1;
     cheatCountRef.current = n;
     setCheatCount(n);
@@ -205,29 +269,43 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, onFini
     const remaining = limit - n;
 
     if (actionTaken === 'auto_submit') {
+      // 🔔 Alarm dikumpulkan paksa
+      playAlarm('locked');
       setLockedMsg(`${limit}x pelanggaran — ujian otomatis dikumpulkan.`);
       submittedRef.current = true;
       await handleSubmit(true);
     } else if (actionTaken === 'lock') {
+      // 🔔 Alarm sesi dikunci — gunakan isCheatLockedRef, BUKAN submittedRef
+      playAlarm('locked');
       setLockedMsg(`${limit}x pelanggaran — sesi dikunci. Hubungi pengawas untuk melanjutkan.`);
-      submittedRef.current = true;
+      isCheatLockedRef.current = true; // bisa dipulihkan oleh proktor
     } else {
+      // 🔔 Alarm peringatan (makin keras setiap pelanggaran)
+      playAlarm('warning', n);
       const typeLabel = violationType === 'fullscreen_exit' ? 'Keluar fullscreen' : 'Meninggalkan halaman';
       addToast(`⚠️ Peringatan ${n}/${limit}: ${typeLabel}! Sisa ${remaining} kesempatan.`);
     }
-  }, [sessionId, cheatLimit, addToast]);
+  }, [sessionId, cheatLimit, addToast, playAlarm]);
 
   // ── Anti-cheat: visibilitychange + fullscreen + keyboard/ctx ──
   useEffect(() => {
     const vis = () => {
-      // Re-acquire wake lock jika halaman kembali visible (setelah notifikasi OS, dll)
       if (!document.hidden && !submittedRef.current) {
+        // Re-acquire wake lock
         if (!wakeLockRef.current || wakeLockRef.current.released) requestWakeLock();
+        // Bug-1 fix: coba masuk fullscreen kembali setelah layar nyala
+        if (enforceFullscreen && document.fullscreenEnabled && !document.fullscreenElement) {
+          setTimeout(() => document.documentElement.requestFullscreen().catch(() => {}), 300);
+        }
       }
-      if (document.hidden && !submittedRef.current) reportViolation('tab_switch');
+      if (document.hidden && !submittedRef.current && !isCheatLockedRef.current) {
+        reportViolation('tab_switch');
+      }
     };
     const fsChange = () => {
-      if (!document.fullscreenElement && !submittedRef.current && enforceFullscreen) {
+      // Bug-1 fix: update React state saat fullscreen berubah
+      setIsFullscreen(!!document.fullscreenElement);
+      if (!document.fullscreenElement && !submittedRef.current && !isCheatLockedRef.current && enforceFullscreen) {
         reportViolation('fullscreen_exit');
       }
     };
@@ -245,7 +323,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, onFini
       document.removeEventListener('contextmenu', ctx);
       document.removeEventListener('keydown', key);
     };
-  }, [enforceFullscreen, reportViolation]);
+  }, [enforceFullscreen, reportViolation, requestWakeLock]);
 
   const setAnswer = useCallback((qId: string, update: Partial<Answer>) => {
     setAnswers(prev => {
@@ -305,6 +383,9 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, onFini
   return (
     <div className="no-select" style={{ minHeight: '100vh', background: C.bg, display: 'flex', flexDirection: 'column', fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}>
 
+      {/* ── WATERMARK NAMA PESERTA (fixed overlay, muncul di screenshot) ── */}
+      <WatermarkOverlay name={studentName} />
+
       {/* ── TOAST PERINGATAN (sticky top, full width, di atas header) ── */}
       {toasts.map(t => (
         <CheatToast key={t.id} msg={t.msg} onDismiss={() => removeToast(t.id)} />
@@ -353,7 +434,8 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, onFini
                 ⚠ {cheatCount}/{cheatLimit}
               </span>
             )}
-            {enforceFullscreen && !document.fullscreenElement && (
+            {/* Bug-1 fix: gunakan isFullscreen state (reaktif), bukan document.fullscreenElement langsung */}
+            {enforceFullscreen && !isFullscreen && (
               <button
                 onClick={() => document.documentElement.requestFullscreen().catch(() => {})}
                 style={{ width: '28px', height: '28px', borderRadius: '8px', background: '#fffbeb', border: '1.5px solid #fde68a', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}

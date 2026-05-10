@@ -85,6 +85,7 @@ function StudentContent() {
   if (activeSession) return (
     <ExamRoom sessionId={activeSession.sessionId} startedAt={activeSession.startedAt}
       durationMinutes={activeSession.durationMinutes}
+      studentName={user.full_name}
       onFinish={r => { setActiveSession(null); setPostExam(r); }} />
   );
 

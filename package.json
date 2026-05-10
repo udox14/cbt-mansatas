@@ -12,5 +12,8 @@
     "deploy:web": "cd apps/web && npx wrangler pages deploy out --project-name=cbt-pmb",
     "db:init": "cd apps/worker && npm run db:init",
     "db:init:local": "cd apps/worker && npm run db:init:local"
+  },
+  "devDependencies": {
+    "wrangler": "^4.90.0"
   }
 }
