@@ -10,6 +10,30 @@ Dokumen ini dipakai saat simulasi dan hari-H CBT MAN 1 Tasikmalaya. Bagikan bagi
 - Jika peserta mengalami kendala, utamakan menjaga halaman ujian tetap terbuka.
 - Semua keputusan membuka kunci, reset perangkat, atau memperbolehkan lanjut ujian harus melalui proktor/panitia.
 
+## Sosialisasi Anti-Cheat
+
+Anti-cheat sebaiknya diberitahukan kepada peserta sebelum ujian dimulai. Tujuannya agar peserta memahami aturan, tidak kaget saat muncul peringatan, dan langsung melapor jika ada kendala teknis.
+
+### Yang Perlu Disampaikan
+
+- Peserta wajib tetap berada di halaman ujian selama ujian berlangsung.
+- Peserta tidak boleh berpindah tab, minimize browser, membuka aplikasi lain, split screen, atau keluar fullscreen jika diminta fullscreen.
+- Sistem dapat mencatat aktivitas yang dianggap pelanggaran.
+- Pelanggaran dapat memunculkan peringatan, mengunci sesi, atau ditindaklanjuti sesuai keputusan panitia/proktor.
+- Jika ada kendala teknis, peserta harus segera mengangkat tangan dan melapor ke proktor.
+- Peserta tidak boleh menutup halaman ujian tanpa instruksi proktor.
+
+### Yang Tidak Perlu Disampaikan Detail
+
+- Batas angka pelanggaran yang terlalu rinci.
+- Detail teknis cara deteksi sistem.
+- Detail cooldown, endpoint, log, atau cara kerja internal aplikasi.
+- Cara reset/unlock sesi.
+
+### Teks Untuk Dibacakan Proktor
+
+> Selama ujian berlangsung, peserta wajib tetap berada di halaman ujian. Sistem akan mendeteksi aktivitas seperti berpindah tab, keluar dari mode layar penuh, membuka aplikasi lain, atau meninggalkan halaman ujian. Setiap pelanggaran akan tercatat dan dapat menimbulkan peringatan, penguncian sesi, atau tindakan sesuai keputusan panitia/proktor. Jika terjadi kendala teknis, segera angkat tangan dan lapor kepada proktor, jangan menutup halaman ujian tanpa instruksi.
+
 ## Runbook Admin/Panitia
 
 ### H-1
@@ -101,6 +125,7 @@ Dokumen ini dipakai saat simulasi dan hari-H CBT MAN 1 Tasikmalaya. Bagikan bagi
    - laporkan ke admin jika tetap gagal.
 4. Setelah peserta berhasil login dan ujian tersedia, bacakan token ruangan.
 5. Pastikan peserta masuk ke halaman soal dan timer berjalan.
+6. Bacakan sosialisasi anti-cheat sebelum peserta mulai mengerjakan.
 
 ### Saat Ujian Berjalan
 
