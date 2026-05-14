@@ -1012,6 +1012,11 @@ function PesertaPage() {
 
   const deletePeserta = async () => {
     if (!confirmDelPeserta) return;
+    if (confirmDelPeserta._sumber !== 'manual') {
+      toast('error', 'Peserta PMB tidak bisa dihapus dari aplikasi CBT');
+      setConfirmDelPeserta(null);
+      return;
+    }
     setDeletingPeserta(true);
     const sumber = confirmDelPeserta._sumber;
     let r;
@@ -1285,12 +1290,14 @@ function PesertaPage() {
                             </button>
                           </td>
                           <td style={{ padding: '10px 14px', textAlign: 'center' }}>
-                            <button onClick={() => setConfirmDelPeserta(p)}
-                              style={{ width: '28px', height: '28px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: '8px', background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted }}
-                              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#fef2f2'; (e.currentTarget as HTMLElement).style.color = '#dc2626'; }}
-                              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'none'; (e.currentTarget as HTMLElement).style.color = C.textMuted; }}>
-                              <Trash2 size={13} />
-                            </button>
+                            {(p as any)._sumber === 'manual' && (
+                              <button onClick={() => setConfirmDelPeserta(p)}
+                                style={{ width: '28px', height: '28px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: '8px', background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted }}
+                                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#fef2f2'; (e.currentTarget as HTMLElement).style.color = '#dc2626'; }}
+                                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'none'; (e.currentTarget as HTMLElement).style.color = C.textMuted; }}>
+                                <Trash2 size={13} />
+                              </button>
+                            )}
                           </td>
                         </tr>
                       ))}
@@ -1327,10 +1334,12 @@ function PesertaPage() {
                           style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '5px', color: C.green, background: C.greenLight, border: `1.5px solid ${C.greenBorder}`, borderRadius: '9px', padding: '7px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}>
                           <UserPlus size={13} /> {p.ruang_tes ? 'Pindah Ruangan' : 'Assign Ruangan'}
                         </button>
-                        <button onClick={() => setConfirmDelPeserta(p)}
-                          style={{ width: '36px', height: '36px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: '9px', background: '#fef2f2', border: '1.5px solid #fecaca', cursor: 'pointer', color: '#dc2626', flexShrink: 0 }}>
-                          <Trash2 size={14} />
-                        </button>
+                        {p._sumber === 'manual' && (
+                          <button onClick={() => setConfirmDelPeserta(p)}
+                            style={{ width: '36px', height: '36px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: '9px', background: '#fef2f2', border: '1.5px solid #fecaca', cursor: 'pointer', color: '#dc2626', flexShrink: 0 }}>
+                            <Trash2 size={14} />
+                          </button>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -1411,7 +1420,7 @@ function PesertaPage() {
             <p style={{ color: '#dc2626', fontSize: '12.5px', fontWeight: 600, marginBottom: '18px', lineHeight: 1.5 }}>
               {confirmDelPeserta._sumber === 'manual'
                 ? 'Akun peserta ini akan dihapus permanen dan tidak dapat dikembalikan.'
-                : 'Data peserta ini akan dihapus dari sistem CBT. Data di PMB tidak terpengaruh.'}
+                : 'Peserta PMB tidak bisa dihapus dari CBT. Untuk mengeluarkan dari ruang/ujian, kosongkan ruang atau hapus assignment ujian.'}
             </p>
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
               <button onClick={() => setConfirmDelPeserta(null)}
