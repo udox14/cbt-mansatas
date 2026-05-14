@@ -1,5 +1,5 @@
 'use client';
-import { ReactNode, useState, createContext, useContext, useCallback } from 'react';
+import { ReactNode, useState, createContext, useContext, useCallback, useRef } from 'react';
 
 const C = {
   white: '#fff', bg: '#f4f6f4', border: '#e0e5e0', borderMid: '#d4dbd4',
@@ -11,17 +11,25 @@ const C = {
 export function Modal({ open, onClose, title, children, size = 'md' }: {
   open: boolean; onClose: () => void; title?: string; children: ReactNode; size?: 'sm' | 'md' | 'lg';
 }) {
+  const backdropPointerDownRef = useRef(false);
   if (!open) return null;
   const maxW = { sm: '420px', md: '560px', lg: '680px' }[size];
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}
-      className="sm:items-center" onClick={onClose}>
-      <div style={{ position: 'fixed', inset: 0, background: 'rgba(30,46,34,0.4)' }} />
+      className="sm:items-center">
+      <div
+        style={{ position: 'fixed', inset: 0, background: 'rgba(30,46,34,0.4)' }}
+        onPointerDown={e => { backdropPointerDownRef.current = e.target === e.currentTarget; }}
+        onClick={e => {
+          if (backdropPointerDownRef.current && e.target === e.currentTarget) onClose();
+          backdropPointerDownRef.current = false;
+        }}
+      />
       <div style={{
         position: 'relative', background: C.white, width: '100%', maxWidth: maxW,
         maxHeight: '90vh', overflowY: 'auto',
         borderRadius: '20px 20px 0 0', boxShadow: '0 -4px 32px rgba(0,0,0,0.08)',
-      }} className="sm:rounded-xl fade-in" onClick={e => e.stopPropagation()}>
+      }} className="sm:rounded-xl fade-in" onPointerDown={() => { backdropPointerDownRef.current = false; }}>
         {title && (
           <div style={{ position: 'sticky', top: 0, background: C.white, borderBottom: `1.5px solid ${C.border}`, padding: '14px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', zIndex: 10, borderRadius: '20px 20px 0 0' }}>
             <p style={{ fontWeight: 800, color: C.text, fontSize: '14px' }}>{title}</p>
@@ -202,4 +210,3 @@ export function Button({ variant = 'primary', size = 'md', loading, children, cl
     </button>
   );
 }
-

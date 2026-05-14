@@ -17,7 +17,7 @@ student.get('/exams', async (c) => {
   const userType = user.source === 'pendaftar' ? 'pendaftar' : 'cbt_user';
 
   const { results } = await c.env.DB.prepare(
-    `SELECT e.id, e.title, e.description, e.duration_minutes, e.rules_text, e.active_status, e.target_jalur,
+    `SELECT e.id, e.title, e.description, e.duration_minutes, e.rules_text, e.active_status, e.target_jalur, e.enforce_fullscreen,
             es.id as session_id, es.status as session_status, es.is_time_locked
      FROM cbt_exams e
      LEFT JOIN cbt_exam_sessions es ON es.exam_id = e.id AND es.user_id = ? AND es.user_type = ?
@@ -67,7 +67,7 @@ student.get('/exams', async (c) => {
       jadwal_status = 'aktif';
     }
 
-    return { ...exam, jadwal_status, jadwal_info, target_jalur: undefined };
+    return { ...exam, enforce_fullscreen: !!exam.enforce_fullscreen, jadwal_status, jadwal_info, target_jalur: undefined };
   });
 
   return c.json(ok(enriched));
@@ -299,6 +299,14 @@ student.post('/sessions/:sessionId/heartbeat', async (c) => {
   const sessionId = c.req.param('sessionId');
   const userType = user.source === 'pendaftar' ? 'pendaftar' : 'cbt_user';
 
+  const session = await c.env.DB.prepare(
+    `SELECT es.*, e.duration_minutes
+     FROM cbt_exam_sessions es
+     JOIN cbt_exams e ON e.id = es.exam_id
+     WHERE es.id=? AND es.user_id=? AND es.user_type=?`
+  ).bind(sessionId, user.sub, userType).first<any>();
+  if (!session) return c.json(err('Sesi tidak ditemukan'), 404);
+
   await c.env.DB.prepare(
     'UPDATE cbt_exam_sessions SET last_heartbeat=? WHERE id=? AND user_id=? AND user_type=?'
   ).bind(now(), sessionId, user.sub, userType).run();
@@ -311,15 +319,26 @@ student.post('/sessions/:sessionId/heartbeat', async (c) => {
     if (jadwal?.sesi_tes && jadwal?.tanggal_tes) {
       const parsed = parseSesiJam(jadwal.sesi_tes);
       if (parsed && cekJadwal(jadwal.tanggal_tes, parsed.jamMulai, parsed.jamSelesai) === 'selesai') {
-        await c.env.DB.prepare(
-          'UPDATE cbt_exam_sessions SET is_time_locked=1 WHERE id=? AND user_id=? AND user_type=? AND is_time_locked=0'
-        ).bind(sessionId, user.sub, userType).run();
-        return c.json(ok({ time_locked: true }, 'Waktu ujian berakhir'));
+        await finalizeSession(c.env.DB, session, [], 'force_submitted');
+        return c.json(ok({ time_locked: true, auto_submitted: true }, 'Waktu ujian berakhir dan otomatis dikumpulkan'));
       }
     }
   }
 
-  return c.json(ok({ time_locked: false }));
+  if (session.status === 'submitted' || session.status === 'force_submitted') {
+    return c.json(ok({ time_locked: false, auto_submitted: true }));
+  }
+
+  if (isSessionDurationExpired(session)) {
+    await finalizeSession(c.env.DB, session, [], 'force_submitted');
+    return c.json(ok({ time_locked: true, auto_submitted: true }, 'Waktu ujian berakhir dan otomatis dikumpulkan'));
+  }
+
+  if (session.is_time_locked) {
+    return c.json(ok({ time_locked: true, auto_submitted: false }));
+  }
+
+  return c.json(ok({ time_locked: false, auto_submitted: false }));
 });
 
 // ── POST cheat ────────────────────────────────────────────────
@@ -384,19 +403,20 @@ student.post('/sessions/:sessionId/submit', async (c) => {
   const sessionId = c.req.param('sessionId');
   const body = await c.req.json<{ answers?: any[] }>().catch(() => ({} as { answers?: any[] }));
   const session = await c.env.DB.prepare(
-    'SELECT * FROM cbt_exam_sessions WHERE id=? AND user_id=? AND user_type=?'
+    `SELECT es.*, e.duration_minutes
+     FROM cbt_exam_sessions es
+     JOIN cbt_exams e ON e.id = es.exam_id
+     WHERE es.id=? AND es.user_id=? AND es.user_type=?`
   ).bind(sessionId, user.sub, userType).first<any>();
   if (!session) return c.json(err('Sesi tidak ditemukan'), 404);
 
   if (session.status !== 'submitted' && session.status !== 'force_submitted') {
-    if (session.is_time_locked) {
+    const timeExpired = isSessionDurationExpired(session);
+    if (session.is_time_locked && !timeExpired) {
       return c.json(err('Waktu ujian dikunci. Hubungi pengawas jika jawaban terakhir belum tersimpan.'), 403);
     }
 
-    await saveAnswers(c.env.DB, sessionId, body.answers || []);
-    await c.env.DB.prepare(
-      `UPDATE cbt_exam_sessions SET status='submitted', finished_at=?, last_heartbeat=? WHERE id=? AND user_id=? AND user_type=? AND status NOT IN ('submitted','force_submitted')`
-    ).bind(now(), now(), sessionId, user.sub, userType).run();
+    await finalizeSession(c.env.DB, session, body.answers || [], timeExpired || session.is_time_locked ? 'force_submitted' : 'submitted');
   }
 
   const result = await computeScore(c.env.DB, sessionId, session.exam_id, session.user_id, session.user_type);
@@ -424,6 +444,23 @@ async function saveAnswers(db: D1Database, sessionId: string, answers: any[]) {
     ).bind(newId(), sessionId, a.question_id, a.selected_option_id || null, a.essay_answer || null, a.is_doubtful ? 1 : 0, now())
   );
   for (let i = 0; i < stmts.length; i += 100) await db.batch(stmts.slice(i, i + 100));
+}
+
+function isSessionDurationExpired(session: any) {
+  const startedAt = new Date(session.started_at).getTime();
+  const durationMinutes = Number(session.duration_minutes || 0);
+  if (!Number.isFinite(startedAt) || !durationMinutes) return false;
+  return Date.now() >= startedAt + durationMinutes * 60 * 1000;
+}
+
+async function finalizeSession(db: D1Database, session: any, answers: any[], status: 'submitted' | 'force_submitted') {
+  await saveAnswers(db, session.id, answers || []);
+  await db.prepare(
+    `UPDATE cbt_exam_sessions
+     SET status=?, finished_at=COALESCE(finished_at, ?), last_heartbeat=?
+     WHERE id=? AND user_id=? AND user_type=? AND status NOT IN ('submitted','force_submitted')`
+  ).bind(status, now(), now(), session.id, session.user_id, session.user_type).run();
+  return computeScore(db, session.id, session.exam_id, session.user_id, session.user_type);
 }
 
 async function computeScore(db: D1Database, sessionId: string, examId: string, userId: string, userType: string) {

@@ -12,6 +12,7 @@ interface Exam {
   id: string; title: string; description: string | null;
   duration_minutes: number; rules_text: string | null;
   session_id: string | null; session_status: string | null;
+  enforce_fullscreen?: boolean;
   jadwal_status?: 'aktif' | 'belum' | 'selesai' | 'no_schedule';
   jadwal_info?: string | null;
   is_time_locked?: number;
@@ -127,6 +128,9 @@ function StudentContent() {
   const validate = async () => {
     if (!selected) return;
     if (tokenInput.length < 4) { setTokenError('Token minimal 4 digit'); return; }
+    if (selected.enforce_fullscreen && document.fullscreenEnabled && !document.fullscreenElement) {
+      await document.documentElement.requestFullscreen().catch(() => {});
+    }
     setTokenLoading(true); setTokenError('');
     const r = await POST(`/api/student/exams/${selected.id}/validate-token`, { token_code: tokenInput, device_id: getDeviceId() });
     setTokenLoading(false);

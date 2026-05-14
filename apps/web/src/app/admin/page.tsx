@@ -960,6 +960,9 @@ function PesertaPage() {
   const [allJalur, setAllJalur] = useState<string[]>([]);
   const [confirmDelPeserta, setConfirmDelPeserta] = useState<any | null>(null);
   const [deletingPeserta, setDeletingPeserta] = useState(false);
+  const [selectedParticipants, setSelectedParticipants] = useState<Set<string>>(new Set());
+  const [batchRoom, setBatchRoom] = useState('');
+  const [savingBatchAssign, setSavingBatchAssign] = useState(false);
 
   const savePeserta = async () => {
     if (!editPeserta?.nisn || !editPeserta?.nama_lengkap) { toast('error', 'NISN dan nama wajib diisi'); return; }
@@ -1022,6 +1025,26 @@ function PesertaPage() {
     else toast('error', r.error || 'Gagal menghapus');
   };
 
+  const participantKey = useCallback((p: any) => `${p._sumber || 'pmb'}:${p.id}`, []);
+  const selectedParticipantRows = data.filter((p: any) => selectedParticipants.has(participantKey(p)));
+  const saveBatchAssignRoom = async () => {
+    if (selectedParticipantRows.length === 0) { toast('error', 'Pilih minimal 1 peserta'); return; }
+    setSavingBatchAssign(true);
+    const r = await POST('/api/admin/participants/assign-room', {
+      ruang_tes: batchRoom || null,
+      participants: selectedParticipantRows.map((p: any) => ({ id: p.id, source: p._sumber === 'manual' ? 'manual' : 'pmb' })),
+    });
+    setSavingBatchAssign(false);
+    if (r.success) {
+      toast('success', r.message || 'Peserta berhasil di-assign');
+      setSelectedParticipants(new Set());
+      setBatchRoom('');
+      fetchPeserta();
+    } else {
+      toast('error', r.error || 'Gagal');
+    }
+  };
+
   const fetchPeserta = useCallback(async () => {
     // Ambil dari semua sumber: semua pendaftar PMB + cbt_users (role student) + jalur list
     const [pmb, manual, rooms, jalur] = await Promise.all([
@@ -1061,6 +1084,8 @@ function PesertaPage() {
   const [filterTgl, setFilterTgl] = useState('');
   const [filterJk, setFilterJk] = useState('');
   const [filterJalur, setFilterJalur] = useState('');
+  const [pageSize, setPageSize] = useState<'20' | '50' | '100' | 'all'>('20');
+  const [page, setPage] = useState(1);
   const jalurOpts = Array.from(new Set(data.map((p: any) => p.jalur).filter(Boolean))).sort() as string[];
 
   const filtered = data.filter((p: any) => {
@@ -1072,6 +1097,39 @@ function PesertaPage() {
     if (filterJalur && (p.jalur || '').toUpperCase() !== filterJalur.toUpperCase()) return false;
     return true;
   });
+  const perPage = pageSize === 'all' ? filtered.length || 1 : Number(pageSize);
+  const totalPages = pageSize === 'all' ? 1 : Math.max(1, Math.ceil(filtered.length / perPage));
+  const currentPage = Math.min(page, totalPages);
+  const pageStart = pageSize === 'all' ? 0 : (currentPage - 1) * perPage;
+  const pagedParticipants = pageSize === 'all' ? filtered : filtered.slice(pageStart, pageStart + perPage);
+  const pageEnd = pageSize === 'all' ? filtered.length : Math.min(filtered.length, pageStart + pagedParticipants.length);
+  const pageParticipantKeys = pagedParticipants.map((p: any) => participantKey(p));
+  const allPageSelected = pageParticipantKeys.length > 0 && pageParticipantKeys.every(k => selectedParticipants.has(k));
+  const toggleParticipant = (p: any) => {
+    const key = participantKey(p);
+    setSelectedParticipants(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+  const togglePageParticipants = () => {
+    setSelectedParticipants(prev => {
+      const next = new Set(prev);
+      if (allPageSelected) pageParticipantKeys.forEach(k => next.delete(k));
+      else pageParticipantKeys.forEach(k => next.add(k));
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    setPage(1);
+  }, [filterRoom, filterSesi, filterTgl, filterSumber, filterJk, filterJalur, pageSize]);
+  useEffect(() => {
+    const valid = new Set(data.map((p: any) => participantKey(p)));
+    setSelectedParticipants(prev => new Set(Array.from(prev).filter(k => valid.has(k))));
+  }, [data, participantKey]);
 
   const selStyle = (val: string): React.CSSProperties => ({
     padding: '7px 11px', fontSize: '12px', fontWeight: 600,
@@ -1128,6 +1186,12 @@ function PesertaPage() {
             <option value="">Semua Jalur</option>
             {jalurOpts.map(j => <option key={j} value={j}>{j}</option>)}
           </select>
+          <select value={pageSize} onChange={e => setPageSize(e.target.value as '20' | '50' | '100' | 'all')} style={selStyle(pageSize)}>
+            <option value="20">20 / halaman</option>
+            <option value="50">50 / halaman</option>
+            <option value="100">100 / halaman</option>
+            <option value="all">Semua</option>
+          </select>
           {(filterRoom || filterSesi || filterTgl || filterSumber || filterJk || filterJalur) && (
             <button onClick={() => { setFilterRoom(''); setFilterSesi(''); setFilterTgl(''); setFilterSumber(''); setFilterJk(''); setFilterJalur(''); }}
               style={{ fontSize: '11.5px', fontWeight: 700, color: '#dc2626', background: '#fef2f2', border: '1.5px solid #fecaca', borderRadius: '10px', padding: '7px 12px', cursor: 'pointer' }}>
@@ -1136,18 +1200,64 @@ function PesertaPage() {
           )}
         </div>
 
+        {!loading && filtered.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap', background: C.white, border: `1.5px solid ${selectedParticipants.size ? C.greenBorder : C.borderMid}`, borderRadius: '12px', padding: '10px 12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <button onClick={togglePageParticipants}
+                style={{ fontSize: '11.5px', fontWeight: 700, color: allPageSelected ? '#dc2626' : C.green, background: allPageSelected ? '#fef2f2' : C.greenLight, border: `1.5px solid ${allPageSelected ? '#fecaca' : C.greenBorder}`, borderRadius: '9px', padding: '7px 11px', cursor: 'pointer' }}>
+                {allPageSelected ? 'Batal pilih halaman' : 'Pilih halaman ini'}
+              </button>
+              <span style={{ color: selectedParticipants.size ? C.text : C.textMuted, fontSize: '11.5px', fontWeight: 700 }}>
+                {selectedParticipants.size} peserta dipilih
+              </span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <select value={batchRoom} onChange={e => setBatchRoom(e.target.value)} style={selStyle(batchRoom)}>
+                <option value="">Tanpa Ruangan</option>
+                {allRooms.map(r => <option key={r.id} value={r.room_name}>{r.room_name}</option>)}
+              </select>
+              <Button size="sm" loading={savingBatchAssign} disabled={selectedParticipants.size === 0} onClick={saveBatchAssignRoom}>
+                Assign Terpilih
+              </Button>
+            </div>
+          </div>
+        )}
+
         {loading ? <div className="py-12 text-center"><Spinner /></div>
           : filtered.length === 0 ? <EmptyState title="Belum ada peserta" desc="Hanya peserta jalur Reguler Murni yang ditampilkan" />
             : (
               <>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
+                  <p style={{ color: C.textMuted, fontSize: '11.5px', fontWeight: 600 }}>
+                    Menampilkan {pageStart + 1}-{pageEnd} dari {filtered.length} peserta
+                  </p>
+                  {pageSize !== 'all' && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={currentPage <= 1}
+                        style={{ padding: '6px 10px', fontSize: '11.5px', fontWeight: 700, color: currentPage <= 1 ? C.textFaint : C.textMid, background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '9px', cursor: currentPage <= 1 ? 'not-allowed' : 'pointer' }}>
+                        Sebelumnya
+                      </button>
+                      <span style={{ color: C.textMuted, fontSize: '11.5px', fontWeight: 700 }}>
+                        {currentPage} / {totalPages}
+                      </span>
+                      <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={currentPage >= totalPages}
+                        style={{ padding: '6px 10px', fontSize: '11.5px', fontWeight: 700, color: currentPage >= totalPages ? C.textFaint : C.textMid, background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '9px', cursor: currentPage >= totalPages ? 'not-allowed' : 'pointer' }}>
+                        Berikutnya
+                      </button>
+                    </div>
+                  )}
+                </div>
                 {/* DESKTOP: table */}
                 <div className="hidden md:block" style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '12px', overflow: 'hidden' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                    <TableHead cols={[{ label: '#' }, { label: 'Nama' }, { label: 'NISN' }, { label: 'JK', center: true }, { label: 'Jalur' }, { label: 'Ruang' }, { label: 'Sesi' }, { label: 'Tgl Tes' }, { label: 'Sumber' }, { label: 'Aksi', center: true }, { label: '', center: true }]} />
+                    <TableHead cols={[{ label: 'Pilih', center: true }, { label: '#' }, { label: 'Nama' }, { label: 'NISN' }, { label: 'JK', center: true }, { label: 'Jalur' }, { label: 'Ruang' }, { label: 'Sesi' }, { label: 'Tgl Tes' }, { label: 'Sumber' }, { label: 'Aksi', center: true }, { label: '', center: true }]} />
                     <tbody>
-                      {filtered.map((p, i) => (
-                        <tr key={p.id} style={{ borderBottom: i < filtered.length - 1 ? `1px solid ${C.borderLight}` : 'none' }}>
-                          <td style={{ padding: '10px 14px', color: C.textMuted }}>{i + 1}</td>
+                      {pagedParticipants.map((p, i) => (
+                        <tr key={p.id} style={{ borderBottom: i < pagedParticipants.length - 1 ? `1px solid ${C.borderLight}` : 'none' }}>
+                          <td style={{ padding: '10px 14px', textAlign: 'center' }}>
+                            <input type="checkbox" checked={selectedParticipants.has(participantKey(p))} onChange={() => toggleParticipant(p)} />
+                          </td>
+                          <td style={{ padding: '10px 14px', color: C.textMuted }}>{pageStart + i + 1}</td>
                           <td style={{ padding: '10px 14px', color: C.text, fontWeight: 700 }}>{p.nama_lengkap}</td>
                           <td style={{ padding: '10px 14px', color: C.textMuted, fontFamily: 'monospace' }}>{p.nisn}</td>
                           <td style={{ padding: '10px 14px', textAlign: 'center', color: C.textMuted, fontWeight: 600 }}>{p.jenis_kelamin ? (p.jenis_kelamin === 'L' || p.jenis_kelamin?.toUpperCase() === 'LAKI-LAKI' ? 'L' : 'P') : '—'}</td>
@@ -1190,10 +1300,11 @@ function PesertaPage() {
 
                 {/* MOBILE: cards — compact & consistent */}
                 <div className="md:hidden flex flex-col gap-2">
-                  {(filtered as any[]).map((p: any) => (
+                  {(pagedParticipants as any[]).map((p: any) => (
                     <div key={p.id} style={{ background: C.white, border: `1.5px solid ${p.ruang_tes ? C.borderMid : C.borderMid}`, borderRadius: '14px', padding: '12px 14px' }}>
                       {/* Row 1: nama + ruangan badge */}
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '6px' }}>
+                        <input type="checkbox" checked={selectedParticipants.has(participantKey(p))} onChange={() => toggleParticipant(p)} style={{ flexShrink: 0 }} />
                         <p style={{ color: C.text, fontSize: '13.5px', fontWeight: 800, lineHeight: 1.2, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.nama_lengkap}</p>
                         <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
                           {p.ruang_tes
@@ -1334,6 +1445,12 @@ function RoomsPage() {
   const [roomDetail, setRoomDetail] = useState<Room | null>(null);
   const [roomStudents, setRoomStudents] = useState<any[]>([]);
   const [loadingStudents, setLoadingStudents] = useState(false);
+  const [studentAssignRoom, setStudentAssignRoom] = useState<Room | null>(null);
+  const [studentCandidates, setStudentCandidates] = useState<any[]>([]);
+  const [selectedRoomParticipants, setSelectedRoomParticipants] = useState<Set<string>>(new Set());
+  const [studentCandidateSearch, setStudentCandidateSearch] = useState('');
+  const [loadingStudentCandidates, setLoadingStudentCandidates] = useState(false);
+  const [savingRoomStudentAssign, setSavingRoomStudentAssign] = useState(false);
 
   const fetchData = useCallback(async () => {
     const [r, p] = await Promise.all([GET<Room[]>('/api/admin/rooms'), GET<Proctor[]>('/api/admin/proctors')]);
@@ -1347,6 +1464,7 @@ function RoomsPage() {
   const assignProctor = async () => { if (!assignModal || !selectedProctor) return; await PUT(`/api/admin/proctors/${selectedProctor}/assign`, { room_id: assignModal.id }); toast('success', 'Berhasil'); setAssignModal(null); setSelectedProctor(''); fetchData(); };
   const unassignProctor = async (pid: string) => { await PUT(`/api/admin/proctors/${pid}/assign`, { room_id: null }); toast('success', 'Proktor dihapus'); fetchData(); };
   const unassigned = proctors.filter(p => !p.room_id);
+  const roomParticipantKey = useCallback((p: any) => `${p.source}:${p.id}`, []);
 
   const openRoomDetail = async (room: Room) => {
     setRoomDetail(room);
@@ -1360,11 +1478,86 @@ function RoomsPage() {
     const pmbList = (pmb.success ? pmb.data || [] : []).map((p: any) => ({
       nama: p.nama_lengkap, nisn: p.nisn, sesi: p.sesi_tes, sumber: 'PMB',
     }));
+    const pmbNisn = new Set(pmbList.map((p: any) => p.nisn).filter(Boolean));
     const manualList = (manual.success ? manual.data || [] : []).map((u: any) => ({
       nama: u.full_name, nisn: u.nisn || u.username, sesi: '—', sumber: 'Manual',
-    }));
+    })).filter((u: any) => !u.nisn || !pmbNisn.has(u.nisn));
     setRoomStudents([...pmbList, ...manualList]);
     setLoadingStudents(false);
+  };
+
+  const openStudentAssign = async (room: Room) => {
+    setStudentAssignRoom(room);
+    setSelectedRoomParticipants(new Set());
+    setStudentCandidateSearch('');
+    setLoadingStudentCandidates(true);
+    const [pmb, manual, roomListResp] = await Promise.all([
+      GET<any[]>('/api/admin/pendaftar'),
+      GET<any[]>('/api/admin/users?role=student'),
+      GET<Room[]>('/api/admin/rooms'),
+    ]);
+    const roomList = roomListResp.success ? roomListResp.data || [] : rooms;
+    const pmbList = (pmb.success ? pmb.data || [] : [])
+      .filter((p: any) => p.ruang_tes !== room.room_name)
+      .map((p: any) => ({
+        id: p.id, source: 'pmb', nama: p.nama_lengkap, nisn: p.nisn, ruang_tes: p.ruang_tes || '', jalur: p.jalur || '',
+      }));
+    const pmbNisn = new Set((pmb.success ? pmb.data || [] : []).map((p: any) => p.nisn).filter(Boolean));
+    const manualList = (manual.success ? manual.data || [] : [])
+      .filter((u: any) => u.room_id !== room.id)
+      .filter((u: any) => !u.nisn || !pmbNisn.has(u.nisn))
+      .map((u: any) => ({
+        id: u.id, source: 'manual', nama: u.full_name, nisn: u.nisn || u.username,
+        ruang_tes: roomList.find((r: Room) => r.id === u.room_id)?.room_name || '', jalur: 'REGULER',
+      }));
+    setStudentCandidates([...pmbList, ...manualList]);
+    setLoadingStudentCandidates(false);
+  };
+
+  const filteredStudentCandidates = studentCandidates.filter((p: any) => {
+    const q = studentCandidateSearch.trim().toLowerCase();
+    if (!q) return true;
+    return `${p.nama} ${p.nisn} ${p.ruang_tes} ${p.jalur}`.toLowerCase().includes(q);
+  });
+  const visibleRoomCandidateKeys = filteredStudentCandidates.map(roomParticipantKey);
+  const allRoomCandidatesSelected = visibleRoomCandidateKeys.length > 0 && visibleRoomCandidateKeys.every(k => selectedRoomParticipants.has(k));
+  const toggleRoomCandidate = (p: any) => {
+    const key = roomParticipantKey(p);
+    setSelectedRoomParticipants(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+  const toggleVisibleRoomCandidates = () => {
+    setSelectedRoomParticipants(prev => {
+      const next = new Set(prev);
+      if (allRoomCandidatesSelected) visibleRoomCandidateKeys.forEach(k => next.delete(k));
+      else visibleRoomCandidateKeys.forEach(k => next.add(k));
+      return next;
+    });
+  };
+  const saveRoomStudentAssign = async () => {
+    if (!studentAssignRoom) return;
+    const selectedRows = studentCandidates.filter((p: any) => selectedRoomParticipants.has(roomParticipantKey(p)));
+    if (selectedRows.length === 0) { toast('error', 'Pilih minimal 1 peserta'); return; }
+    setSavingRoomStudentAssign(true);
+    const r = await POST('/api/admin/participants/assign-room', {
+      ruang_tes: studentAssignRoom.room_name,
+      participants: selectedRows.map((p: any) => ({ id: p.id, source: p.source })),
+    });
+    setSavingRoomStudentAssign(false);
+    if (r.success) {
+      toast('success', r.message || 'Peserta berhasil di-assign');
+      setStudentAssignRoom(null);
+      setStudentCandidates([]);
+      setSelectedRoomParticipants(new Set());
+      fetchData();
+      if (roomDetail?.id === studentAssignRoom.id) openRoomDetail(studentAssignRoom);
+    } else {
+      toast('error', r.error || 'Gagal');
+    }
   };
 
   return (
@@ -1403,9 +1596,14 @@ function RoomsPage() {
                                 : <div className="space-y-1">{rp.map(p => <div key={p.id} className="flex items-center gap-1.5 text-xs" style={{ color: C.textMid }}><span>{p.full_name}</span><button onClick={() => unassignProctor(p.id)} style={{ color: C.borderMid, background: 'none', border: 'none', cursor: 'pointer', lineHeight: 1 }}><X size={11} /></button></div>)}</div>}
                             </td>
                             <td style={{ padding: '10px 14px', textAlign: 'center' }}>
-                              <button onClick={() => { setAssignModal(r); setSelectedProctor(''); }} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: C.green, fontSize: '11px', fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer' }}>
-                                <UserPlus size={12} /> Assign
-                              </button>
+                              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', justifyContent: 'center' }}>
+                                <button onClick={() => openStudentAssign(r)} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: '#1a5fa8', fontSize: '11px', fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer' }}>
+                                  <Users size={12} /> Peserta
+                                </button>
+                                <button onClick={() => { setAssignModal(r); setSelectedProctor(''); }} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: C.green, fontSize: '11px', fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer' }}>
+                                  <UserPlus size={12} /> Proktor
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         );
@@ -1433,9 +1631,14 @@ function RoomsPage() {
                               ? <p style={{ color: C.textFaint, fontSize: '11.5px' }}>Belum ada proktor</p>
                               : rp.map(p => <p key={p.id} style={{ color: C.textMid, fontSize: '11.5px', fontWeight: 600 }}>{p.full_name}</p>)}
                           </div>
-                          <button onClick={() => { setAssignModal(r); setSelectedProctor(''); }} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: C.green, fontSize: '11.5px', fontWeight: 700, background: C.greenLight, border: `1.5px solid ${C.greenBorder}`, borderRadius: '8px', padding: '5px 10px', cursor: 'pointer' }}>
-                            <UserPlus size={12} /> Assign
-                          </button>
+                          <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
+                            <button onClick={() => openStudentAssign(r)} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: '#1a5fa8', fontSize: '11.5px', fontWeight: 700, background: '#e0f0ff', border: '1.5px solid #b8ddff', borderRadius: '8px', padding: '5px 9px', cursor: 'pointer' }}>
+                              <Users size={12} /> Peserta
+                            </button>
+                            <button onClick={() => { setAssignModal(r); setSelectedProctor(''); }} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: C.green, fontSize: '11.5px', fontWeight: 700, background: C.greenLight, border: `1.5px solid ${C.greenBorder}`, borderRadius: '8px', padding: '5px 9px', cursor: 'pointer' }}>
+                              <UserPlus size={12} /> Proktor
+                            </button>
+                          </div>
                         </div>
                       </div>
                     );
@@ -1447,6 +1650,11 @@ function RoomsPage() {
 
       {/* Modal detail siswa per ruangan */}
       <Modal open={!!roomDetail} onClose={() => setRoomDetail(null)} title={`Siswa — ${roomDetail?.room_name}`} size="md">
+        {roomDetail && (
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '12px' }}>
+            <Button size="sm" onClick={() => openStudentAssign(roomDetail)}><Users size={13} /> Tambah Peserta</Button>
+          </div>
+        )}
         {loadingStudents
           ? <div className="py-8 text-center"><Spinner /></div>
           : roomStudents.length === 0
@@ -1484,6 +1692,55 @@ function RoomsPage() {
                 </div>
               </div>
             )}
+      </Modal>
+
+      <Modal open={!!studentAssignRoom} onClose={() => setStudentAssignRoom(null)} title={`Tambah Peserta — ${studentAssignRoom?.room_name}`} size="lg">
+        <div className="space-y-3">
+          <Input
+            placeholder="Cari nama, NISN, ruangan, jalur..."
+            value={studentCandidateSearch}
+            onChange={e => setStudentCandidateSearch(e.target.value)}
+          />
+          {loadingStudentCandidates
+            ? <div className="py-8 text-center"><Spinner /></div>
+            : studentCandidates.length === 0
+              ? <EmptyState title="Tidak ada kandidat peserta" desc="Semua peserta sudah berada di ruangan ini" />
+              : (
+                <>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
+                    <button onClick={toggleVisibleRoomCandidates}
+                      style={{ fontSize: '11.5px', fontWeight: 700, color: allRoomCandidatesSelected ? '#dc2626' : C.green, background: allRoomCandidatesSelected ? '#fef2f2' : C.greenLight, border: `1.5px solid ${allRoomCandidatesSelected ? '#fecaca' : C.greenBorder}`, borderRadius: '9px', padding: '7px 11px', cursor: 'pointer' }}>
+                      {allRoomCandidatesSelected ? 'Batal pilih hasil' : 'Pilih semua hasil'}
+                    </button>
+                    <span style={{ color: C.textMuted, fontSize: '11.5px', fontWeight: 700 }}>
+                      {selectedRoomParticipants.size} dipilih · {filteredStudentCandidates.length} kandidat
+                    </span>
+                  </div>
+                  <div style={{ maxHeight: '360px', overflowY: 'auto', border: `1.5px solid ${C.borderMid}`, borderRadius: '12px', background: C.bg }}>
+                    {filteredStudentCandidates.length === 0
+                      ? <p style={{ padding: '20px', textAlign: 'center', color: C.textFaint, fontSize: '12px' }}>Tidak ada hasil</p>
+                      : filteredStudentCandidates.map((p: any, i: number) => (
+                        <label key={roomParticipantKey(p)} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', borderBottom: i < filteredStudentCandidates.length - 1 ? `1px solid ${C.borderLight}` : 'none', background: C.white, cursor: 'pointer' }}>
+                          <input type="checkbox" checked={selectedRoomParticipants.has(roomParticipantKey(p))} onChange={() => toggleRoomCandidate(p)} />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <p style={{ color: C.text, fontSize: '12.5px', fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.nama}</p>
+                            <p style={{ color: C.textMuted, fontSize: '11px', marginTop: '2px' }}>{p.nisn || 'Tanpa NISN'}{p.ruang_tes ? ` · ${p.ruang_tes}` : ' · Belum ada ruangan'}</p>
+                          </div>
+                          <span style={{ background: p.source === 'manual' ? '#fffbeb' : '#e2ebe3', color: p.source === 'manual' ? '#b45309' : '#2d6644', fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '999px', flexShrink: 0 }}>
+                            {p.source === 'manual' ? 'Manual' : 'PMB'}
+                          </span>
+                        </label>
+                      ))}
+                  </div>
+                </>
+              )}
+          <div className="flex gap-2 justify-end pt-1">
+            <Button variant="secondary" size="sm" onClick={() => setStudentAssignRoom(null)}>Batal</Button>
+            <Button size="sm" loading={savingRoomStudentAssign} disabled={selectedRoomParticipants.size === 0} onClick={saveRoomStudentAssign}>
+              Assign {selectedRoomParticipants.size} Peserta
+            </Button>
+          </div>
+        </div>
       </Modal>
 
       <Modal open={!!assignModal} onClose={() => setAssignModal(null)} title={`Assign Proktor — ${assignModal?.room_name}`} size="sm">

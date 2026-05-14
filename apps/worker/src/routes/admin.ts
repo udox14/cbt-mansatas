@@ -21,7 +21,16 @@ admin.get('/rooms', async (c) => {
   // Rooms + jumlah pendaftar non-Prestasi + proktor yang di-assign
   const { results } = await c.env.DB.prepare(
     `SELECT r.*,
-       (SELECT COUNT(*) FROM pendaftar p WHERE p.ruang_tes = r.room_name AND ${EXCLUDE_JALUR_COND}) as jumlah_peserta,
+       (
+         (SELECT COUNT(*) FROM pendaftar p WHERE p.ruang_tes = r.room_name AND ${EXCLUDE_JALUR_COND})
+         +
+         (SELECT COUNT(*) FROM cbt_users cu
+          WHERE cu.room_id = r.id AND cu.role = 'student'
+            AND NOT EXISTS (
+              SELECT 1 FROM pendaftar p2
+              WHERE p2.nisn = cu.nisn AND ${EXCLUDE_JALUR_COND}
+            ))
+       ) as jumlah_peserta,
        (SELECT GROUP_CONCAT(cu.nama_lengkap, ', ') FROM cbt_users cu WHERE cu.room_id = r.id AND cu.role = 'proctor') as proctor_names
      FROM cbt_rooms r ORDER BY r.room_name`
   ).all();
@@ -255,6 +264,32 @@ admin.put('/pendaftar/:id/ruang', async (c) => {
     'UPDATE pendaftar SET ruang_tes = ? WHERE id = ?'
   ).bind(ruang_tes || null, c.req.param('id')).run();
   return c.json(ok(null, 'Ruangan berhasil diperbarui'));
+});
+
+admin.post('/participants/assign-room', async (c) => {
+  const { participants, ruang_tes } = await c.req.json<{
+    participants?: { id: string; source: 'pmb' | 'manual' }[];
+    ruang_tes?: string | null;
+  }>();
+  if (!participants?.length) return c.json(err('Pilih minimal 1 peserta'), 400);
+
+  const roomName = ruang_tes || null;
+  let roomId: string | null = null;
+  if (roomName) {
+    const room = await c.env.DB.prepare('SELECT id FROM cbt_rooms WHERE room_name = ?')
+      .bind(roomName).first<any>();
+    if (!room) return c.json(err('Ruangan tidak ditemukan'), 404);
+    roomId = room.id;
+  }
+
+  const pmbStmt = c.env.DB.prepare('UPDATE pendaftar SET ruang_tes = ? WHERE id = ?');
+  const manualStmt = c.env.DB.prepare('UPDATE cbt_users SET room_id = ?, updated_at = ? WHERE id = ? AND role = ?');
+  const batch = participants.map(p => {
+    if (p.source === 'manual') return manualStmt.bind(roomId, now(), p.id, 'student');
+    return pmbStmt.bind(roomName, p.id);
+  });
+  for (let i = 0; i < batch.length; i += 100) await c.env.DB.batch(batch.slice(i, i + 100));
+  return c.json(ok({ updated: participants.length }, `${participants.length} peserta berhasil di-assign`));
 });
 
 // Statistik pendaftar (exclude Prestasi)

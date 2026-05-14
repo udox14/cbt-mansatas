@@ -7,7 +7,7 @@
  *  - 'locked'  : 3x bunyi panjang + buzz (sesi dikunci / dikumpulkan paksa)
  */
 export function useAntiCheatAlarm() {
-  const playAlarm = (type: 'warning' | 'locked', violationCount = 1) => {
+  const playAlarm = (type: 'warning' | 'locked', _violationCount = 1) => {
     // Semua browser modern support AudioContext
     const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
     if (!AudioCtx) return;
@@ -52,9 +52,9 @@ export function useAntiCheatAlarm() {
     if (type === 'warning') {
       /**
        * Pola: 2x bunyi pendek naik nada + 1x buzz kotak
-       * Makin banyak pelanggaran → makin keras volumenya
+       * Browser tidak bisa mengubah volume hardware HP; gain dibuat maksimum sejak pelanggaran pertama.
        */
-      const vol = Math.min(0.3 + violationCount * 0.15, 0.9);
+      const vol = 1;
 
       // Bunyi 1: 880 Hz (A5), 0.18 detik
       beep(880, 0.0, 0.18, vol);
@@ -69,7 +69,7 @@ export function useAntiCheatAlarm() {
       /**
        * Pola: 3x bunyi panjang + buzz panjang (tanda kunci/kumpul paksa)
        */
-      const vol = 0.9;
+      const vol = 1;
 
       beep(440,  0.0,  0.4, vol);          // A4
       beep(440,  0.5,  0.4, vol);          // A4
