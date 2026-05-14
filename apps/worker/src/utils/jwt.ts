@@ -31,7 +31,7 @@ async function getKey(secret: string): Promise<CryptoKey> {
 export async function signJWT(
   payload: Omit<JWTPayload, 'iat' | 'exp'>,
   secret: string,
-  expiresInHours = 12
+  expiresInHours = 4
 ): Promise<string> {
   const header = { alg: 'HS256', typ: 'JWT' };
   const now = Math.floor(Date.now() / 1000);

@@ -2,8 +2,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { ShieldCheck, Clock, Monitor, CheckCircle2 } from 'lucide-react';
-
-const API = 'https://cbtmansatas.drudox.workers.dev';
+import { API_BASE_URL } from '@/lib/api';
 
 const FEATURES = [
   { icon: ShieldCheck, title: 'Anti-Kecurangan', desc: 'Deteksi pindah tab',    green: true  },
@@ -27,7 +26,7 @@ export default function LandingPage() {
 
   useEffect(() => {
     const t = setTimeout(() => setMounted(true), 60);
-    fetch(`${API}/api/settings`).then(r => r.json()).then(r => {
+    fetch(`${API_BASE_URL}/api/settings`).then(r => r.json()).then(r => {
       if (r.success && r.data) setS(prev => ({ ...prev, ...r.data }));
     }).catch(() => {});
     return () => clearTimeout(t);

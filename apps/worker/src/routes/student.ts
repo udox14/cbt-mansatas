@@ -194,9 +194,10 @@ student.post('/exams/:examId/validate-token', async (c) => {
 // ── GET soal ujian ────────────────────────────────────────────
 student.get('/sessions/:sessionId/questions', async (c) => {
   const user = c.get('user');
+  const userType = user.source === 'pendaftar' ? 'pendaftar' : 'cbt_user';
   const session = await c.env.DB.prepare(
-    'SELECT * FROM cbt_exam_sessions WHERE id=? AND user_id=?'
-  ).bind(c.req.param('sessionId'), user.sub).first<any>();
+    'SELECT * FROM cbt_exam_sessions WHERE id=? AND user_id=? AND user_type=?'
+  ).bind(c.req.param('sessionId'), user.sub, userType).first<any>();
   if (!session) return c.json(err('Sesi tidak ditemukan'), 404);
   if (session.status === 'submitted' || session.status === 'force_submitted')
     return c.json(err('Ujian sudah selesai'), 400);
@@ -252,6 +253,7 @@ student.get('/sessions/:sessionId/questions', async (c) => {
 // ── POST batch save jawaban ───────────────────────────────────
 student.post('/sessions/:sessionId/answers', async (c) => {
   const user = c.get('user');
+  const userType = user.source === 'pendaftar' ? 'pendaftar' : 'cbt_user';
   const sessionId = c.req.param('sessionId');
   let body: { answers?: any[] };
   try {
@@ -262,8 +264,8 @@ student.post('/sessions/:sessionId/answers', async (c) => {
   const { answers } = body;
 
   const session = await c.env.DB.prepare(
-    'SELECT id, status, is_time_locked, started_at, exam_id FROM cbt_exam_sessions WHERE id=? AND user_id=?'
-  ).bind(sessionId, user.sub).first<any>();
+    'SELECT id, status, is_time_locked, started_at, exam_id FROM cbt_exam_sessions WHERE id=? AND user_id=? AND user_type=?'
+  ).bind(sessionId, user.sub, userType).first<any>();
   if (!session || session.status === 'submitted' || session.status === 'force_submitted')
     return c.json(err('Sesi tidak aktif'), 400);
   if (session.is_time_locked)
@@ -279,14 +281,15 @@ student.post('/sessions/:sessionId/answers', async (c) => {
     if (Date.now() > startMs + durationMs) {
       // Auto-lock sesi yang sudah habis waktu
       await c.env.DB.prepare(
-        'UPDATE cbt_exam_sessions SET is_time_locked=1 WHERE id=?'
-      ).bind(sessionId).run();
+        'UPDATE cbt_exam_sessions SET is_time_locked=1 WHERE id=? AND user_id=? AND user_type=?'
+      ).bind(sessionId, user.sub, userType).run();
       return c.json(err('Waktu ujian sudah habis'), 403);
     }
   }
 
   await saveAnswers(c.env.DB, sessionId, answers || []);
-  await c.env.DB.prepare('UPDATE cbt_exam_sessions SET last_heartbeat=? WHERE id=?').bind(now(), sessionId).run();
+  await c.env.DB.prepare('UPDATE cbt_exam_sessions SET last_heartbeat=? WHERE id=? AND user_id=? AND user_type=?')
+    .bind(now(), sessionId, user.sub, userType).run();
   return c.json(ok(null, 'Jawaban tersimpan'));
 });
 
@@ -297,8 +300,8 @@ student.post('/sessions/:sessionId/heartbeat', async (c) => {
   const userType = user.source === 'pendaftar' ? 'pendaftar' : 'cbt_user';
 
   await c.env.DB.prepare(
-    'UPDATE cbt_exam_sessions SET last_heartbeat=? WHERE id=? AND user_id=?'
-  ).bind(now(), sessionId, user.sub).run();
+    'UPDATE cbt_exam_sessions SET last_heartbeat=? WHERE id=? AND user_id=? AND user_type=?'
+  ).bind(now(), sessionId, user.sub, userType).run();
 
   // Cek jadwal untuk pendaftar — kalau waktu habis, kunci otomatis
   if (userType === 'pendaftar') {
@@ -309,8 +312,8 @@ student.post('/sessions/:sessionId/heartbeat', async (c) => {
       const parsed = parseSesiJam(jadwal.sesi_tes);
       if (parsed && cekJadwal(jadwal.tanggal_tes, parsed.jamMulai, parsed.jamSelesai) === 'selesai') {
         await c.env.DB.prepare(
-          'UPDATE cbt_exam_sessions SET is_time_locked=1 WHERE id=? AND is_time_locked=0'
-        ).bind(sessionId).run();
+          'UPDATE cbt_exam_sessions SET is_time_locked=1 WHERE id=? AND user_id=? AND user_type=? AND is_time_locked=0'
+        ).bind(sessionId, user.sub, userType).run();
         return c.json(ok({ time_locked: true }, 'Waktu ujian berakhir'));
       }
     }
@@ -322,6 +325,7 @@ student.post('/sessions/:sessionId/heartbeat', async (c) => {
 // ── POST cheat ────────────────────────────────────────────────
 student.post('/sessions/:sessionId/cheat', async (c) => {
   const user = c.get('user');
+  const userType = user.source === 'pendaftar' ? 'pendaftar' : 'cbt_user';
   const sessionId = c.req.param('sessionId');
   const body = await c.req.json<{ violation_type?: string }>().catch(() => ({} as { violation_type?: string }));
   const violationType = body.violation_type || 'tab_switch';
@@ -330,8 +334,8 @@ student.post('/sessions/:sessionId/cheat', async (c) => {
     `SELECT es.*, e.cheat_limit, e.cheat_action
      FROM cbt_exam_sessions es
      JOIN cbt_exams e ON e.id = es.exam_id
-     WHERE es.id = ? AND es.user_id = ?`
-  ).bind(sessionId, user.sub).first<any>();
+     WHERE es.id = ? AND es.user_id = ? AND es.user_type = ?`
+  ).bind(sessionId, user.sub, userType).first<any>();
   if (!session) return c.json(err('Sesi tidak ditemukan'), 404);
 
   const cheatLimit  = session.cheat_limit  ?? 3;
@@ -348,20 +352,20 @@ student.post('/sessions/:sessionId/cheat', async (c) => {
   if (limitReached) {
     if (cheatAction === 'auto_submit') {
       await c.env.DB.prepare(
-        `UPDATE cbt_exam_sessions SET cheat_warnings=?, status='force_submitted', finished_at=?, last_heartbeat=? WHERE id=?`
-      ).bind(newW, now(), now(), sessionId).run();
+        `UPDATE cbt_exam_sessions SET cheat_warnings=?, status='force_submitted', finished_at=?, last_heartbeat=? WHERE id=? AND user_id=? AND user_type=?`
+      ).bind(newW, now(), now(), sessionId, user.sub, userType).run();
       try { await computeScore(c.env.DB, sessionId, session.exam_id, session.user_id, session.user_type); } catch {}
       actionTaken = 'auto_submit';
     } else {
       await c.env.DB.prepare(
-        `UPDATE cbt_exam_sessions SET cheat_warnings=?, is_time_locked=1, last_heartbeat=? WHERE id=?`
-      ).bind(newW, now(), sessionId).run();
+        `UPDATE cbt_exam_sessions SET cheat_warnings=?, is_time_locked=1, last_heartbeat=? WHERE id=? AND user_id=? AND user_type=?`
+      ).bind(newW, now(), sessionId, user.sub, userType).run();
       actionTaken = 'lock';
     }
   } else {
     await c.env.DB.prepare(
-      `UPDATE cbt_exam_sessions SET cheat_warnings=?, last_heartbeat=? WHERE id=?`
-    ).bind(newW, now(), sessionId).run();
+      `UPDATE cbt_exam_sessions SET cheat_warnings=?, last_heartbeat=? WHERE id=? AND user_id=? AND user_type=?`
+    ).bind(newW, now(), sessionId, user.sub, userType).run();
   }
 
   return c.json(ok({
@@ -376,11 +380,12 @@ student.post('/sessions/:sessionId/cheat', async (c) => {
 // ── POST submit ───────────────────────────────────────────────
 student.post('/sessions/:sessionId/submit', async (c) => {
   const user = c.get('user');
+  const userType = user.source === 'pendaftar' ? 'pendaftar' : 'cbt_user';
   const sessionId = c.req.param('sessionId');
   const body = await c.req.json<{ answers?: any[] }>().catch(() => ({} as { answers?: any[] }));
   const session = await c.env.DB.prepare(
-    'SELECT * FROM cbt_exam_sessions WHERE id=? AND user_id=?'
-  ).bind(sessionId, user.sub).first<any>();
+    'SELECT * FROM cbt_exam_sessions WHERE id=? AND user_id=? AND user_type=?'
+  ).bind(sessionId, user.sub, userType).first<any>();
   if (!session) return c.json(err('Sesi tidak ditemukan'), 404);
 
   if (session.status !== 'submitted' && session.status !== 'force_submitted') {
@@ -390,8 +395,8 @@ student.post('/sessions/:sessionId/submit', async (c) => {
 
     await saveAnswers(c.env.DB, sessionId, body.answers || []);
     await c.env.DB.prepare(
-      `UPDATE cbt_exam_sessions SET status='submitted', finished_at=?, last_heartbeat=? WHERE id=? AND status NOT IN ('submitted','force_submitted')`
-    ).bind(now(), now(), sessionId).run();
+      `UPDATE cbt_exam_sessions SET status='submitted', finished_at=?, last_heartbeat=? WHERE id=? AND user_id=? AND user_type=? AND status NOT IN ('submitted','force_submitted')`
+    ).bind(now(), now(), sessionId, user.sub, userType).run();
   }
 
   const result = await computeScore(c.env.DB, sessionId, session.exam_id, session.user_id, session.user_type);

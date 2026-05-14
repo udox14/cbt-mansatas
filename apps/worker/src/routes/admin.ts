@@ -166,9 +166,19 @@ admin.post('/users/bulk', async (c) => {
     'INSERT OR IGNORE INTO cbt_users (id, username, password_hash, nama_lengkap, role, room_id, nisn) VALUES (?,?,?,?,?,?,?)'
   );
   const batch = [];
-  for (const u of users) {
-    const hash = await hashPassword(u.password || u.username);
-    batch.push(stmt.bind(newId(), u.username, hash, u.full_name || u.nama_lengkap, u.role || 'student', u.room_id || null, u.nisn || null));
+  for (let i = 0; i < users.length; i++) {
+    const u = users[i];
+    const username = String(u.username || '').trim();
+    const password = String(u.password || u.username || '').trim();
+    const nama = String(u.full_name || u.nama_lengkap || '').trim();
+    const role = String(u.role || 'student').trim();
+
+    if (!username || !password || !nama) return c.json(err(`Data baris ${i + 1} tidak lengkap`), 400);
+    if (!['proctor', 'student'].includes(role)) return c.json(err(`Role baris ${i + 1} tidak valid`), 400);
+    if (password.length < 6) return c.json(err(`Password baris ${i + 1} minimal 6 karakter`), 400);
+
+    const hash = await hashPassword(password);
+    batch.push(stmt.bind(newId(), username, hash, nama, role, u.room_id || null, u.nisn || null));
   }
   for (let i = 0; i < batch.length; i += 100) { await c.env.DB.batch(batch.slice(i, i + 100)); }
   return c.json(ok({ imported: users.length }, 'Import user berhasil'));
@@ -473,8 +483,24 @@ admin.post('/upload', async (c) => {
   const formData = await c.req.formData();
   const file = formData.get('file') as unknown as File;
   if (!file || typeof file === 'string') return c.json(err('File tidak ditemukan'), 400);
-  const ext = file.name.split('.').pop() || 'bin';
-  const key = `media/${Date.now()}-${newId().slice(0, 8)}.${ext}`;
+
+  const type = file.type || '';
+  const isImage = type.startsWith('image/');
+  const isAudio = type.startsWith('audio/');
+  if (!isImage && !isAudio) return c.json(err('Tipe file tidak diizinkan'), 400);
+
+  const maxSize = isImage ? 5 * 1024 * 1024 : 20 * 1024 * 1024;
+  if (file.size > maxSize) {
+    return c.json(err(isImage ? 'Ukuran gambar maksimal 5MB' : 'Ukuran audio maksimal 20MB'), 400);
+  }
+
+  const ext = (file.name.split('.').pop() || 'bin').toLowerCase();
+  const allowedExt = isImage
+    ? ['jpg', 'jpeg', 'png', 'gif', 'webp']
+    : ['mp3', 'wav', 'ogg', 'm4a', 'aac'];
+  if (!allowedExt.includes(ext)) return c.json(err('Ekstensi file tidak diizinkan'), 400);
+
+  const key = `media/${Date.now()}-${newId().replace(/-/g, '')}.${ext}`;
   await c.env.R2.put(key, await file.arrayBuffer(), { httpMetadata: { contentType: file.type } });
   // Return full R2 path
   return c.json(ok({ key, url: `/r2/${key}` }, 'Upload berhasil'));
