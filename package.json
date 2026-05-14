@@ -11,7 +11,10 @@
     "build:web": "cd apps/web && npm run build",
     "deploy:web": "cd apps/web && npx wrangler pages deploy out --project-name=cbt-pmb",
     "db:init": "cd apps/worker && npm run db:init",
-    "db:init:local": "cd apps/worker && npm run db:init:local"
+    "db:init:local": "cd apps/worker && npm run db:init:local",
+    "db:readiness": "node scripts/cbt-readiness-migration.mjs --remote",
+    "db:readiness:local": "node scripts/cbt-readiness-migration.mjs --local",
+    "load:simulate": "node scripts/cbt-load-sim.mjs"
   },
   "devDependencies": {
     "wrangler": "^4.90.0"

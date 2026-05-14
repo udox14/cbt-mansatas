@@ -40,12 +40,22 @@ proctor.get('/sessions', async (c) => {
            COALESCE(p.nisn, cu.nisn) as nisn,
            COALESCE(p.sesi_tes, '') as sesi_tes,
            e.title as exam_title,
-           (SELECT COUNT(*) FROM cbt_student_answers sa WHERE sa.session_id = es.id) as answered_count,
-           (SELECT COUNT(*) FROM cbt_questions q WHERE q.exam_id = es.exam_id) as total_questions
+           COALESCE(ac.answered_count, 0) as answered_count,
+           COALESCE(qc.total_questions, 0) as total_questions
     FROM cbt_exam_sessions es
     JOIN cbt_exams e ON e.id = es.exam_id
     LEFT JOIN pendaftar p ON es.user_id = p.id AND es.user_type = 'pendaftar'
     LEFT JOIN cbt_users cu ON es.user_id = cu.id AND es.user_type = 'cbt_user'
+    LEFT JOIN (
+      SELECT session_id, COUNT(*) as answered_count
+      FROM cbt_student_answers
+      GROUP BY session_id
+    ) ac ON ac.session_id = es.id
+    LEFT JOIN (
+      SELECT exam_id, COUNT(*) as total_questions
+      FROM cbt_questions
+      GROUP BY exam_id
+    ) qc ON qc.exam_id = es.exam_id
     WHERE es.room_id = ? AND (p.id IS NOT NULL OR cu.id IS NOT NULL)`;
   const params: any[] = [user.room_id];
   if (examId) { sql += ' AND es.exam_id = ?'; params.push(examId); }

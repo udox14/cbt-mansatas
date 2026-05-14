@@ -1,4 +1,6 @@
-const API = 'https://cbtmansatas.drudox.workers.dev';
+export const API_BASE_URL = (
+  process.env.NEXT_PUBLIC_API_URL || 'https://cbtmansatas.drudox.workers.dev'
+).replace(/\/$/, '');
 
 interface ApiRes<T = any> { success: boolean; data?: T; message?: string; error?: string }
 
@@ -15,8 +17,8 @@ export async function api<T = any>(path: string, opts: RequestInit = {}): Promis
   if (token) h['Authorization'] = `Bearer ${token}`;
   if (!(opts.body instanceof FormData)) h['Content-Type'] = 'application/json';
   try {
-    const r = await fetch(`${API}${path}`, { ...opts, headers: h });
-    const d = await r.json() as ApiRes<T>;
+    const r = await fetch(`${API_BASE_URL}${path}`, { ...opts, headers: h });
+    const d = await r.json().catch(() => ({ success: false, error: `HTTP ${r.status}` })) as ApiRes<T>;
     if (!r.ok && !d.error) { d.error = `HTTP ${r.status}`; d.success = false; }
     return d;
   } catch (e: any) {

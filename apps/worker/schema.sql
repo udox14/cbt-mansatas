@@ -42,6 +42,10 @@ CREATE TABLE IF NOT EXISTS cbt_exams (
   randomize_options INTEGER DEFAULT 0,
   active_status TEXT DEFAULT 'draft' CHECK (active_status IN ('draft', 'active', 'finished')),
   passing_score REAL DEFAULT 0,
+  target_jalur TEXT DEFAULT NULL,
+  cheat_limit INTEGER DEFAULT 3,
+  cheat_action TEXT DEFAULT 'lock',
+  enforce_fullscreen INTEGER DEFAULT 0,
   created_by TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
@@ -139,6 +143,34 @@ CREATE TABLE IF NOT EXISTS cbt_exam_results (
   computed_at TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_cbt_results_exam ON cbt_exam_results(exam_id);
+
+-- Pengaturan CBT (landing page, teks publik, konfigurasi ringan)
+CREATE TABLE IF NOT EXISTS cbt_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Assignment ujian ke peserta tertentu
+CREATE TABLE IF NOT EXISTS cbt_exam_assignments (
+  id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+  exam_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  user_type TEXT NOT NULL DEFAULT 'pendaftar',
+  created_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(exam_id, user_id, user_type)
+);
+CREATE INDEX IF NOT EXISTS idx_cbt_assignments_exam ON cbt_exam_assignments(exam_id);
+CREATE INDEX IF NOT EXISTS idx_cbt_assignments_user ON cbt_exam_assignments(user_id, user_type);
+
+-- Log pelanggaran anti-cheat
+CREATE TABLE IF NOT EXISTS cbt_cheat_logs (
+  id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+  session_id TEXT NOT NULL REFERENCES cbt_exam_sessions(id) ON DELETE CASCADE,
+  violation_type TEXT NOT NULL,
+  happened_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cheat_logs_session ON cbt_cheat_logs(session_id);
 
 -- Seed ruangan default
 INSERT OR IGNORE INTO cbt_rooms (id, room_name, capacity) VALUES ('room-1', 'Ruang 1', 40);

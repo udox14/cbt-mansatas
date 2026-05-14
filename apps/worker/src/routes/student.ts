@@ -285,17 +285,7 @@ student.post('/sessions/:sessionId/answers', async (c) => {
     }
   }
 
-  if (!answers?.length) return c.json(ok(null));
-
-  const stmts = answers.map((a: any) =>
-    c.env.DB.prepare(
-      `INSERT INTO cbt_student_answers (id, session_id, question_id, selected_option_id, essay_answer, is_doubtful, answered_at)
-       VALUES (?,?,?,?,?,?,?) ON CONFLICT(session_id, question_id) DO UPDATE SET
-       selected_option_id=excluded.selected_option_id, essay_answer=excluded.essay_answer,
-       is_doubtful=excluded.is_doubtful, answered_at=excluded.answered_at`
-    ).bind(newId(), sessionId, a.question_id, a.selected_option_id || null, a.essay_answer || null, a.is_doubtful ? 1 : 0, now())
-  );
-  for (let i = 0; i < stmts.length; i += 100) { await c.env.DB.batch(stmts.slice(i, i + 100)); }
+  await saveAnswers(c.env.DB, sessionId, answers || []);
   await c.env.DB.prepare('UPDATE cbt_exam_sessions SET last_heartbeat=? WHERE id=?').bind(now(), sessionId).run();
   return c.json(ok(null, 'Jawaban tersimpan'));
 });
@@ -387,16 +377,23 @@ student.post('/sessions/:sessionId/cheat', async (c) => {
 student.post('/sessions/:sessionId/submit', async (c) => {
   const user = c.get('user');
   const sessionId = c.req.param('sessionId');
+  const body = await c.req.json<{ answers?: any[] }>().catch(() => ({} as { answers?: any[] }));
   const session = await c.env.DB.prepare(
     'SELECT * FROM cbt_exam_sessions WHERE id=? AND user_id=?'
   ).bind(sessionId, user.sub).first<any>();
   if (!session) return c.json(err('Sesi tidak ditemukan'), 404);
-  if (session.status === 'submitted' || session.status === 'force_submitted')
-    return c.json(err('Ujian sudah diselesaikan'), 400);
 
-  await c.env.DB.prepare(
-    `UPDATE cbt_exam_sessions SET status='submitted', finished_at=? WHERE id=?`
-  ).bind(now(), sessionId).run();
+  if (session.status !== 'submitted' && session.status !== 'force_submitted') {
+    if (session.is_time_locked) {
+      return c.json(err('Waktu ujian dikunci. Hubungi pengawas jika jawaban terakhir belum tersimpan.'), 403);
+    }
+
+    await saveAnswers(c.env.DB, sessionId, body.answers || []);
+    await c.env.DB.prepare(
+      `UPDATE cbt_exam_sessions SET status='submitted', finished_at=?, last_heartbeat=? WHERE id=? AND status NOT IN ('submitted','force_submitted')`
+    ).bind(now(), now(), sessionId).run();
+  }
+
   const result = await computeScore(c.env.DB, sessionId, session.exam_id, session.user_id, session.user_type);
 
   const exam = await c.env.DB.prepare(
@@ -410,6 +407,20 @@ student.post('/sessions/:sessionId/submit', async (c) => {
 });
 
 // ── COMPUTE SCORE ─────────────────────────────────────────────
+async function saveAnswers(db: D1Database, sessionId: string, answers: any[]) {
+  if (!answers?.length) return;
+
+  const stmts = answers.map((a: any) =>
+    db.prepare(
+      `INSERT INTO cbt_student_answers (id, session_id, question_id, selected_option_id, essay_answer, is_doubtful, answered_at)
+       VALUES (?,?,?,?,?,?,?) ON CONFLICT(session_id, question_id) DO UPDATE SET
+       selected_option_id=excluded.selected_option_id, essay_answer=excluded.essay_answer,
+       is_doubtful=excluded.is_doubtful, answered_at=excluded.answered_at`
+    ).bind(newId(), sessionId, a.question_id, a.selected_option_id || null, a.essay_answer || null, a.is_doubtful ? 1 : 0, now())
+  );
+  for (let i = 0; i < stmts.length; i += 100) await db.batch(stmts.slice(i, i + 100));
+}
+
 async function computeScore(db: D1Database, sessionId: string, examId: string, userId: string, userType: string) {
   const { results: answers } = await db.prepare(
     'SELECT question_id, selected_option_id FROM cbt_student_answers WHERE session_id=?'

@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { GET, POST } from '@/lib/api';
+import { API_BASE_URL, GET, POST } from '@/lib/api';
 import { Modal, Spinner } from '@/components/ui';
 import { Clock, ChevronLeft, ChevronRight, Minus, Plus, Send, AlertTriangle, Maximize } from 'lucide-react';
 import DOMPurify from 'dompurify';
@@ -16,8 +16,6 @@ interface Question {
 }
 interface Answer { question_id: string; selected_option_id?: string; essay_answer?: string; is_doubtful?: boolean }
 interface ExamRoomProps { sessionId: string; startedAt: string; durationMinutes: number; studentName: string; onFinish: (result: any) => void }
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 
 const C = {
   bg: '#f4f6f4', white: '#fff', border: '#e0e5e0', borderLight: '#edf0ed', borderMid: '#d4dbd4',
@@ -240,14 +238,18 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
 
   // ── M4: flushAnswers menggunakan answersRef agar tidak stale closure ──
   const flushAnswers = useCallback(async () => {
-    if (dirtyRef.current.size === 0) return;
+    if (dirtyRef.current.size === 0) return true;
     const batch: Answer[] = [];
     const currentAnswers = answersRef.current;
     dirtyRef.current.forEach(qId => { const a = currentAnswers.get(qId); if (a) batch.push(a); });
     const ids = new Set(dirtyRef.current);
     dirtyRef.current.clear();
     const r = await POST(`/api/student/sessions/${sessionId}/answers`, { answers: batch });
-    if (!r.success) ids.forEach(id => dirtyRef.current.add(id));
+    if (!r.success) {
+      ids.forEach(id => dirtyRef.current.add(id));
+      return false;
+    }
+    return true;
   }, [sessionId]); // tidak depend on answers lagi
 
   // ── Fungsi deteksi & laporan pelanggaran ──────────────────────
@@ -262,6 +264,9 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
     const n = cheatCountRef.current + 1;
     cheatCountRef.current = n;
     setCheatCount(n);
+
+    const flushed = await flushAnswers();
+    if (!flushed) addToast('Jawaban terakhir belum tersimpan. Sistem akan mencoba menyimpan lagi otomatis.');
 
     const r = await POST(`/api/student/sessions/${sessionId}/cheat`, { violation_type: violationType });
     const limit = r.data?.limit ?? cheatLimit;
@@ -285,7 +290,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
       const typeLabel = violationType === 'fullscreen_exit' ? 'Keluar fullscreen' : 'Meninggalkan halaman';
       addToast(`⚠️ Peringatan ${n}/${limit}: ${typeLabel}! Sisa ${remaining} kesempatan.`);
     }
-  }, [sessionId, cheatLimit, addToast, playAlarm]);
+  }, [sessionId, cheatLimit, addToast, playAlarm, flushAnswers]);
 
   // ── Anti-cheat: visibilitychange + fullscreen + keyboard/ctx ──
   useEffect(() => {
@@ -350,13 +355,21 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
     submittedRef.current = true;
     setSubmitting(true);
     setShowConfirm(false);
-    const batch = Array.from(answers.values());
-    if (batch.length) await POST(`/api/student/sessions/${sessionId}/answers`, { answers: batch });
-    const r = await POST(`/api/student/sessions/${sessionId}/submit`);
+    setLockedMsg('');
+
+    const batch = Array.from(answersRef.current.values());
+    const r = await POST(`/api/student/sessions/${sessionId}/submit`, { answers: batch });
+    if (!r.success) {
+      submittedRef.current = false;
+      setSubmitting(false);
+      setLockedMsg(r.error || 'Submit gagal. Jawaban masih tersimpan di perangkat ini, coba kirim ulang atau hubungi pengawas.');
+      return;
+    }
+
     localStorage.removeItem(`cbt_answers_${sessionId}`);
     localStorage.removeItem(`cbt_pos_${sessionId}`);
     onFinish(r.data || {});
-  }, [answers, sessionId, onFinish]);
+  }, [sessionId, onFinish]);
 
   const changeFontSize = (d: number) => {
     const n = Math.max(12, Math.min(24, fontSize + d));
@@ -487,13 +500,13 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
           {/* media */}
           {q.image_url && (
             <div style={{ padding: '0 14px 12px' }}>
-              <img src={`${API_URL}${q.image_url}`} alt="" style={{ maxWidth: '100%', borderRadius: '10px', border: `1px solid ${C.borderLight}` }} />
+              <img src={`${API_BASE_URL}${q.image_url}`} alt="" style={{ maxWidth: '100%', borderRadius: '10px', border: `1px solid ${C.borderLight}` }} />
             </div>
           )}
           {q.audio_url && (
             <div style={{ padding: '0 14px 12px' }}>
               <audio controls controlsList="nodownload" preload="auto" style={{ width: '100%' }}>
-                <source src={`${API_URL}${q.audio_url}`} />
+                <source src={`${API_BASE_URL}${q.audio_url}`} />
               </audio>
             </div>
           )}
@@ -522,7 +535,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
                     }}>{o.option_label}</span>
                     <span style={{ flex: 1, fontSize: `${fontSize}px`, color: C.text, fontWeight: 500, paddingTop: '2px' }}>
                       {o.image_url
-                        ? <img src={`${API_URL}${o.image_url}`} alt={o.option_label} style={{ maxWidth: '100%', borderRadius: '8px' }} />
+                        ? <img src={`${API_BASE_URL}${o.image_url}`} alt={o.option_label} style={{ maxWidth: '100%', borderRadius: '8px' }} />
                         : <span dangerouslySetInnerHTML={{ __html: sanitize(o.option_text) }} />}
                     </span>
                   </button>
