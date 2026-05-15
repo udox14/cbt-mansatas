@@ -25,6 +25,14 @@ interface QOption { id?: string; option_label: string; option_text: string; imag
 type Page = 'exams' | 'peserta' | 'rooms' | 'pelaksana' | 'settings';
 type ExamTab = 'soal' | 'token' | 'monitor' | 'hasil' | 'peserta';
 
+const normalizeJenisKelamin = (value?: string | null) => {
+  const normalized = (value || '').trim().toUpperCase().replace(/[\s_-]+/g, ' ');
+  if (!normalized) return '';
+  if (normalized === 'L' || normalized.startsWith('LAKI') || normalized === 'PRIA') return 'L';
+  if (normalized === 'P' || normalized.startsWith('PEREMPUAN') || normalized === 'WANITA') return 'P';
+  return normalized;
+};
+
 const C = {
   bg: '#f4f6f4', white: '#fff', border: '#e0e5e0', borderLight: '#edf0ed', borderMid: '#d4dbd4',
   text: '#1e2e22', textMid: '#4a6655', textMuted: '#8a9e8d', textFaint: '#a8b9aa',
@@ -1098,7 +1106,7 @@ function PesertaPage() {
     if (filterSesi && p.sesi_tes !== filterSesi) return false;
     if (filterSumber && p._sumber !== filterSumber) return false;
     if (filterTgl && p.tanggal_tes !== filterTgl) return false;
-    if (filterJk && (p.jenis_kelamin || '').toUpperCase() !== filterJk) return false;
+    if (filterJk && normalizeJenisKelamin(p.jenis_kelamin) !== filterJk) return false;
     if (filterJalur && (p.jalur || '').toUpperCase() !== filterJalur.toUpperCase()) return false;
     return true;
   });
@@ -1265,7 +1273,7 @@ function PesertaPage() {
                           <td style={{ padding: '10px 14px', color: C.textMuted }}>{pageStart + i + 1}</td>
                           <td style={{ padding: '10px 14px', color: C.text, fontWeight: 700 }}>{p.nama_lengkap}</td>
                           <td style={{ padding: '10px 14px', color: C.textMuted, fontFamily: 'monospace' }}>{p.nisn}</td>
-                          <td style={{ padding: '10px 14px', textAlign: 'center', color: C.textMuted, fontWeight: 600 }}>{p.jenis_kelamin ? (p.jenis_kelamin === 'L' || p.jenis_kelamin?.toUpperCase() === 'LAKI-LAKI' ? 'L' : 'P') : '—'}</td>
+                          <td style={{ padding: '10px 14px', textAlign: 'center', color: C.textMuted, fontWeight: 600 }}>{normalizeJenisKelamin(p.jenis_kelamin) || '—'}</td>
                           <td style={{ padding: '10px 14px' }}>
                             {p.jalur
                               ? <span style={{ background: '#f0e6ff', color: '#6d28d9', fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '999px' }}>{p.jalur}</span>
@@ -1326,7 +1334,7 @@ function PesertaPage() {
                       <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '10px' }}>
                         {p.sesi_tes && <span style={{ color: C.textMuted, fontSize: '11px' }}>{p.sesi_tes}</span>}
                         {p.tanggal_tes && <span style={{ color: C.textMuted, fontSize: '11px' }}>{p.tanggal_tes}</span>}
-                        {p.jenis_kelamin && <span style={{ color: C.textMuted, fontSize: '11px' }}>{p.jenis_kelamin === 'L' || p.jenis_kelamin === 'LAKI-LAKI' ? 'L' : 'P'}</span>}
+                        {p.jenis_kelamin && <span style={{ color: C.textMuted, fontSize: '11px' }}>{normalizeJenisKelamin(p.jenis_kelamin)}</span>}
                       </div>
                       {/* Row 3: actions — full width, consistent */}
                       <div style={{ display: 'flex', gap: '6px' }}>
