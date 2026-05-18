@@ -333,6 +333,14 @@ admin.get('/pendaftar/jalur', async (c) => {
   return c.json(ok(results.map((r: any) => r.jalur)));
 });
 
+// Daftar sesi unik dari pendaftar
+admin.get('/pendaftar/sesi', async (c) => {
+  const { results } = await c.env.DB.prepare(
+    `SELECT DISTINCT sesi_tes FROM pendaftar WHERE sesi_tes IS NOT NULL AND sesi_tes != '' ORDER BY sesi_tes`
+  ).all();
+  return c.json(ok(results.map((r: any) => r.sesi_tes)));
+});
+
 // ══════════════════════════════════════════════════════════════
 // EXAMS
 // ══════════════════════════════════════════════════════════════
@@ -557,7 +565,6 @@ admin.post('/upload', async (c) => {
 
   const key = `media/${Date.now()}-${newId().replace(/-/g, '')}.${ext}`;
   await c.env.R2.put(key, await file.arrayBuffer(), { httpMetadata: { contentType: file.type } });
-  // Return full R2 path
   return c.json(ok({ key, url: `/r2/${key}` }, 'Upload berhasil'));
 });
 
@@ -628,30 +635,65 @@ admin.put('/settings', async (c) => {
 });
 
 // ══════════════════════════════════════════════════════════════
-// EXAM ASSIGNMENTS — assign ujian ke peserta tertentu
+// EXAM ASSIGNMENTS — assign ujian ke peserta, ruangan, atau sesi
 // ══════════════════════════════════════════════════════════════
 
 admin.get('/exams/:examId/assignments', async (c) => {
   const { results } = await c.env.DB.prepare(
-    `SELECT ea.*, COALESCE(p.nama_lengkap, cu.nama_lengkap) as full_name,
-       COALESCE(p.nisn, cu.nisn, cu.username) as nisn
+    `SELECT ea.*,
+       CASE
+         WHEN ea.user_type IN ('room','sesi') THEN ea.user_id
+         ELSE COALESCE(p.nama_lengkap, cu.nama_lengkap)
+       END as full_name,
+       CASE
+         WHEN ea.user_type IN ('room','sesi') THEN NULL
+         ELSE COALESCE(p.nisn, cu.nisn, cu.username)
+       END as nisn
      FROM cbt_exam_assignments ea
      LEFT JOIN pendaftar p ON ea.user_id = p.id AND ea.user_type = 'pendaftar'
      LEFT JOIN cbt_users cu ON ea.user_id = cu.id AND ea.user_type = 'cbt_user'
-     WHERE ea.exam_id = ? ORDER BY full_name`
+     WHERE ea.exam_id = ? ORDER BY ea.user_type, full_name`
   ).bind(c.req.param('examId')).all();
   return c.json(ok(results));
 });
 
+// Assign ke peserta individu
 admin.post('/exams/:examId/assignments', async (c) => {
   const { users } = await c.req.json<{ users: { user_id: string; user_type: string }[] }>();
   const examId = c.req.param('examId');
+  if (!users?.length) return c.json(err('Pilih minimal 1 peserta'), 400);
   const stmts = users.map(u =>
     c.env.DB.prepare('INSERT OR IGNORE INTO cbt_exam_assignments (id, exam_id, user_id, user_type) VALUES (?,?,?,?)')
       .bind(newId(), examId, u.user_id, u.user_type)
   );
   for (let i = 0; i < stmts.length; i += 100) await c.env.DB.batch(stmts.slice(i, i + 100));
   return c.json(ok({ added: users.length }, 'Peserta di-assign'));
+});
+
+// Assign ke semua peserta dalam ruangan tertentu
+admin.post('/exams/:examId/assignments/room', async (c) => {
+  const examId = c.req.param('examId');
+  const { rooms } = await c.req.json<{ rooms: string[] }>();
+  if (!rooms?.length) return c.json(err('Pilih minimal 1 ruangan'), 400);
+  const stmts = rooms.map(roomName =>
+    c.env.DB.prepare('INSERT OR IGNORE INTO cbt_exam_assignments (id, exam_id, user_id, user_type) VALUES (?,?,?,?)')
+      .bind(newId(), examId, roomName, 'room')
+  );
+  for (let i = 0; i < stmts.length; i += 100) await c.env.DB.batch(stmts.slice(i, i + 100));
+  return c.json(ok({ added: rooms.length }, `${rooms.length} ruangan di-assign`));
+});
+
+// Assign ke semua peserta dalam sesi tertentu
+admin.post('/exams/:examId/assignments/sesi', async (c) => {
+  const examId = c.req.param('examId');
+  const { sessions } = await c.req.json<{ sessions: string[] }>();
+  if (!sessions?.length) return c.json(err('Pilih minimal 1 sesi'), 400);
+  const stmts = sessions.map(sesi =>
+    c.env.DB.prepare('INSERT OR IGNORE INTO cbt_exam_assignments (id, exam_id, user_id, user_type) VALUES (?,?,?,?)')
+      .bind(newId(), examId, sesi, 'sesi')
+  );
+  for (let i = 0; i < stmts.length; i += 100) await c.env.DB.batch(stmts.slice(i, i + 100));
+  return c.json(ok({ added: sessions.length }, `${sessions.length} sesi di-assign`));
 });
 
 admin.delete('/exams/:examId/assignments/:id', async (c) => {

@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { GET, POST, PUT, DEL } from '@/lib/api';
@@ -749,7 +749,6 @@ function MonitorView({ examId }: { examId: string }) {
     </div>
   );
 }
-
 // ── RESULTS VIEW ──────────────────────────────────────────────
 function ResultsView({ examId }: { examId: string }) {
   const [results, setResults] = useState<any[]>([]);
@@ -786,16 +785,26 @@ function ResultsView({ examId }: { examId: string }) {
     </div>
   );
 }
-
-// ── ASSIGNMENTS VIEW — Assign peserta ke ujian ───────────────
+// ── ASSIGNMENTS VIEW ─────────────────────────────────────────
+type AssignTab = 'peserta' | 'ruangan' | 'sesi';
 function AssignmentsView({ examId }: { examId: string }) {
   const { toast } = useToast();
+  const [tab, setTab] = useState<AssignTab>('peserta');
   const [assignments, setAssignments] = useState<any[]>([]);
-  const [candidates, setCandidates] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showAdd, setShowAdd] = useState(false);
+  // Per-Peserta state
+  const [showAddPeserta, setShowAddPeserta] = useState(false);
+  const [candidates, setCandidates] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Per-Ruangan state
+  const [showAddRoom, setShowAddRoom] = useState(false);
+  const [rooms, setRooms] = useState<any[]>([]);
+  const [selRooms, setSelRooms] = useState<Set<string>>(new Set());
+  // Per-Sesi state
+  const [showAddSesi, setShowAddSesi] = useState(false);
+  const [sesiList, setSesiList] = useState<string[]>([]);
+  const [selSesi, setSelSesi] = useState<Set<string>>(new Set());
 
   const fetchData = useCallback(async () => {
     const r = await GET(`/api/admin/exams/${examId}/assignments`);
@@ -804,148 +813,231 @@ function AssignmentsView({ examId }: { examId: string }) {
   }, [examId]);
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const openAdd = async () => {
-    setShowAdd(true); setSearch(''); setSelected(new Set());
-    // Fetch all students (pendaftar + cbt_users student)
-    const [pmb, manual] = await Promise.all([
-      GET<any[]>('/api/admin/pendaftar'),
-      GET<any[]>('/api/admin/users?role=student'),
-    ]);
-    const pmbList = (pmb.success ? (pmb.data || []) : []).map((p: any) => ({
-      id: p.id, name: p.nama_lengkap, nisn: p.nisn, jalur: p.jalur || '', user_type: 'pendaftar',
-    }));
-    const manualList = (manual.success ? (manual.data || []) : []).map((u: any) => ({
-      id: u.id, name: u.full_name, nisn: u.nisn || u.username, jalur: '', user_type: 'cbt_user',
-    }));
-    // Exclude already assigned
-    const assignedIds = new Set(assignments.map((a: any) => `${a.user_id}:${a.user_type}`));
-    setCandidates([...pmbList, ...manualList].filter(c => !assignedIds.has(`${c.id}:${c.user_type}`)));
-  };
+  const pesertaList = assignments.filter(a => a.user_type === 'pendaftar' || a.user_type === 'cbt_user');
+  const roomList    = assignments.filter(a => a.user_type === 'room');
+  const sesiListA   = assignments.filter(a => a.user_type === 'sesi');
 
-  const toggleSelect = (key: string) => {
-    setSelected(prev => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key); else next.add(key);
-      return next;
-    });
+  // Per-Peserta
+  const openAddPeserta = async () => {
+    setShowAddPeserta(true); setSearch(''); setSelected(new Set());
+    const [pmb, manual] = await Promise.all([GET<any[]>('/api/admin/pendaftar'), GET<any[]>('/api/admin/users?role=student')]);
+    const pmbL  = (pmb.success   ? pmb.data   || [] : []).map((p: any) => ({ id: p.id, name: p.nama_lengkap, nisn: p.nisn, jalur: p.jalur || '', user_type: 'pendaftar' }));
+    const manL  = (manual.success ? manual.data || [] : []).map((u: any) => ({ id: u.id, name: u.full_name,   nisn: u.nisn || u.username, jalur: '', user_type: 'cbt_user' }));
+    const used  = new Set(pesertaList.map((a: any) => `${a.user_id}:${a.user_type}`));
+    setCandidates([...pmbL, ...manL].filter(c => !used.has(`${c.id}:${c.user_type}`)));
   };
-
-  const selectAll = () => {
-    const visible = filteredCandidates.map(c => `${c.id}:${c.user_type}`);
-    setSelected(prev => {
-      const next = new Set(prev);
-      const allSelected = visible.every(k => next.has(k));
-      if (allSelected) visible.forEach(k => next.delete(k));
-      else visible.forEach(k => next.add(k));
-      return next;
-    });
-  };
-
-  const saveAssignments = async () => {
-    const users = Array.from(selected).map(k => {
-      const [user_id, user_type] = k.split(':');
-      return { user_id, user_type };
-    });
+  const savePeserta = async () => {
+    const users = Array.from(selected).map(k => { const [user_id, user_type] = k.split(':'); return { user_id, user_type }; });
     if (!users.length) { toast('error', 'Pilih minimal 1 peserta'); return; }
     const r = await POST(`/api/admin/exams/${examId}/assignments`, { users });
-    if (r.success) { toast('success', `${users.length} peserta di-assign`); setShowAdd(false); fetchData(); }
+    if (r.success) { toast('success', `${users.length} peserta di-assign`); setShowAddPeserta(false); fetchData(); }
+    else toast('error', r.error || 'Gagal');
+  };
+  const toggleSel = (key: string) => setSelected(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
+  const filteredC = candidates.filter(c => !search || [c.name, c.nisn, c.jalur].some(v => v?.toLowerCase().includes(search.toLowerCase())));
+  const selectAll = () => {
+    const vis = filteredC.map(c => `${c.id}:${c.user_type}`);
+    setSelected(prev => { const n = new Set(prev); const allSel = vis.every(k => n.has(k)); vis.forEach(k => allSel ? n.delete(k) : n.add(k)); return n; });
+  };
+
+  // Per-Ruangan
+  const openAddRoom = async () => {
+    setShowAddRoom(true); setSelRooms(new Set());
+    const r = await GET<any[]>('/api/admin/rooms');
+    if (r.success) { const used = new Set(roomList.map((a: any) => a.user_id)); setRooms((r.data || []).filter((rm: any) => !used.has(rm.room_name))); }
+  };
+  const saveRooms = async () => {
+    if (!selRooms.size) { toast('error', 'Pilih minimal 1 ruangan'); return; }
+    const r = await POST(`/api/admin/exams/${examId}/assignments/room`, { rooms: Array.from(selRooms) });
+    if (r.success) { toast('success', `${selRooms.size} ruangan di-assign`); setShowAddRoom(false); fetchData(); }
     else toast('error', r.error || 'Gagal');
   };
 
-  const removeAssignment = async (id: string) => {
-    await DEL(`/api/admin/exams/${examId}/assignments/${id}`);
-    toast('success', 'Dihapus');
-    fetchData();
+  // Per-Sesi
+  const openAddSesi = async () => {
+    setShowAddSesi(true); setSelSesi(new Set());
+    const r = await GET<string[]>('/api/admin/pendaftar/sesi');
+    if (r.success) { const used = new Set(sesiListA.map((a: any) => a.user_id)); setSesiList((r.data || []).filter((s: string) => !used.has(s))); }
+  };
+  const saveSesi = async () => {
+    if (!selSesi.size) { toast('error', 'Pilih minimal 1 sesi'); return; }
+    const r = await POST(`/api/admin/exams/${examId}/assignments/sesi`, { sessions: Array.from(selSesi) });
+    if (r.success) { toast('success', `${selSesi.size} sesi di-assign`); setShowAddSesi(false); fetchData(); }
+    else toast('error', r.error || 'Gagal');
   };
 
-  const filteredCandidates = candidates.filter(c => {
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return c.name?.toLowerCase().includes(q) || c.nisn?.toLowerCase().includes(q) || c.jalur?.toLowerCase().includes(q);
-  });
+  const removeAssignment = async (id: string) => { await DEL(`/api/admin/exams/${examId}/assignments/${id}`); toast('success', 'Dihapus'); fetchData(); };
 
   if (loading) return <div className="py-12 text-center"><Spinner /></div>;
 
+  const ATABS = [
+    { key: 'peserta' as AssignTab, label: 'Per Peserta', count: pesertaList.length },
+    { key: 'ruangan' as AssignTab, label: 'Per Ruangan', count: roomList.length },
+    { key: 'sesi'    as AssignTab, label: 'Per Sesi',    count: sesiListA.length },
+  ];
+
+  const Chk = ({ size, check }: { size?: number; check: boolean }) => (
+    <div style={{ width: size || 18, height: size || 18, borderRadius: '5px', border: `2px solid ${check ? C.green : C.borderMid}`, background: check ? C.green : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+      {check && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}
+    </div>
+  );
+
+  const AssignBadge = ({ type }: { type: string }) => {
+    const m: Record<string, { bg: string; color: string; label: string }> = {
+      pendaftar: { bg: '#e2ebe3', color: '#2d6644', label: 'PMB' },
+      cbt_user:  { bg: '#fffbeb', color: '#b45309', label: 'Manual' },
+      room:      { bg: '#e0f0ff', color: '#1a5fa8', label: 'Ruangan' },
+      sesi:      { bg: '#f0e6ff', color: '#6d28d9', label: 'Sesi' },
+    };
+    const s = m[type] || m.pendaftar;
+    return <span style={{ background: s.bg, color: s.color, fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '999px' }}>{s.label}</span>;
+  };
+
+  const AssignTable = ({ list, cols }: { list: any[]; cols: { label: string; center?: boolean }[] }) => (
+    list.length === 0 ? <EmptyState title="Belum ada assignment" /> : (
+      <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '12px', overflow: 'hidden' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+          <TableHead cols={cols} />
+          <tbody>
+            {list.map((a: any, i: number) => (
+              <tr key={a.id} style={{ borderBottom: i < list.length - 1 ? `1px solid ${C.borderLight}` : 'none' }}>
+                <td style={{ padding: '10px 14px', color: C.textMuted }}>{i + 1}</td>
+                <td style={{ padding: '10px 14px', color: C.text, fontWeight: 700 }}>{a.full_name || '—'}</td>
+                {a.user_type !== 'room' && a.user_type !== 'sesi' && <td style={{ padding: '10px 14px', color: C.textMuted, fontFamily: 'monospace' }}>{a.nisn || '—'}</td>}
+                <td style={{ padding: '10px 14px' }}><AssignBadge type={a.user_type} /></td>
+                <td style={{ padding: '10px 14px', textAlign: 'center' }}>
+                  <button onClick={() => removeAssignment(a.id)} style={{ color: '#dc2626', background: 'none', border: 'none', cursor: 'pointer' }}><Trash2 size={13} /></button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )
+  );
+
   return (
     <div className="space-y-3">
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div>
-          <p style={{ color: C.textMid, fontSize: '11px', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Peserta di-assign — {assignments.length} orang</p>
-          <p style={{ color: C.textFaint, fontSize: '10.5px', marginTop: '2px' }}>Peserta yang di-assign bisa mengakses ujian ini terlepas dari filter jalur.</p>
-        </div>
-        <button onClick={openAdd}
-          style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: C.green, color: '#fff', fontSize: '12px', fontWeight: 700, padding: '8px 14px', borderRadius: '10px', border: 'none', cursor: 'pointer' }}>
-          <Plus size={13} strokeWidth={2.5} /> Tambah Peserta
-        </button>
+      {/* Sub-tabs */}
+      <div style={{ display: 'flex', gap: '2px', borderBottom: `1.5px solid ${C.borderMid}`, marginBottom: '4px' }}>
+        {ATABS.map(t => (
+          <button key={t.key} onClick={() => setTab(t.key)} style={{
+            padding: '9px 16px 8px', fontSize: '12px', fontWeight: tab === t.key ? 800 : 600,
+            color: tab === t.key ? C.green : C.textMuted, background: 'none', border: 'none',
+            borderBottom: `2.5px solid ${tab === t.key ? C.green : 'transparent'}`,
+            marginBottom: '-1.5px', cursor: 'pointer', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '5px',
+          }}>
+            {t.label}
+            {t.count > 0 && <span style={{ background: tab === t.key ? C.green : C.borderMid, color: tab === t.key ? '#fff' : C.textMuted, fontSize: '9px', fontWeight: 800, padding: '1px 6px', borderRadius: '999px' }}>{t.count}</span>}
+          </button>
+        ))}
       </div>
 
-      {assignments.length === 0
-        ? <EmptyState title="Belum ada peserta di-assign" />
-        : (
-          <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '12px', overflow: 'hidden' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-              <TableHead cols={[{ label: '#' }, { label: 'Nama' }, { label: 'NISN' }, { label: 'Tipe' }, { label: 'Aksi', center: true }]} />
-              <tbody>
-                {assignments.map((a: any, i: number) => (
-                  <tr key={a.id} style={{ borderBottom: i < assignments.length - 1 ? `1px solid ${C.borderLight}` : 'none' }}>
-                    <td style={{ padding: '10px 14px', color: C.textMuted }}>{i + 1}</td>
-                    <td style={{ padding: '10px 14px', color: C.text, fontWeight: 700 }}>{a.full_name || '—'}</td>
-                    <td style={{ padding: '10px 14px', color: C.textMuted, fontFamily: 'monospace' }}>{a.nisn || '—'}</td>
-                    <td style={{ padding: '10px 14px' }}>
-                      <span style={{ background: a.user_type === 'pendaftar' ? '#e2ebe3' : '#fffbeb', color: a.user_type === 'pendaftar' ? '#2d6644' : '#b45309', fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '999px' }}>
-                        {a.user_type === 'pendaftar' ? 'PMB' : 'Manual'}
-                      </span>
-                    </td>
-                    <td style={{ padding: '10px 14px', textAlign: 'center' }}>
-                      <button onClick={() => removeAssignment(a.id)}
-                        style={{ color: '#dc2626', fontSize: '11px', fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer' }}>
-                        <Trash2 size={13} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-      {/* Modal tambah peserta */}
-      <Modal open={showAdd} onClose={() => setShowAdd(false)} title="Assign Peserta ke Ujian" size="lg">
+      {/* Tab: Per Peserta */}
+      {tab === 'peserta' && (
         <div className="space-y-3">
-          <Input placeholder="Cari nama, NISN, atau jalur..." value={search} onChange={e => setSearch(e.target.value)} />
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <p style={{ color: C.textMuted, fontSize: '11px' }}>{filteredCandidates.length} peserta tersedia · {selected.size} dipilih</p>
-            <button onClick={selectAll} style={{ color: C.green, fontSize: '11px', fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer' }}>
-              {filteredCandidates.length > 0 && filteredCandidates.every(c => selected.has(`${c.id}:${c.user_type}`)) ? 'Batal Semua' : 'Pilih Semua'}
+            <p style={{ color: C.textFaint, fontSize: '10.5px' }}>Peserta yang di-assign bisa mengakses ujian terlepas dari filter jalur.</p>
+            <button onClick={openAddPeserta} style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: C.green, color: '#fff', fontSize: '12px', fontWeight: 700, padding: '8px 14px', borderRadius: '10px', border: 'none', cursor: 'pointer' }}>
+              <Plus size={13} strokeWidth={2.5} /> Tambah
             </button>
           </div>
-          <div style={{ maxHeight: '320px', overflow: 'auto', border: `1.5px solid ${C.borderMid}`, borderRadius: '12px' }}>
-            {filteredCandidates.length === 0
-              ? <p style={{ padding: '20px', textAlign: 'center', color: C.textFaint, fontSize: '12px' }}>Tidak ada peserta</p>
-              : filteredCandidates.map(c => {
-                const key = `${c.id}:${c.user_type}`;
-                const checked = selected.has(key);
-                return (
-                  <div key={key} onClick={() => toggleSelect(key)}
-                    style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 14px', cursor: 'pointer', borderBottom: `1px solid ${C.borderLight}`, background: checked ? C.greenLight : 'transparent' }}>
-                    <div style={{ width: '18px', height: '18px', borderRadius: '5px', border: `2px solid ${checked ? C.green : C.borderMid}`, background: checked ? C.green : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                      {checked && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}
+          <AssignTable list={pesertaList} cols={[{ label: '#' }, { label: 'Nama' }, { label: 'NISN' }, { label: 'Tipe' }, { label: 'Aksi', center: true }]} />
+          <Modal open={showAddPeserta} onClose={() => setShowAddPeserta(false)} title="Assign Per Peserta" size="lg">
+            <div className="space-y-3">
+              <Input placeholder="Cari nama, NISN, atau jalur..." value={search} onChange={e => setSearch(e.target.value)} />
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <p style={{ color: C.textMuted, fontSize: '11px' }}>{filteredC.length} tersedia · {selected.size} dipilih</p>
+                <button onClick={selectAll} style={{ color: C.green, fontSize: '11px', fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer' }}>
+                  {filteredC.length > 0 && filteredC.every(c => selected.has(`${c.id}:${c.user_type}`)) ? 'Batal Semua' : 'Pilih Semua'}
+                </button>
+              </div>
+              <div style={{ maxHeight: '300px', overflow: 'auto', border: `1.5px solid ${C.borderMid}`, borderRadius: '12px' }}>
+                {filteredC.length === 0 ? <p style={{ padding: '20px', textAlign: 'center', color: C.textFaint, fontSize: '12px' }}>Tidak ada peserta</p>
+                  : filteredC.map(c => { const key = `${c.id}:${c.user_type}`; const chk = selected.has(key); return (
+                    <div key={key} onClick={() => toggleSel(key)} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 14px', cursor: 'pointer', borderBottom: `1px solid ${C.borderLight}`, background: chk ? C.greenLight : 'transparent' }}>
+                      <Chk check={chk} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p style={{ color: C.text, fontSize: '12px', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</p>
+                        <p style={{ color: C.textFaint, fontSize: '10px', fontFamily: 'monospace' }}>{c.nisn}</p>
+                      </div>
+                      {c.jalur && <span style={{ background: '#f0e6ff', color: '#6d28d9', fontSize: '9px', fontWeight: 700, padding: '2px 7px', borderRadius: '999px', flexShrink: 0 }}>{c.jalur}</span>}
                     </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <p style={{ color: C.text, fontSize: '12px', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</p>
-                      <p style={{ color: C.textFaint, fontSize: '10px', fontFamily: 'monospace' }}>{c.nisn}</p>
-                    </div>
-                    {c.jalur && <span style={{ background: '#f0e6ff', color: '#6d28d9', fontSize: '9px', fontWeight: 700, padding: '2px 7px', borderRadius: '999px', flexShrink: 0 }}>{c.jalur}</span>}
-                  </div>
-                );
-              })}
-          </div>
-          <div className="flex gap-2 justify-end pt-1">
-            <Button variant="secondary" size="sm" onClick={() => setShowAdd(false)}>Batal</Button>
-            <Button size="sm" onClick={saveAssignments}>Assign {selected.size} Peserta</Button>
-          </div>
+                  ); })}
+              </div>
+              <div className="flex gap-2 justify-end pt-1">
+                <Button variant="secondary" size="sm" onClick={() => setShowAddPeserta(false)}>Batal</Button>
+                <Button size="sm" onClick={savePeserta}>Assign {selected.size} Peserta</Button>
+              </div>
+            </div>
+          </Modal>
         </div>
-      </Modal>
+      )}
+
+      {/* Tab: Per Ruangan */}
+      {tab === 'ruangan' && (
+        <div className="space-y-3">
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <p style={{ color: C.textFaint, fontSize: '10.5px' }}>Semua peserta di ruangan yang di-assign akan mendapat akses ujian ini.</p>
+            <button onClick={openAddRoom} style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: C.green, color: '#fff', fontSize: '12px', fontWeight: 700, padding: '8px 14px', borderRadius: '10px', border: 'none', cursor: 'pointer' }}>
+              <Plus size={13} strokeWidth={2.5} /> Tambah
+            </button>
+          </div>
+          <AssignTable list={roomList} cols={[{ label: '#' }, { label: 'Ruangan' }, { label: 'Tipe' }, { label: 'Aksi', center: true }]} />
+          <Modal open={showAddRoom} onClose={() => setShowAddRoom(false)} title="Assign Per Ruangan" size="lg">
+            <div className="space-y-3">
+              <p style={{ color: C.textMuted, fontSize: '11px' }}>{rooms.length} ruangan tersedia · {selRooms.size} dipilih</p>
+              <div style={{ maxHeight: '300px', overflow: 'auto', border: `1.5px solid ${C.borderMid}`, borderRadius: '12px' }}>
+                {rooms.length === 0 ? <p style={{ padding: '20px', textAlign: 'center', color: C.textFaint, fontSize: '12px' }}>Semua ruangan sudah di-assign</p>
+                  : rooms.map((rm: any) => { const chk = selRooms.has(rm.room_name); return (
+                    <div key={rm.id} onClick={() => setSelRooms(prev => { const n = new Set(prev); n.has(rm.room_name) ? n.delete(rm.room_name) : n.add(rm.room_name); return n; })} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 14px', cursor: 'pointer', borderBottom: `1px solid ${C.borderLight}`, background: chk ? C.greenLight : 'transparent' }}>
+                      <Chk check={chk} />
+                      <div style={{ flex: 1 }}>
+                        <p style={{ color: C.text, fontSize: '12px', fontWeight: 700 }}>{rm.room_name}</p>
+                        <p style={{ color: C.textFaint, fontSize: '10px' }}>{rm.jumlah_peserta || 0} peserta</p>
+                      </div>
+                    </div>
+                  ); })}
+              </div>
+              <div className="flex gap-2 justify-end pt-1">
+                <Button variant="secondary" size="sm" onClick={() => setShowAddRoom(false)}>Batal</Button>
+                <Button size="sm" onClick={saveRooms}>Assign {selRooms.size} Ruangan</Button>
+              </div>
+            </div>
+          </Modal>
+        </div>
+      )}
+
+      {/* Tab: Per Sesi */}
+      {tab === 'sesi' && (
+        <div className="space-y-3">
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <p style={{ color: C.textFaint, fontSize: '10.5px' }}>Semua peserta di sesi yang di-assign akan mendapat akses ujian ini.</p>
+            <button onClick={openAddSesi} style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: C.green, color: '#fff', fontSize: '12px', fontWeight: 700, padding: '8px 14px', borderRadius: '10px', border: 'none', cursor: 'pointer' }}>
+              <Plus size={13} strokeWidth={2.5} /> Tambah
+            </button>
+          </div>
+          <AssignTable list={sesiListA} cols={[{ label: '#' }, { label: 'Sesi' }, { label: 'Tipe' }, { label: 'Aksi', center: true }]} />
+          <Modal open={showAddSesi} onClose={() => setShowAddSesi(false)} title="Assign Per Sesi" size="lg">
+            <div className="space-y-3">
+              <p style={{ color: C.textMuted, fontSize: '11px' }}>{sesiList.length} sesi tersedia · {selSesi.size} dipilih</p>
+              <div style={{ maxHeight: '300px', overflow: 'auto', border: `1.5px solid ${C.borderMid}`, borderRadius: '12px' }}>
+                {sesiList.length === 0 ? <p style={{ padding: '20px', textAlign: 'center', color: C.textFaint, fontSize: '12px' }}>Semua sesi sudah di-assign</p>
+                  : sesiList.map((s: string) => { const chk = selSesi.has(s); return (
+                    <div key={s} onClick={() => setSelSesi(prev => { const n = new Set(prev); n.has(s) ? n.delete(s) : n.add(s); return n; })} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 14px', cursor: 'pointer', borderBottom: `1px solid ${C.borderLight}`, background: chk ? C.greenLight : 'transparent' }}>
+                      <Chk check={chk} />
+                      <p style={{ color: C.text, fontSize: '12px', fontWeight: 700 }}>{s}</p>
+                    </div>
+                  ); })}
+              </div>
+              <div className="flex gap-2 justify-end pt-1">
+                <Button variant="secondary" size="sm" onClick={() => setShowAddSesi(false)}>Batal</Button>
+                <Button size="sm" onClick={saveSesi}>Assign {selSesi.size} Sesi</Button>
+              </div>
+            </div>
+          </Modal>
+        </div>
+      )}
     </div>
   );
 }
