@@ -18,22 +18,38 @@ const EXCLUDE_JALUR_COND = "UPPER(jalur) NOT LIKE '%PRESTASI%'";
 // ══════════════════════════════════════════════════════════════
 
 admin.get('/rooms', async (c) => {
+  const tanggalTes = c.req.query('tanggal_tes');
+  const sesiTes = c.req.query('sesi_tes');
+  const pmbFilterValues: string[] = [];
+  const pmbCountConditions = [`p.ruang_tes = r.room_name`, EXCLUDE_JALUR_COND];
+  const pmbDedupConditions = [`p2.nisn = cu.nisn`, EXCLUDE_JALUR_COND];
+  if (tanggalTes) {
+    pmbCountConditions.push('p.tanggal_tes = ?');
+    pmbDedupConditions.push('p2.tanggal_tes = ?');
+    pmbFilterValues.push(tanggalTes);
+  }
+  if (sesiTes) {
+    pmbCountConditions.push('p.sesi_tes = ?');
+    pmbDedupConditions.push('p2.sesi_tes = ?');
+    pmbFilterValues.push(sesiTes);
+  }
+
   // Rooms + jumlah pendaftar non-Prestasi + proktor yang di-assign
   const { results } = await c.env.DB.prepare(
     `SELECT r.*,
        (
-         (SELECT COUNT(*) FROM pendaftar p WHERE p.ruang_tes = r.room_name AND ${EXCLUDE_JALUR_COND})
+         (SELECT COUNT(*) FROM pendaftar p WHERE ${pmbCountConditions.join(' AND ')})
          +
          (SELECT COUNT(*) FROM cbt_users cu
           WHERE cu.room_id = r.id AND cu.role = 'student'
             AND NOT EXISTS (
               SELECT 1 FROM pendaftar p2
-              WHERE p2.nisn = cu.nisn AND ${EXCLUDE_JALUR_COND}
+              WHERE ${pmbDedupConditions.join(' AND ')}
             ))
        ) as jumlah_peserta,
        (SELECT GROUP_CONCAT(cu.nama_lengkap, ', ') FROM cbt_users cu WHERE cu.room_id = r.id AND cu.role = 'proctor') as proctor_names
      FROM cbt_rooms r ORDER BY r.room_name`
-  ).all();
+  ).bind(...pmbFilterValues, ...pmbFilterValues).all();
   return c.json(ok(results));
 });
 
@@ -238,6 +254,8 @@ admin.delete('/users/:id', async (c) => {
 admin.get('/pendaftar', async (c) => {
   const room  = c.req.query('ruang_tes');
   const jalur = c.req.query('jalur');
+  const tanggalTes = c.req.query('tanggal_tes');
+  const sesiTes = c.req.query('sesi_tes');
   let sql = `SELECT id, nisn, nama_lengkap, no_pendaftaran, ruang_tes, jalur, asal_sekolah,
             jenis_kelamin, tanggal_lahir, tanggal_tes, sesi_tes,
             status_verifikasi, status_kelulusan
@@ -245,6 +263,8 @@ admin.get('/pendaftar', async (c) => {
   const params: string[] = [];
   if (room)  { sql += ' AND ruang_tes = ?'; params.push(room); }
   if (jalur) { sql += ' AND LOWER(jalur) = LOWER(?)'; params.push(jalur); }
+  if (tanggalTes) { sql += ' AND tanggal_tes = ?'; params.push(tanggalTes); }
+  if (sesiTes) { sql += ' AND sesi_tes = ?'; params.push(sesiTes); }
   sql += ' ORDER BY ruang_tes, nama_lengkap';
   const { results } = await c.env.DB.prepare(sql).bind(...params).all();
   return c.json(ok(results));

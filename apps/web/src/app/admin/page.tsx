@@ -1468,13 +1468,31 @@ function RoomsPage() {
   const [studentCandidateSearch, setStudentCandidateSearch] = useState('');
   const [loadingStudentCandidates, setLoadingStudentCandidates] = useState(false);
   const [savingRoomStudentAssign, setSavingRoomStudentAssign] = useState(false);
+  const [filterRoomDate, setFilterRoomDate] = useState('');
+  const [filterRoomSession, setFilterRoomSession] = useState('');
+  const [roomDateOptions, setRoomDateOptions] = useState<string[]>([]);
+  const [roomSessionOptions, setRoomSessionOptions] = useState<string[]>([]);
 
   const fetchData = useCallback(async () => {
-    const [r, p] = await Promise.all([GET<Room[]>('/api/admin/rooms'), GET<Proctor[]>('/api/admin/proctors')]);
+    setLoading(true);
+    const roomQs = new URLSearchParams();
+    if (filterRoomDate) roomQs.set('tanggal_tes', filterRoomDate);
+    if (filterRoomSession) roomQs.set('sesi_tes', filterRoomSession);
+    const roomUrl = roomQs.toString() ? `/api/admin/rooms?${roomQs.toString()}` : '/api/admin/rooms';
+    const [r, p, pmb] = await Promise.all([
+      GET<Room[]>(roomUrl),
+      GET<Proctor[]>('/api/admin/proctors'),
+      GET<Pendaftar[]>('/api/admin/pendaftar'),
+    ]);
     if (r.success) setRooms(r.data || []);
     if (p.success) setProctors(p.data || []);
+    if (pmb.success) {
+      const pmbData = pmb.data || [];
+      setRoomDateOptions(Array.from(new Set(pmbData.map((x: any) => x.tanggal_tes).filter(Boolean))).sort() as string[]);
+      setRoomSessionOptions(Array.from(new Set(pmbData.map((x: any) => x.sesi_tes).filter(Boolean))).sort() as string[]);
+    }
     setLoading(false);
-  }, []);
+  }, [filterRoomDate, filterRoomSession]);
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const syncRooms = async () => { setSyncing(true); const r = await POST('/api/admin/rooms/sync', {}); toast(r.success ? 'success' : 'error', r.message || r.error || 'Gagal'); setSyncing(false); fetchData(); };
@@ -1487,17 +1505,31 @@ function RoomsPage() {
     setRoomDetail(room);
     setLoadingStudents(true);
     setRoomStudents([]);
+    const pmbQs = new URLSearchParams({ ruang_tes: room.room_name });
+    if (filterRoomDate) pmbQs.set('tanggal_tes', filterRoomDate);
+    if (filterRoomSession) pmbQs.set('sesi_tes', filterRoomSession);
+
     // Ambil dari dua sumber: pendaftar PMB + cbt_users manual (room_id)
     const [pmb, manual] = await Promise.all([
-      GET<any[]>(`/api/admin/pendaftar?ruang_tes=${encodeURIComponent(room.room_name)}`),
+      GET<any[]>(`/api/admin/pendaftar?${pmbQs.toString()}`),
       GET<any[]>(`/api/admin/users?role=student&room_id=${encodeURIComponent(room.id)}`),
     ]);
     const pmbList = (pmb.success ? pmb.data || [] : []).map((p: any) => ({
-      nama: p.nama_lengkap, nisn: p.nisn, sesi: p.sesi_tes, sumber: 'PMB',
+      nama: p.nama_lengkap,
+      nisn: p.nisn,
+      ruang_tes: p.ruang_tes || room.room_name,
+      sesi: p.sesi_tes,
+      tanggal_tes: p.tanggal_tes,
+      sumber: 'PMB',
     }));
     const pmbNisn = new Set(pmbList.map((p: any) => p.nisn).filter(Boolean));
     const manualList = (manual.success ? manual.data || [] : []).map((u: any) => ({
-      nama: u.full_name, nisn: u.nisn || u.username, sesi: '—', sumber: 'Manual',
+      nama: u.full_name,
+      nisn: u.nisn || u.username,
+      ruang_tes: room.room_name,
+      sesi: '',
+      tanggal_tes: '',
+      sumber: 'Manual',
     })).filter((u: any) => !u.nisn || !pmbNisn.has(u.nisn));
     setRoomStudents([...pmbList, ...manualList]);
     setLoadingStudents(false);
@@ -1508,8 +1540,11 @@ function RoomsPage() {
     setSelectedRoomParticipants(new Set());
     setStudentCandidateSearch('');
     setLoadingStudentCandidates(true);
+    const pmbQs = new URLSearchParams();
+    if (filterRoomDate) pmbQs.set('tanggal_tes', filterRoomDate);
+    if (filterRoomSession) pmbQs.set('sesi_tes', filterRoomSession);
     const [pmb, manual, roomListResp] = await Promise.all([
-      GET<any[]>('/api/admin/pendaftar'),
+      GET<any[]>(pmbQs.toString() ? `/api/admin/pendaftar?${pmbQs.toString()}` : '/api/admin/pendaftar'),
       GET<any[]>('/api/admin/users?role=student'),
       GET<Room[]>('/api/admin/rooms'),
     ]);
@@ -1517,15 +1552,28 @@ function RoomsPage() {
     const pmbList = (pmb.success ? pmb.data || [] : [])
       .filter((p: any) => p.ruang_tes !== room.room_name)
       .map((p: any) => ({
-        id: p.id, source: 'pmb', nama: p.nama_lengkap, nisn: p.nisn, ruang_tes: p.ruang_tes || '', jalur: p.jalur || '',
+        id: p.id,
+        source: 'pmb',
+        nama: p.nama_lengkap,
+        nisn: p.nisn,
+        ruang_tes: p.ruang_tes || '',
+        jalur: p.jalur || '',
+        sesi_tes: p.sesi_tes || '',
+        tanggal_tes: p.tanggal_tes || '',
       }));
     const pmbNisn = new Set((pmb.success ? pmb.data || [] : []).map((p: any) => p.nisn).filter(Boolean));
     const manualList = (manual.success ? manual.data || [] : [])
       .filter((u: any) => u.room_id !== room.id)
       .filter((u: any) => !u.nisn || !pmbNisn.has(u.nisn))
       .map((u: any) => ({
-        id: u.id, source: 'manual', nama: u.full_name, nisn: u.nisn || u.username,
-        ruang_tes: roomList.find((r: Room) => r.id === u.room_id)?.room_name || '', jalur: 'REGULER',
+        id: u.id,
+        source: 'manual',
+        nama: u.full_name,
+        nisn: u.nisn || u.username,
+        ruang_tes: roomList.find((r: Room) => r.id === u.room_id)?.room_name || '',
+        jalur: 'REGULER',
+        sesi_tes: '',
+        tanggal_tes: '',
       }));
     setStudentCandidates([...pmbList, ...manualList]);
     setLoadingStudentCandidates(false);
@@ -1534,7 +1582,7 @@ function RoomsPage() {
   const filteredStudentCandidates = studentCandidates.filter((p: any) => {
     const q = studentCandidateSearch.trim().toLowerCase();
     if (!q) return true;
-    return `${p.nama} ${p.nisn} ${p.ruang_tes} ${p.jalur}`.toLowerCase().includes(q);
+    return `${p.nama} ${p.nisn} ${p.ruang_tes} ${p.jalur} ${p.sesi_tes || ''} ${p.tanggal_tes || ''}`.toLowerCase().includes(q);
   });
   const visibleRoomCandidateKeys = filteredStudentCandidates.map(roomParticipantKey);
   const allRoomCandidatesSelected = visibleRoomCandidateKeys.length > 0 && visibleRoomCandidateKeys.every(k => selectedRoomParticipants.has(k));
@@ -1587,6 +1635,23 @@ function RoomsPage() {
         <Button size="sm" loading={syncing} onClick={syncRooms}><RefreshCw size={13} /> Sinkronkan</Button>
       </div>
       <div style={{ flex: 1, padding: '16px 20px' }} className="space-y-3">
+        <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '12px', padding: '10px 12px', display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+          <Select
+            value={filterRoomSession}
+            onChange={e => setFilterRoomSession(e.target.value)}
+            options={[{ value: '', label: 'Semua Sesi' }, ...roomSessionOptions.map(s => ({ value: s, label: s }))]}
+          />
+          <Select
+            value={filterRoomDate}
+            onChange={e => setFilterRoomDate(e.target.value)}
+            options={[{ value: '', label: 'Semua Tanggal' }, ...roomDateOptions.map(t => ({ value: t, label: t }))]}
+          />
+          {(filterRoomSession || filterRoomDate) && (
+            <Button variant="secondary" size="sm" onClick={() => { setFilterRoomSession(''); setFilterRoomDate(''); }}>
+              Reset Filter
+            </Button>
+          )}
+        </div>
         {loading ? <div className="py-12 text-center"><Spinner /></div>
           : rooms.length === 0 ? <EmptyState title="Belum ada ruangan" desc="Klik Sinkronkan dari PMB" />
             : (
@@ -1687,6 +1752,7 @@ function RoomsPage() {
                         <th style={{ padding: '8px 14px', textAlign: 'left', color: C.textMid, fontSize: '10.5px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Nama</th>
                         <th style={{ padding: '8px 14px', textAlign: 'left', color: C.textMid, fontSize: '10.5px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>NISN</th>
                         <th style={{ padding: '8px 14px', textAlign: 'left', color: C.textMid, fontSize: '10.5px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Sesi</th>
+                        <th style={{ padding: '8px 14px', textAlign: 'left', color: C.textMid, fontSize: '10.5px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Tgl Tes</th>
                         <th style={{ padding: '8px 14px', textAlign: 'left', color: C.textMid, fontSize: '10.5px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Sumber</th>
                       </tr>
                     </thead>
@@ -1697,6 +1763,7 @@ function RoomsPage() {
                           <td style={{ padding: '9px 14px', color: C.text, fontWeight: 700 }}>{s.nama}</td>
                           <td style={{ padding: '9px 14px', color: C.textMuted, fontFamily: 'monospace' }}>{s.nisn}</td>
                           <td style={{ padding: '9px 14px', color: C.textMuted }}>{s.sesi || '—'}</td>
+                          <td style={{ padding: '9px 14px', color: C.textMuted, whiteSpace: 'nowrap' }}>{s.tanggal_tes || '—'}</td>
                           <td style={{ padding: '9px 14px' }}>
                             {s.sumber === 'Manual'
                               ? <span style={{ background: '#fffbeb', color: '#b45309', fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '999px' }}>Manual</span>
@@ -1714,7 +1781,7 @@ function RoomsPage() {
       <Modal open={!!studentAssignRoom} onClose={() => setStudentAssignRoom(null)} title={`Tambah Peserta — ${studentAssignRoom?.room_name}`} size="lg">
         <div className="space-y-3">
           <Input
-            placeholder="Cari nama, NISN, ruangan, jalur..."
+            placeholder="Cari nama, NISN, ruangan, jalur, sesi, tanggal..."
             value={studentCandidateSearch}
             onChange={e => setStudentCandidateSearch(e.target.value)}
           />
@@ -1741,7 +1808,14 @@ function RoomsPage() {
                           <input type="checkbox" checked={selectedRoomParticipants.has(roomParticipantKey(p))} onChange={() => toggleRoomCandidate(p)} />
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <p style={{ color: C.text, fontSize: '12.5px', fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.nama}</p>
-                            <p style={{ color: C.textMuted, fontSize: '11px', marginTop: '2px' }}>{p.nisn || 'Tanpa NISN'}{p.ruang_tes ? ` · ${p.ruang_tes}` : ' · Belum ada ruangan'}</p>
+                            <p style={{ color: C.textMuted, fontSize: '11px', marginTop: '2px' }}>
+                              {[
+                                p.nisn || 'Tanpa NISN',
+                                p.ruang_tes || 'Belum ada ruangan',
+                                p.sesi_tes || null,
+                                p.tanggal_tes || null,
+                              ].filter(Boolean).join(' · ')}
+                            </p>
                           </div>
                           <span style={{ background: p.source === 'manual' ? '#fffbeb' : '#e2ebe3', color: p.source === 'manual' ? '#b45309' : '#2d6644', fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '999px', flexShrink: 0 }}>
                             {p.source === 'manual' ? 'Manual' : 'PMB'}
