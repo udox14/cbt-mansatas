@@ -25,9 +25,9 @@ function LiveClock() {
     return () => clearInterval(iv);
   }, []);
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: C.greenLight, border: `1.5px solid ${C.greenBorder}`, borderRadius: '10px', padding: '6px 14px' }}>
-      <Clock size={13} color={C.green} strokeWidth={2.5} />
-      <span style={{ fontFamily: 'monospace', fontSize: '15px', fontWeight: 900, color: C.text, letterSpacing: '0.05em' }}>{time}</span>
+    <div style={{ display: 'flex', alignItems: 'center', gap: '5px', background: C.greenLight, border: `1.5px solid ${C.greenBorder}`, borderRadius: '9px', padding: '5px 10px', flexShrink: 0 }}>
+      <Clock size={12} color={C.green} strokeWidth={2.5} />
+      <span style={{ fontFamily: 'monospace', fontSize: '13px', fontWeight: 900, color: C.text, letterSpacing: '0.04em', whiteSpace: 'nowrap' }}>{time}</span>
     </div>
   );
 }
@@ -139,27 +139,33 @@ function ProctorContent() {
     <div style={{ minHeight: '100vh', background: C.bg, fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}>
       <div className="pointer-events-none fixed inset-0" style={{ backgroundImage: 'radial-gradient(circle,#c4ccc4 1px,transparent 1px)', backgroundSize: '26px 26px', opacity: 0.35, zIndex: 0 }} />
 
-      {/* HEADER */}
+      {/* HEADER — 1 baris, responsif mobile */}
       <header style={{ position: 'relative', zIndex: 2, background: C.white, borderBottom: `1.5px solid ${C.border}` }}>
-        <div style={{ maxWidth: '820px', margin: '0 auto', padding: '12px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <div style={{ maxWidth: '820px', margin: '0 auto', padding: '10px 16px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+          {/* Kiri: logo + nama sekolah */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '9px', flex: 1, minWidth: 0 }}>
             <KemenagLogo />
-            <div>
-              <p style={{ color: C.text, fontSize: '11px', fontWeight: 800, letterSpacing: '0.01em', lineHeight: 1.2 }}>MAN 1 TASIKMALAYA</p>
-              <p style={{ color: '#7a9e86', fontSize: '9.5px', fontWeight: 600, fontStyle: 'italic', letterSpacing: '0.05em', marginTop: '1px' }}>Bangkit · Jaya · Juara</p>
+            <div style={{ minWidth: 0 }}>
+              <p style={{ color: C.text, fontSize: '11px', fontWeight: 800, letterSpacing: '0.01em', lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>MAN 1 TASIKMALAYA</p>
+              <p style={{ color: '#7a9e86', fontSize: '9px', fontWeight: 600, fontStyle: 'italic', letterSpacing: '0.04em', marginTop: '1px' }}>Bangkit · Jaya · Juara</p>
             </div>
           </div>
-          {/* #5: Jam real-time */}
-          <LiveClock />
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <div style={{ textAlign: 'right' }}>
-              <p style={{ color: C.text, fontSize: '13px', fontWeight: 700, lineHeight: 1.2 }}>{user.full_name}</p>
-              <p style={{ color: C.textMuted, fontSize: '11px' }}>Pengawas Ruangan</p>
+          {/* Kanan: jam + nama + logout (tidak wrap) */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+            <LiveClock />
+            <div style={{ textAlign: 'right', display: 'none' }} className="sm:block">
+              <p style={{ color: C.text, fontSize: '12px', fontWeight: 700, lineHeight: 1.2, whiteSpace: 'nowrap' }}>{user.full_name}</p>
+              <p style={{ color: C.textMuted, fontSize: '10px' }}>Pengawas</p>
             </div>
-            <button onClick={logout} style={{ width: '34px', height: '34px', borderRadius: '10px', background: '#fef2f2', border: '1.5px solid #fecaca', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}>
-              <LogOut size={15} color="#dc2626" strokeWidth={2} />
+            <button onClick={logout} style={{ width: '32px', height: '32px', borderRadius: '10px', background: '#fef2f2', border: '1.5px solid #fecaca', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}>
+              <LogOut size={14} color="#dc2626" strokeWidth={2} />
             </button>
           </div>
+        </div>
+        {/* Sub-bar nama pengawas — hanya muncul di mobile */}
+        <div className="sm:hidden" style={{ padding: '0 16px 8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span style={{ color: C.text, fontSize: '12px', fontWeight: 700 }}>{user.full_name}</span>
+          <span style={{ color: C.textFaint, fontSize: '11px' }}>· Pengawas Ruangan</span>
         </div>
       </header>
 
@@ -222,86 +228,132 @@ function ProctorContent() {
             )}
           </div>
 
-          {filtered.length === 0
-            ? <EmptyState title="Belum ada peserta" />
-            : (
-              <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '14px', overflow: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', minWidth: '640px' }}>
-                  <thead>
-                    <tr style={{ background: C.bg, borderBottom: `1.5px solid ${C.borderMid}` }}>
-                      {['Peserta', 'Status', 'Progres', '⚠ Langgar', 'Sisa Waktu', 'Aksi'].map((h, i) => (
-                        <th key={h} style={{ padding: '9px 14px', textAlign: i === 0 ? 'left' : 'center', color: C.textMid, fontSize: '10.5px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filtered.map((s: any, i: number) => {
-                      const isOnline  = s.live_status === 'online';
-                      const isDone    = s.live_status === 'selesai';
-                      const isLocked  = s.live_status === 'dikunci';
-                      // #4: Sisa waktu
-                      const rem = (!isDone && s.started_at && s.duration_minutes)
-                        ? getRemainingTime(s.started_at, s.duration_minutes)
-                        : null;
-                      return (
-                        <tr key={s.id} style={{ borderBottom: i < filtered.length - 1 ? `1px solid ${C.borderLight}` : 'none', background: isLocked ? '#fffbeb' : 'transparent' }}>
-                          <td style={{ padding: '10px 14px' }}>
-                            <p style={{ color: C.text, fontWeight: 700 }}>{s.full_name}</p>
-                            <p style={{ color: C.textFaint, fontSize: '10px', marginTop: '1px', fontFamily: 'monospace' }}>{s.nisn}</p>
-                          </td>
-                          <td style={{ padding: '10px 14px', textAlign: 'center' }}>
-                            <span style={{
-                              background: isDone ? '#f1f1f0' : isLocked ? '#fffbeb' : isOnline ? C.greenLight : '#fef2f2',
-                              color: isDone ? '#6b7c6e' : isLocked ? '#b45309' : isOnline ? '#2d6644' : '#dc2626',
-                              fontSize: '10px', fontWeight: 700, padding: '3px 9px', borderRadius: '999px',
-                            }}>
-                              {isDone ? 'Selesai' : isLocked ? '🔒 Dikunci' : isOnline ? 'Online' : 'Offline'}
-                            </span>
-                          </td>
-                          <td style={{ padding: '10px 14px', textAlign: 'center', color: C.textMuted, fontFamily: 'monospace', fontWeight: 600 }}>{s.answered_count}/{s.total_questions}</td>
-                          <td style={{ padding: '10px 14px', textAlign: 'center', fontWeight: s.cheat_warnings > 0 ? 700 : 400, color: s.cheat_warnings > 0 ? '#dc2626' : C.textFaint }}>{s.cheat_warnings}</td>
-                          {/* #4: Sisa waktu */}
-                          <td style={{ padding: '10px 14px', textAlign: 'center', fontFamily: 'monospace', fontSize: '11.5px', fontWeight: 700, color: isDone ? C.textFaint : rem?.urgent ? '#dc2626' : C.textMid }}>
-                            {isDone ? '—' : rem ? rem.text : '—'}
-                          </td>
-                          <td style={{ padding: '10px 14px', textAlign: 'center' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', flexWrap: 'wrap' }}>
-                              {/* Log pelanggaran */}
-                              <button onClick={() => openLog(s)}
-                                style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', color: '#1a5fa8', fontSize: '11px', fontWeight: 700, background: '#e0f0ff', border: '1.5px solid #bfdbfe', borderRadius: '8px', padding: '4px 8px', cursor: 'pointer' }}
-                                title="Lihat log pelanggaran">
-                                <ClipboardList size={11} strokeWidth={2.5} />
-                                {s.cheat_warnings > 0 ? s.cheat_warnings : ''}
-                              </button>
-                              {/* #7: Konfirmasi unlock */}
-                              {isLocked && (
-                                <button onClick={() => setUnlockTarget(s)} style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', color: '#b45309', fontSize: '11px', fontWeight: 700, background: '#fffbeb', border: '1.5px solid #fde68a', borderRadius: '8px', padding: '4px 10px', cursor: 'pointer' }}>
-                                  Buka Kunci
-                                </button>
-                              )}
-                              {/* #10: Force submit */}
-                              {!isDone && (
-                                <button onClick={() => setForceTarget(s)} style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', color: '#dc2626', fontSize: '11px', fontWeight: 700, background: '#fef2f2', border: '1.5px solid #fecaca', borderRadius: '8px', padding: '4px 8px', cursor: 'pointer' }}
-                                  title="Paksa kumpulkan ujian">
-                                  <Send size={10} strokeWidth={2.5} />
-                                </button>
-                              )}
-                              {/* #2: Rename Reset → Ganti Perangkat */}
-                              {!isDone && !isLocked && (
-                                <button onClick={() => setResetTarget(s)} style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', color: C.green, fontSize: '11px', fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer' }}
-                                  title="Reset jika peserta ganti perangkat">
-                                  <RefreshCw size={11} strokeWidth={2.5} />
-                                </button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
+          {filtered.length === 0 ? <EmptyState title="Belum ada peserta" /> : (<>
+
+            {/* ── MOBILE: card layout ── */}
+            <div className="sm:hidden" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {filtered.map((s: any) => {
+                const isOnline = s.live_status === 'online';
+                const isDone   = s.live_status === 'selesai';
+                const isLocked = s.live_status === 'dikunci';
+                const rem = (!isDone && s.started_at && s.duration_minutes)
+                  ? getRemainingTime(s.started_at, s.duration_minutes) : null;
+                return (
+                  <div key={s.id} style={{
+                    border: `1.5px solid ${isLocked ? '#fde68a' : C.borderMid}`,
+                    borderRadius: '14px', padding: '12px 14px',
+                    background: isLocked ? '#fffbeb' : C.white,
+                  }}>
+                    {/* Baris 1: Nama + Badge status */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '8px' }}>
+                      <div style={{ minWidth: 0 }}>
+                        <p style={{ color: C.text, fontWeight: 800, fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.full_name}</p>
+                        <p style={{ color: C.textFaint, fontSize: '10px', fontFamily: 'monospace', marginTop: '1px' }}>{s.nisn}</p>
+                      </div>
+                      <span style={{
+                        background: isDone ? '#f1f1f0' : isLocked ? '#fffbeb' : isOnline ? C.greenLight : '#fef2f2',
+                        color: isDone ? '#6b7c6e' : isLocked ? '#b45309' : isOnline ? '#2d6644' : '#dc2626',
+                        fontSize: '10px', fontWeight: 700, padding: '3px 10px', borderRadius: '999px', whiteSpace: 'nowrap', flexShrink: 0,
+                      }}>
+                        {isDone ? 'Selesai' : isLocked ? '🔒 Dikunci' : isOnline ? 'Online' : 'Offline'}
+                      </span>
+                    </div>
+                    {/* Baris 2: Progres + Sisa waktu + Pelanggaran */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+                      <span style={{ background: C.bg, border: `1px solid ${C.borderLight}`, borderRadius: '7px', padding: '3px 8px', fontSize: '11px', fontWeight: 700, color: C.textMid, fontFamily: 'monospace' }}>
+                        {s.answered_count}/{s.total_questions} soal
+                      </span>
+                      {rem && (
+                        <span style={{ background: rem.urgent ? '#fef2f2' : C.bg, border: `1px solid ${rem.urgent ? '#fecaca' : C.borderLight}`, borderRadius: '7px', padding: '3px 8px', fontSize: '11px', fontWeight: 700, color: rem.urgent ? '#dc2626' : C.textMid, fontFamily: 'monospace' }}>
+                          ⏱ {rem.text}
+                        </span>
+                      )}
+                      {s.cheat_warnings > 0 && (
+                        <span style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '7px', padding: '3px 8px', fontSize: '11px', fontWeight: 700, color: '#dc2626' }}>
+                          ⚠ {s.cheat_warnings}x
+                        </span>
+                      )}
+                    </div>
+                    {/* Baris 3: Tombol aksi */}
+                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                      <button onClick={() => openLog(s)}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: '#1a5fa8', fontSize: '11px', fontWeight: 700, background: '#e0f0ff', border: '1.5px solid #bfdbfe', borderRadius: '8px', padding: '5px 10px', cursor: 'pointer' }}>
+                        <ClipboardList size={11} strokeWidth={2.5} /> Log
+                      </button>
+                      {isLocked && (
+                        <button onClick={() => setUnlockTarget(s)}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: '#b45309', fontSize: '11px', fontWeight: 700, background: '#fffbeb', border: '1.5px solid #fde68a', borderRadius: '8px', padding: '5px 10px', cursor: 'pointer' }}>
+                          Buka Kunci
+                        </button>
+                      )}
+                      {!isDone && (
+                        <button onClick={() => setForceTarget(s)}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: '#dc2626', fontSize: '11px', fontWeight: 700, background: '#fef2f2', border: '1.5px solid #fecaca', borderRadius: '8px', padding: '5px 10px', cursor: 'pointer' }}>
+                          <Send size={10} strokeWidth={2.5} /> Kumpul
+                        </button>
+                      )}
+                      {!isDone && !isLocked && (
+                        <button onClick={() => setResetTarget(s)}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: C.green, fontSize: '11px', fontWeight: 700, background: C.greenLight, border: `1.5px solid ${C.greenBorder}`, borderRadius: '8px', padding: '5px 10px', cursor: 'pointer' }}>
+                          <RefreshCw size={10} strokeWidth={2.5} /> Perangkat
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* ── DESKTOP: tabel ── */}
+            <div className="hidden sm:block" style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '14px', overflow: 'hidden' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                <thead>
+                  <tr style={{ background: C.bg, borderBottom: `1.5px solid ${C.borderMid}` }}>
+                    {['Peserta', 'Status', 'Progres', '⚠', 'Sisa Waktu', 'Aksi'].map((h, i) => (
+                      <th key={h} style={{ padding: '9px 14px', textAlign: i === 0 ? 'left' : 'center', color: C.textMid, fontSize: '10.5px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((s: any, i: number) => {
+                    const isOnline = s.live_status === 'online';
+                    const isDone   = s.live_status === 'selesai';
+                    const isLocked = s.live_status === 'dikunci';
+                    const rem = (!isDone && s.started_at && s.duration_minutes)
+                      ? getRemainingTime(s.started_at, s.duration_minutes) : null;
+                    return (
+                      <tr key={s.id} style={{ borderBottom: i < filtered.length - 1 ? `1px solid ${C.borderLight}` : 'none', background: isLocked ? '#fffbeb' : 'transparent' }}>
+                        <td style={{ padding: '10px 14px' }}>
+                          <p style={{ color: C.text, fontWeight: 700 }}>{s.full_name}</p>
+                          <p style={{ color: C.textFaint, fontSize: '10px', fontFamily: 'monospace' }}>{s.nisn}</p>
+                        </td>
+                        <td style={{ padding: '10px 14px', textAlign: 'center' }}>
+                          <span style={{ background: isDone ? '#f1f1f0' : isLocked ? '#fffbeb' : isOnline ? C.greenLight : '#fef2f2', color: isDone ? '#6b7c6e' : isLocked ? '#b45309' : isOnline ? '#2d6644' : '#dc2626', fontSize: '10px', fontWeight: 700, padding: '3px 9px', borderRadius: '999px' }}>
+                            {isDone ? 'Selesai' : isLocked ? '🔒' : isOnline ? 'Online' : 'Offline'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '10px 14px', textAlign: 'center', color: C.textMuted, fontFamily: 'monospace', fontWeight: 600 }}>{s.answered_count}/{s.total_questions}</td>
+                        <td style={{ padding: '10px 14px', textAlign: 'center', fontWeight: s.cheat_warnings > 0 ? 700 : 400, color: s.cheat_warnings > 0 ? '#dc2626' : C.textFaint }}>{s.cheat_warnings}</td>
+                        <td style={{ padding: '10px 14px', textAlign: 'center', fontFamily: 'monospace', fontSize: '11.5px', fontWeight: 700, color: isDone ? C.textFaint : rem?.urgent ? '#dc2626' : C.textMid }}>
+                          {isDone ? '—' : rem ? rem.text : '—'}
+                        </td>
+                        <td style={{ padding: '10px 14px', textAlign: 'center' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                            <button onClick={() => openLog(s)} style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', color: '#1a5fa8', fontSize: '11px', fontWeight: 700, background: '#e0f0ff', border: '1.5px solid #bfdbfe', borderRadius: '8px', padding: '4px 8px', cursor: 'pointer' }} title="Log pelanggaran">
+                              <ClipboardList size={11} strokeWidth={2.5} />{s.cheat_warnings > 0 ? ` ${s.cheat_warnings}` : ''}
+                            </button>
+                            {isLocked && <button onClick={() => setUnlockTarget(s)} style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', color: '#b45309', fontSize: '11px', fontWeight: 700, background: '#fffbeb', border: '1.5px solid #fde68a', borderRadius: '8px', padding: '4px 10px', cursor: 'pointer' }}>Buka Kunci</button>}
+                            {!isDone && <button onClick={() => setForceTarget(s)} style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', color: '#dc2626', fontSize: '11px', fontWeight: 700, background: '#fef2f2', border: '1.5px solid #fecaca', borderRadius: '8px', padding: '4px 8px', cursor: 'pointer' }} title="Paksa kumpulkan"><Send size={10} strokeWidth={2.5} /></button>}
+                            {!isDone && !isLocked && <button onClick={() => setResetTarget(s)} style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', color: C.green, fontSize: '11px', fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer' }} title="Ganti perangkat"><RefreshCw size={11} strokeWidth={2.5} /></button>}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>)}
         </section>
       </main>
 
