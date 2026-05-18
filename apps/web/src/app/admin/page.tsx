@@ -786,7 +786,7 @@ function ResultsView({ examId }: { examId: string }) {
   );
 }
 // ── ASSIGNMENTS VIEW ─────────────────────────────────────────
-type AssignTab = 'peserta' | 'ruangan' | 'sesi';
+type AssignTab = 'peserta' | 'ruangan' | 'sesi' | 'kelompok';
 function AssignmentsView({ examId }: { examId: string }) {
   const { toast } = useToast();
   const [tab, setTab] = useState<AssignTab>('peserta');
@@ -805,6 +805,10 @@ function AssignmentsView({ examId }: { examId: string }) {
   const [showAddSesi, setShowAddSesi] = useState(false);
   const [sesiList, setSesiList] = useState<string[]>([]);
   const [selSesi, setSelSesi] = useState<Set<string>>(new Set());
+  // Per-Kelompok state
+  const [showAddKelompok, setShowAddKelompok] = useState(false);
+  const [groupList, setGroupList] = useState<any[]>([]);
+  const [selGroups, setSelGroups] = useState<Set<string>>(new Set());
 
   const fetchData = useCallback(async () => {
     const r = await GET(`/api/admin/exams/${examId}/assignments`);
@@ -813,9 +817,10 @@ function AssignmentsView({ examId }: { examId: string }) {
   }, [examId]);
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const pesertaList = assignments.filter(a => a.user_type === 'pendaftar' || a.user_type === 'cbt_user');
-  const roomList    = assignments.filter(a => a.user_type === 'room');
-  const sesiListA   = assignments.filter(a => a.user_type === 'sesi');
+  const pesertaList  = assignments.filter(a => a.user_type === 'pendaftar' || a.user_type === 'cbt_user');
+  const roomList     = assignments.filter(a => a.user_type === 'room');
+  const sesiListA    = assignments.filter(a => a.user_type === 'sesi');
+  const kelompokList = assignments.filter(a => a.user_type === 'tanggal_sesi');
 
   // Per-Peserta
   const openAddPeserta = async () => {
@@ -866,14 +871,32 @@ function AssignmentsView({ examId }: { examId: string }) {
     else toast('error', r.error || 'Gagal');
   };
 
+  // Per-Kelompok Tes (tanggal × sesi)
+  const openAddKelompok = async () => {
+    setShowAddKelompok(true); setSelGroups(new Set());
+    const r = await GET<any[]>('/api/admin/pendaftar/groups');
+    if (r.success) {
+      const used = new Set(kelompokList.map((a: any) => a.user_id));
+      setGroupList((r.data || []).filter((g: any) => !used.has(`${g.tanggal_tes}|${g.sesi_tes}`)));
+    }
+  };
+  const saveKelompok = async () => {
+    if (!selGroups.size) { toast('error', 'Pilih minimal 1 kelompok'); return; }
+    const groups = Array.from(selGroups).map(k => { const [tanggal_tes, ...rest] = k.split('|'); return { tanggal_tes, sesi_tes: rest.join('|') }; });
+    const r = await POST(`/api/admin/exams/${examId}/assignments/group`, { groups });
+    if (r.success) { toast('success', `${selGroups.size} kelompok di-assign`); setShowAddKelompok(false); fetchData(); }
+    else toast('error', r.error || 'Gagal');
+  };
+
   const removeAssignment = async (id: string) => { await DEL(`/api/admin/exams/${examId}/assignments/${id}`); toast('success', 'Dihapus'); fetchData(); };
 
   if (loading) return <div className="py-12 text-center"><Spinner /></div>;
 
   const ATABS = [
-    { key: 'peserta' as AssignTab, label: 'Per Peserta', count: pesertaList.length },
-    { key: 'ruangan' as AssignTab, label: 'Per Ruangan', count: roomList.length },
-    { key: 'sesi'    as AssignTab, label: 'Per Sesi',    count: sesiListA.length },
+    { key: 'peserta'  as AssignTab, label: 'Per Peserta',        count: pesertaList.length },
+    { key: 'kelompok' as AssignTab, label: '🗓 Per Kelompok Tes', count: kelompokList.length },
+    { key: 'ruangan'  as AssignTab, label: 'Per Ruangan',         count: roomList.length },
+    { key: 'sesi'     as AssignTab, label: 'Per Sesi',            count: sesiListA.length },
   ];
 
   const Chk = ({ size, check }: { size?: number; check: boolean }) => (
@@ -884,10 +907,11 @@ function AssignmentsView({ examId }: { examId: string }) {
 
   const AssignBadge = ({ type }: { type: string }) => {
     const m: Record<string, { bg: string; color: string; label: string }> = {
-      pendaftar: { bg: '#e2ebe3', color: '#2d6644', label: 'PMB' },
-      cbt_user:  { bg: '#fffbeb', color: '#b45309', label: 'Manual' },
-      room:      { bg: '#e0f0ff', color: '#1a5fa8', label: 'Ruangan' },
-      sesi:      { bg: '#f0e6ff', color: '#6d28d9', label: 'Sesi' },
+      pendaftar:    { bg: '#e2ebe3', color: '#2d6644', label: 'PMB' },
+      cbt_user:     { bg: '#fffbeb', color: '#b45309', label: 'Manual' },
+      room:         { bg: '#e0f0ff', color: '#1a5fa8', label: 'Ruangan' },
+      sesi:         { bg: '#f0e6ff', color: '#6d28d9', label: 'Sesi' },
+      tanggal_sesi: { bg: '#fef3c7', color: '#92400e', label: 'Kelompok' },
     };
     const s = m[type] || m.pendaftar;
     return <span style={{ background: s.bg, color: s.color, fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '999px' }}>{s.label}</span>;
@@ -1033,6 +1057,81 @@ function AssignmentsView({ examId }: { examId: string }) {
               <div className="flex gap-2 justify-end pt-1">
                 <Button variant="secondary" size="sm" onClick={() => setShowAddSesi(false)}>Batal</Button>
                 <Button size="sm" onClick={saveSesi}>Assign {selSesi.size} Sesi</Button>
+              </div>
+            </div>
+          </Modal>
+        </div>
+      )}
+
+      {/* Tab: Per Kelompok Tes (Tanggal × Sesi) */}
+      {tab === 'kelompok' && (
+        <div className="space-y-3">
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              <p style={{ color: C.textFaint, fontSize: '10.5px' }}>
+                Assign ujian ke kelompok tes berdasarkan <strong>Tanggal × Sesi</strong>.
+                Cocok untuk ujian multi-hari: satu klik assign semua peserta di sesi tertentu.
+              </p>
+            </div>
+            <button onClick={openAddKelompok} style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: C.green, color: '#fff', fontSize: '12px', fontWeight: 700, padding: '8px 14px', borderRadius: '10px', border: 'none', cursor: 'pointer' }}>
+              <Plus size={13} strokeWidth={2.5} /> Tambah Kelompok
+            </button>
+          </div>
+
+          {/* List kelompok yang sudah di-assign */}
+          {kelompokList.length === 0 ? <EmptyState title="Belum ada kelompok tes di-assign" /> : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '10px' }}>
+              {kelompokList.map((a: any) => {
+                const [tgl, ...sesiParts] = (a.user_id || '').split('|');
+                const sesi = sesiParts.join('|');
+                return (
+                  <div key={a.id} style={{ background: C.white, border: `1.5px solid #fde68a`, borderRadius: '12px', padding: '12px 14px', position: 'relative' }}>
+                    <button onClick={() => removeAssignment(a.id)} style={{ position: 'absolute', top: '8px', right: '10px', color: '#dc2626', background: 'none', border: 'none', cursor: 'pointer' }}>
+                      <Trash2 size={12} />
+                    </button>
+                    <p style={{ fontSize: '10px', fontWeight: 700, color: '#92400e', background: '#fef3c7', padding: '2px 8px', borderRadius: '999px', display: 'inline-block', marginBottom: '6px' }}>Kelompok</p>
+                    <p style={{ color: C.text, fontWeight: 800, fontSize: '12px' }}>{tgl}</p>
+                    <p style={{ color: C.textMuted, fontSize: '11px', marginTop: '2px' }}>{sesi}</p>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Modal pilih kelompok */}
+          <Modal open={showAddKelompok} onClose={() => setShowAddKelompok(false)} title="🗓 Assign Per Kelompok Tes" size="lg">
+            <div className="space-y-3">
+              <p style={{ color: C.textMuted, fontSize: '11px' }}>
+                Pilih satu atau beberapa kelompok (Tanggal × Sesi). Semua peserta di kelompok tersebut akan mendapat akses ujian ini.
+              </p>
+              <p style={{ color: C.textMuted, fontSize: '11px', fontWeight: 600 }}>{groupList.length} kelompok tersedia · {selGroups.size} dipilih</p>
+              <div style={{ display: 'grid', gap: '8px', maxHeight: '360px', overflowY: 'auto' }}>
+                {groupList.length === 0
+                  ? <p style={{ padding: '20px', textAlign: 'center', color: C.textFaint, fontSize: '12px' }}>Semua kelompok sudah di-assign</p>
+                  : groupList.map((g: any) => {
+                    const gKey = `${g.tanggal_tes}|${g.sesi_tes}`;
+                    const chk = selGroups.has(gKey);
+                    return (
+                      <div key={gKey} onClick={() => setSelGroups(prev => { const n = new Set(prev); n.has(gKey) ? n.delete(gKey) : n.add(gKey); return n; })}
+                        style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 14px', cursor: 'pointer', border: `1.5px solid ${chk ? C.green : C.borderMid}`, borderRadius: '10px', background: chk ? C.greenLight : C.white, transition: 'all 0.15s' }}>
+                        <Chk check={chk} />
+                        <div style={{ flex: 1 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <p style={{ color: C.text, fontWeight: 800, fontSize: '12.5px' }}>{g.tanggal_tes}</p>
+                            <span style={{ background: '#fef3c7', color: '#92400e', fontSize: '10px', fontWeight: 700, padding: '1px 7px', borderRadius: '999px' }}>{g.sesi_tes}</span>
+                          </div>
+                          <p style={{ color: C.textMuted, fontSize: '10.5px', marginTop: '3px' }}>
+                            {g.jumlah_peserta} peserta · Ruangan: {g.ruangan || '—'}
+                          </p>
+                        </div>
+                        <span style={{ color: C.green, fontSize: '13px', fontWeight: 900 }}>{g.jumlah_peserta}</span>
+                      </div>
+                    );
+                  })}
+              </div>
+              <div className="flex gap-2 justify-end pt-1">
+                <Button variant="secondary" size="sm" onClick={() => setShowAddKelompok(false)}>Batal</Button>
+                <Button size="sm" onClick={saveKelompok}>Assign {selGroups.size} Kelompok</Button>
               </div>
             </div>
           </Modal>

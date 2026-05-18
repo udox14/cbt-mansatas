@@ -341,8 +341,21 @@ admin.get('/pendaftar/sesi', async (c) => {
   return c.json(ok(results.map((r: any) => r.sesi_tes)));
 });
 
-// ══════════════════════════════════════════════════════════════
-// EXAMS
+// Daftar kelompok tes unik (tanggal × sesi) dengan jumlah peserta — untuk bulk assign
+admin.get('/pendaftar/groups', async (c) => {
+  const { results } = await c.env.DB.prepare(
+    `SELECT tanggal_tes, sesi_tes,
+       COUNT(*) as jumlah_peserta,
+       GROUP_CONCAT(DISTINCT ruang_tes ORDER BY ruang_tes) as ruangan
+     FROM pendaftar
+     WHERE tanggal_tes IS NOT NULL AND sesi_tes IS NOT NULL AND ${EXCLUDE_JALUR_COND}
+     GROUP BY tanggal_tes, sesi_tes
+     ORDER BY tanggal_tes, sesi_tes`
+  ).all();
+  return c.json(ok(results));
+});
+
+
 // ══════════════════════════════════════════════════════════════
 
 admin.get('/exams', async (c) => {
@@ -694,6 +707,20 @@ admin.post('/exams/:examId/assignments/sesi', async (c) => {
   );
   for (let i = 0; i < stmts.length; i += 100) await c.env.DB.batch(stmts.slice(i, i + 100));
   return c.json(ok({ added: sessions.length }, `${sessions.length} sesi di-assign`));
+});
+
+// Assign ke kelompok tes berdasarkan kombinasi tanggal × sesi
+// user_id disimpan sebagai "{tanggal_tes}|{sesi_tes}" — dievaluasi saat peserta login
+admin.post('/exams/:examId/assignments/group', async (c) => {
+  const examId = c.req.param('examId');
+  const { groups } = await c.req.json<{ groups: { tanggal_tes: string; sesi_tes: string }[] }>();
+  if (!groups?.length) return c.json(err('Pilih minimal 1 kelompok'), 400);
+  const stmts = groups.map(g =>
+    c.env.DB.prepare('INSERT OR IGNORE INTO cbt_exam_assignments (id, exam_id, user_id, user_type) VALUES (?,?,?,?)')
+      .bind(newId(), examId, `${g.tanggal_tes}|${g.sesi_tes}`, 'tanggal_sesi')
+  );
+  for (let i = 0; i < stmts.length; i += 100) await c.env.DB.batch(stmts.slice(i, i + 100));
+  return c.json(ok({ added: groups.length }, `${groups.length} kelompok tes di-assign`));
 });
 
 admin.delete('/exams/:examId/assignments/:id', async (c) => {

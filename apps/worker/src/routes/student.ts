@@ -29,6 +29,7 @@ student.get('/exams', async (c) => {
   let jadwalData: { sesi_tes: string; tanggal_tes: string; jalur: string; ruang_tes: string } | null = null;
   let studentRoom: string | null = null;
   let studentSesi: string | null = null;
+  let studentGroupKey: string | null = null; // composite key "tanggal_tes|sesi_tes"
 
   if (userType === 'pendaftar') {
     jadwalData = await c.env.DB.prepare(
@@ -36,6 +37,9 @@ student.get('/exams', async (c) => {
     ).bind(user.sub).first<any>() || null;
     studentRoom = jadwalData?.ruang_tes || null;
     studentSesi = jadwalData?.sesi_tes || null;
+    if (jadwalData?.tanggal_tes && jadwalData?.sesi_tes) {
+      studentGroupKey = `${jadwalData.tanggal_tes}|${jadwalData.sesi_tes}`;
+    }
   } else if (user.room_id) {
     // cbt_user — resolve room_name dari room_id
     const roomRow = await c.env.DB.prepare(
@@ -44,13 +48,14 @@ student.get('/exams', async (c) => {
     studentRoom = roomRow?.room_name || null;
   }
 
-  // Cek exam assignments: per-user, per-ruangan, per-sesi
+  // Cek exam assignments: per-user, per-ruangan, per-sesi, per-kelompok (tanggal×sesi)
   const { results: assignments } = await c.env.DB.prepare(
     `SELECT DISTINCT exam_id FROM cbt_exam_assignments
      WHERE (user_id = ? AND user_type = ?)
         OR (user_type = 'room' AND ? IS NOT NULL AND user_id = ?)
-        OR (user_type = 'sesi' AND ? IS NOT NULL AND user_id = ?)`
-  ).bind(user.sub, userType, studentRoom, studentRoom, studentSesi, studentSesi).all();
+        OR (user_type = 'sesi' AND ? IS NOT NULL AND user_id = ?)
+        OR (user_type = 'tanggal_sesi' AND ? IS NOT NULL AND user_id = ?)`
+  ).bind(user.sub, userType, studentRoom, studentRoom, studentSesi, studentSesi, studentGroupKey, studentGroupKey).all();
   const assignedExamIds = new Set((assignments as any[]).map(a => a.exam_id));
 
   // Filter: cek assignment dulu, lalu target_jalur
