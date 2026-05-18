@@ -16,6 +16,8 @@ interface Exam {
   jadwal_status?: 'aktif' | 'belum' | 'selesai' | 'no_schedule';
   jadwal_info?: string | null;
   is_time_locked?: number;
+  answered_count?: number;
+  total_questions?: number;
 }
 
 const KemenagLogo = () => (
@@ -185,6 +187,7 @@ function StudentContent() {
                 const done = exam.session_status === 'submitted' || exam.session_status === 'force_submitted';
                 const active = exam.session_status === 'active';
                 const canStart = !done && (exam.jadwal_status === 'aktif' || exam.jadwal_status === 'no_schedule');
+                const pct = active && exam.total_questions ? Math.round((exam.answered_count || 0) / exam.total_questions * 100) : 0;
                 return (
                   <div key={exam.id} style={{
                     background: done ? '#fafbfa' : '#fff',
@@ -200,6 +203,18 @@ function StudentContent() {
                       <BadgeStatus status={exam.session_status} />
                     </div>
                     {exam.jadwal_info && <div className="mb-3"><JadwalInfo exam={exam} /></div>}
+                    {/* #6: Progress bar untuk sesi aktif */}
+                    {active && exam.total_questions && exam.total_questions > 0 && (
+                      <div style={{ marginBottom: '10px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '3px' }}>
+                          <span style={{ fontSize: '10px', fontWeight: 700, color: '#4a6655' }}>{exam.answered_count || 0}/{exam.total_questions} dijawab</span>
+                          <span style={{ fontSize: '10px', color: '#8a9e8d' }}>{pct}%</span>
+                        </div>
+                        <div style={{ height: '5px', background: '#e0e5e0', borderRadius: '999px', overflow: 'hidden' }}>
+                          <div style={{ height: '100%', background: '#2d7a4f', borderRadius: '999px', width: `${pct}%`, transition: 'width 0.3s' }} />
+                        </div>
+                      </div>
+                    )}
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-1.5 font-semibold" style={{ color: done ? '#a8b9aa' : '#6b7c6e', fontSize: '11.5px' }}>
                         <Clock size={13} strokeWidth={2} />
@@ -232,6 +247,7 @@ function StudentContent() {
                     const done = exam.session_status === 'submitted' || exam.session_status === 'force_submitted';
                     const active = exam.session_status === 'active';
                     const canStart = !done && (exam.jadwal_status === 'aktif' || exam.jadwal_status === 'no_schedule');
+                    const pct = active && exam.total_questions ? Math.round((exam.answered_count || 0) / exam.total_questions * 100) : 0;
                     const dimmed = { color: '#a8b9aa' };
                     return (
                       <tr key={exam.id} style={{ borderBottom: i < exams.length - 1 ? '1px solid #edf0ed' : 'none', background: i % 2 !== 0 ? '#fafbfa' : '#fff' }}>
@@ -242,7 +258,16 @@ function StudentContent() {
                         </td>
                         <td style={{ padding: '14px 20px', textAlign: 'center', fontSize: '12px', fontWeight: 600, whiteSpace: 'nowrap', ...(done ? dimmed : { color: '#6b7c6e' }) }}>{exam.duration_minutes} menit</td>
                         <td style={{ padding: '14px 20px', textAlign: 'center' }}><BadgeStatus status={exam.session_status} /></td>
-                        <td style={{ padding: '14px 20px', textAlign: 'center' }}>
+                        <td style={{ padding: '14px 20px', textAlign: 'center', minWidth: '130px' }}>
+                          {/* #6: Progress di desktop */}
+                          {active && exam.total_questions && exam.total_questions > 0 && (
+                            <div style={{ marginBottom: '6px' }}>
+                              <div style={{ fontSize: '10px', fontWeight: 700, color: '#4a6655', marginBottom: '2px' }}>{exam.answered_count || 0}/{exam.total_questions}</div>
+                              <div style={{ height: '4px', background: '#e0e5e0', borderRadius: '999px', overflow: 'hidden' }}>
+                                <div style={{ height: '100%', background: '#2d7a4f', borderRadius: '999px', width: `${pct}%` }} />
+                              </div>
+                            </div>
+                          )}
                           {!done
                             ? <ActionBtn label={active ? 'Lanjut' : 'Mulai'} variant={active ? 'resume' : 'primary'} onClick={() => start(exam)} disabled={!canStart} />
                             : <span style={{ color: '#c4cec4', fontSize: '14px', fontWeight: 700 }}>—</span>}

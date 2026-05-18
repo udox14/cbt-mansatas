@@ -40,6 +40,7 @@ proctor.get('/sessions', async (c) => {
            COALESCE(p.nisn, cu.nisn) as nisn,
            COALESCE(p.sesi_tes, '') as sesi_tes,
            e.title as exam_title,
+           e.duration_minutes,
            COALESCE(ac.answered_count, 0) as answered_count,
            COALESCE(qc.total_questions, 0) as total_questions
     FROM cbt_exam_sessions es
@@ -122,6 +123,44 @@ proctor.get('/sessions/:id/cheat-logs', async (c) => {
   }));
 
   return c.json(ok(enriched));
+});
+
+// Force submit — proktor bisa paksa submit sesi aktif (darurat)
+proctor.post('/sessions/:id/force-submit', async (c) => {
+  const user = c.get('user');
+  const session = await c.env.DB.prepare(
+    `SELECT es.*, e.duration_minutes FROM cbt_exam_sessions es
+     JOIN cbt_exams e ON e.id = es.exam_id
+     WHERE es.id = ? AND es.room_id = ?`
+  ).bind(c.req.param('id'), user.room_id).first<any>();
+  if (!session) return c.json(err('Sesi tidak ditemukan di ruangan Anda'), 404);
+  if (session.status === 'submitted' || session.status === 'force_submitted')
+    return c.json(err('Ujian sudah selesai'), 400);
+  await c.env.DB.prepare(
+    `UPDATE cbt_exam_sessions SET status='force_submitted', finished_at=?, is_time_locked=0, last_heartbeat=? WHERE id=?`
+  ).bind(now(), now(), session.id).run();
+  // Hitung skor
+  try {
+    const { results: answers } = await c.env.DB.prepare(
+      'SELECT * FROM cbt_student_answers WHERE session_id=?'
+    ).bind(session.id).all();
+    const { results: qOpts } = await c.env.DB.prepare(
+      `SELECT qo.id, qo.question_id, qo.is_correct FROM cbt_question_options qo
+       JOIN cbt_questions q ON q.id = qo.question_id WHERE q.exam_id=?`
+    ).bind(session.exam_id).all();
+    const correctSet = new Set((qOpts as any[]).filter((o: any) => o.is_correct).map((o: any) => o.id));
+    let correct = 0; let wrong = 0;
+    for (const a of answers as any[]) {
+      if (a.selected_option_id) { if (correctSet.has(a.selected_option_id)) correct++; else wrong++; }
+    }
+    const total = (qOpts as any[]).map((o: any) => o.question_id).filter((v, i, a) => a.indexOf(v) === i).length;
+    const score = total > 0 ? Math.round((correct / total) * 100) : 0;
+    await c.env.DB.prepare(
+      `INSERT OR REPLACE INTO cbt_exam_results (id, session_id, exam_id, user_id, user_type, total_correct, total_wrong, total_unanswered, score, calculated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?)`
+    ).bind(c.env.DB ? undefined : null, session.id, session.exam_id, session.user_id, session.user_type, correct, wrong, total - correct - wrong, score, now()).run();
+  } catch {}
+  return c.json(ok(null, 'Ujian berhasil di-force submit'));
 });
 
 export default proctor;

@@ -70,6 +70,8 @@ export async function exportExamResults(
     { key: 'full_name', label: 'Nama Lengkap', width: 30 },
     { key: 'username', label: 'Username', width: 15 },
     { key: 'room_name', label: 'Ruangan', width: 15 },
+    { key: 'tanggal_tes', label: 'Tanggal Tes', width: 18 },
+    { key: 'sesi_tes', label: 'Sesi Tes', width: 25 },
     { key: 'total_questions', label: 'Total Soal', width: 10 },
     { key: 'total_correct', label: 'Benar', width: 8 },
     { key: 'total_wrong', label: 'Salah', width: 8 },

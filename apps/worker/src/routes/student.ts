@@ -18,9 +18,21 @@ student.get('/exams', async (c) => {
 
   const { results } = await c.env.DB.prepare(
     `SELECT e.id, e.title, e.description, e.duration_minutes, e.rules_text, e.active_status, e.target_jalur, e.enforce_fullscreen,
-            es.id as session_id, es.status as session_status, es.is_time_locked
+            es.id as session_id, es.status as session_status, es.is_time_locked,
+            COALESCE(ac.answered_count, 0) as answered_count,
+            COALESCE(qc.total_questions, 0) as total_questions
      FROM cbt_exams e
      LEFT JOIN cbt_exam_sessions es ON es.exam_id = e.id AND es.user_id = ? AND es.user_type = ?
+     LEFT JOIN (
+       SELECT session_id, COUNT(*) as answered_count
+       FROM cbt_student_answers
+       GROUP BY session_id
+     ) ac ON ac.session_id = es.id
+     LEFT JOIN (
+       SELECT exam_id, COUNT(*) as total_questions
+       FROM cbt_questions
+       GROUP BY exam_id
+     ) qc ON qc.exam_id = e.id
      WHERE e.active_status = 'active'
      ORDER BY e.title`
   ).bind(user.sub, userType).all();

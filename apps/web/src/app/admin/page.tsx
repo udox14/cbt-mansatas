@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { GET, POST, PUT, DEL } from '@/lib/api';
@@ -687,20 +687,32 @@ function TokensView({ examId }: { examId: string }) {
   const [tokens, setTokens] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [gen, setGen] = useState(false);
+  const [filterRoom, setFilterRoom] = useState('all');
   const fetchT = useCallback(async () => { const r = await GET(`/api/admin/exams/${examId}/tokens`); if (r.success) setTokens(r.data || []); setLoading(false); }, [examId]);
   useEffect(() => { fetchT(); }, [fetchT]);
   const generate = async () => { setGen(true); const r = await POST(`/api/admin/exams/${examId}/tokens/generate`, {}); setGen(false); toast(r.success ? 'success' : 'error', r.message || r.error || 'Gagal'); fetchT(); };
+  const rooms = Array.from(new Set(tokens.map((t: any) => t.room_name))).sort();
+  const visible = filterRoom === 'all' ? tokens : tokens.filter((t: any) => t.room_name === filterRoom);
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <span style={{ color: C.textMid, fontSize: '11px', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Token per Ruangan</span>
-        <Button size="sm" loading={gen} onClick={generate}><RefreshCw size={13} /> Generate</Button>
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <span style={{ color: C.textMid, fontSize: '11px', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>{visible.length} Token</span>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          {rooms.length > 1 && (
+            <select value={filterRoom} onChange={e => setFilterRoom(e.target.value)}
+              style={{ fontSize: '11.5px', fontWeight: 600, padding: '5px 10px', border: `1.5px solid ${C.borderMid}`, borderRadius: '8px', background: C.white, color: C.textMid, cursor: 'pointer' }}>
+              <option value="all">Semua Ruangan</option>
+              {rooms.map(r => <option key={r} value={r}>{r}</option>)}
+            </select>
+          )}
+          <Button size="sm" loading={gen} onClick={generate}><RefreshCw size={13} /> Generate</Button>
+        </div>
       </div>
       {loading ? <div className="py-12 text-center"><Spinner /></div>
-        : tokens.length === 0 ? <EmptyState title="Belum ada token" />
+        : visible.length === 0 ? <EmptyState title="Belum ada token" />
           : (
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {tokens.map((t: any) => (
+              {visible.map((t: any) => (
                 <div key={t.id} style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '12px', padding: '14px 16px' }}>
                   <p style={{ color: C.textMuted, fontSize: '11px', fontWeight: 600, marginBottom: '4px' }}>{t.room_name}</p>
                   <p style={{ color: C.green, fontSize: '22px', fontWeight: 900, letterSpacing: '0.18em', fontVariantNumeric: 'tabular-nums' }}>{t.token_code}</p>
@@ -716,30 +728,53 @@ function TokensView({ examId }: { examId: string }) {
 function MonitorView({ examId }: { examId: string }) {
   const [sessions, setSessions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [filterRoom, setFilterRoom] = useState('all');
   const fetchS = useCallback(async () => { const r = await GET(`/api/admin/exams/${examId}/sessions`); if (r.success) setSessions(r.data || []); setLoading(false); }, [examId]);
   useEffect(() => { fetchS(); const iv = setInterval(fetchS, 10000); return () => clearInterval(iv); }, [fetchS]);
+  const rooms = Array.from(new Set(sessions.map((s: any) => s.room_name).filter(Boolean))).sort();
+  const visible = filterRoom === 'all' ? sessions : sessions.filter((s: any) => s.room_name === filterRoom);
+  const online = visible.filter((s: any) => s.status === 'active' && (Date.now() - new Date(s.last_heartbeat).getTime()) < 30000).length;
+  const done = visible.filter((s: any) => s.status === 'submitted' || s.status === 'force_submitted').length;
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <span style={{ color: C.textMid, fontSize: '11px', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Sesi Aktif — {sessions.length} peserta</span>
-        <span style={{ background: '#e0f0ff', color: '#1a5fa8', fontSize: '10px', fontWeight: 700, padding: '3px 10px', borderRadius: '999px' }}>Auto-refresh 10s</span>
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <span style={{ color: C.textMid, fontSize: '11px', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>{visible.length} Peserta</span>
+          {visible.length > 0 && (
+            <>
+              <span style={{ background: C.greenLight, color: C.green, fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '999px' }}>🟢 {online} Online</span>
+              <span style={{ background: '#f1f1f0', color: '#6b7c6e', fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '999px' }}>✓ {done} Selesai</span>
+            </>
+          )}
+        </div>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          {rooms.length > 1 && (
+            <select value={filterRoom} onChange={e => setFilterRoom(e.target.value)}
+              style={{ fontSize: '11.5px', fontWeight: 600, padding: '5px 10px', border: `1.5px solid ${C.borderMid}`, borderRadius: '8px', background: C.white, color: C.textMid, cursor: 'pointer' }}>
+              <option value="all">Semua Ruangan</option>
+              {rooms.map(r => <option key={r} value={r}>{r}</option>)}
+            </select>
+          )}
+          <span style={{ background: '#e0f0ff', color: '#1a5fa8', fontSize: '10px', fontWeight: 700, padding: '3px 10px', borderRadius: '999px' }}>Auto-refresh 10s</span>
+        </div>
       </div>
       {loading ? <div className="py-12 text-center"><Spinner /></div>
-        : sessions.length === 0 ? <EmptyState title="Belum ada sesi" />
+        : visible.length === 0 ? <EmptyState title="Belum ada sesi" />
           : (
             <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '12px', overflow: 'hidden' }}>
-              {sessions.map((s: any, i: number) => {
-                const online = s.status === 'active' && (Date.now() - new Date(s.last_heartbeat).getTime()) < 30000;
-                const done = s.status === 'submitted' || s.status === 'force_submitted';
+              {visible.map((s: any, i: number) => {
+                const isOnline = s.status === 'active' && (Date.now() - new Date(s.last_heartbeat).getTime()) < 30000;
+                const isDone = s.status === 'submitted' || s.status === 'force_submitted';
+                const isLocked = s.is_time_locked && !isDone;
                 return (
-                  <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 14px', borderBottom: i < sessions.length - 1 ? `1px solid ${C.borderLight}` : 'none' }}>
+                  <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 14px', borderBottom: i < visible.length - 1 ? `1px solid ${C.borderLight}` : 'none' }}>
                     <span style={{ flex: 1, color: C.text, fontSize: '12.5px', fontWeight: 700 }}>{s.full_name}</span>
                     <span style={{ color: '#6b7c6e', fontSize: '11.5px' }}>{s.room_name}</span>
-                    <span style={{ background: done ? '#f1f1f0' : online ? C.greenLight : '#fef2f2', color: done ? '#6b7c6e' : online ? '#2d6644' : '#dc2626', fontSize: '10px', fontWeight: 700, padding: '3px 9px', borderRadius: '999px' }}>
-                      {done ? 'Selesai' : online ? 'Online' : 'Offline'}
+                    <span style={{ background: isDone ? '#f1f1f0' : isLocked ? '#fef3c7' : isOnline ? C.greenLight : '#fef2f2', color: isDone ? '#6b7c6e' : isLocked ? '#92400e' : isOnline ? '#2d6644' : '#dc2626', fontSize: '10px', fontWeight: 700, padding: '3px 9px', borderRadius: '999px' }}>
+                      {isDone ? 'Selesai' : isLocked ? '🔒 Dikunci' : isOnline ? 'Online' : 'Offline'}
                     </span>
                     <span style={{ fontSize: '11px', fontWeight: s.cheat_warnings > 0 ? 700 : 400, color: s.cheat_warnings > 0 ? '#dc2626' : C.textFaint }}>
-                      {s.cheat_warnings} pelanggaran
+                      {s.cheat_warnings} ⚠
                     </span>
                   </div>
                 );
@@ -753,22 +788,38 @@ function MonitorView({ examId }: { examId: string }) {
 function ResultsView({ examId }: { examId: string }) {
   const [results, setResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [filterRoom, setFilterRoom] = useState('all');
   useEffect(() => { GET(`/api/admin/exams/${examId}/results`).then(r => { if (r.success) setResults(r.data || []); setLoading(false); }); }, [examId]);
+  const rooms = Array.from(new Set(results.map((r: any) => r.room_name).filter(Boolean))).sort();
+  const visible = filterRoom === 'all' ? results : results.filter((r: any) => r.room_name === filterRoom);
+  const avgScore = visible.length ? Math.round(visible.reduce((s: number, r: any) => s + (r.score ?? 0), 0) / visible.length) : 0;
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <span style={{ color: C.textMid, fontSize: '11px', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>{results.length} Hasil Masuk</span>
-        {results.length > 0 && <Button variant="secondary" size="sm" onClick={() => exportExamResults(results, `ujian-${examId}`)}><FileDown size={13} /> Export Excel</Button>}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <span style={{ color: C.textMid, fontSize: '11px', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>{visible.length} Hasil</span>
+          {visible.length > 0 && <span style={{ background: C.greenLight, color: C.green, fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '999px' }}>Rata-rata {avgScore}</span>}
+        </div>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          {rooms.length > 1 && (
+            <select value={filterRoom} onChange={e => setFilterRoom(e.target.value)}
+              style={{ fontSize: '11.5px', fontWeight: 600, padding: '5px 10px', border: `1.5px solid ${C.borderMid}`, borderRadius: '8px', background: C.white, color: C.textMid, cursor: 'pointer' }}>
+              <option value="all">Semua Ruangan</option>
+              {rooms.map(r => <option key={r} value={r}>{r}</option>)}
+            </select>
+          )}
+          {visible.length > 0 && <Button variant="secondary" size="sm" onClick={() => exportExamResults(visible, `ujian-${examId}${filterRoom !== 'all' ? `-${filterRoom}` : ''}`)}><FileDown size={13} /> Export</Button>}
+        </div>
       </div>
       {loading ? <div className="py-12 text-center"><Spinner /></div>
-        : results.length === 0 ? <EmptyState title="Belum ada hasil" />
+        : visible.length === 0 ? <EmptyState title="Belum ada hasil" />
           : (
             <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '12px', overflow: 'hidden' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
                 <TableHead cols={[{ label: '#' }, { label: 'Nama' }, { label: 'NISN' }, { label: 'Ruangan' }, { label: 'Benar', center: true }, { label: 'Salah', center: true }, { label: 'Nilai', center: true }]} />
                 <tbody>
-                  {results.map((r: any, i: number) => (
-                    <tr key={i} style={{ borderBottom: i < results.length - 1 ? `1px solid ${C.borderLight}` : 'none' }}>
+                  {visible.map((r: any, i: number) => (
+                    <tr key={i} style={{ borderBottom: i < visible.length - 1 ? `1px solid ${C.borderLight}` : 'none' }}>
                       <td style={{ padding: '10px 14px', color: C.textMuted, fontWeight: 600 }}>{i + 1}</td>
                       <td style={{ padding: '10px 14px', color: C.text, fontWeight: 700 }}>{r.full_name}</td>
                       <td style={{ padding: '10px 14px', color: C.textMuted, fontFamily: 'monospace' }}>{r.nisn || '—'}</td>
