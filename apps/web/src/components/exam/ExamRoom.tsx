@@ -163,7 +163,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
     if (saved) setFontSize(parseInt(saved));
     // Aktifkan wake lock secepatnya
     requestWakeLock();
-    GET<{ questions: Question[]; answers: any[]; cheat_limit: number; cheat_action: string; enforce_fullscreen: boolean }>(
+    GET<{ questions: Question[]; answers: any[]; cheat_limit: number; cheat_action: string; enforce_fullscreen: boolean; cheat_warnings: number; is_time_locked: number }>(
       `/api/student/sessions/${sessionId}/questions`
     ).then(r => {
       if (r.success && r.data) {
@@ -184,6 +184,20 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
         setCheatLimit(limit);
         setCheatAction(action);
         setEnforceFullscreen(fs);
+
+        // ── Bug-1 fix: restore cheat state dari server saat resume ──
+        // Jika sesi sedang dikunci karena cheat (bukan waktu habis),
+        // tampilkan pesan kunci TANPA men-submit otomatis.
+        const warnings = r.data.cheat_warnings ?? 0;
+        cheatCountRef.current = warnings;
+        setCheatCount(warnings);
+        if (r.data.is_time_locked && action === 'lock') {
+          // Dikunci karena pelanggaran — bisa dibuka proktor
+          isCheatLockedRef.current = true;
+          submittedRef.current = false; // jangan auto-submit!
+          setLockedMsg(`Sesi dikunci karena pelanggaran (${warnings}x). Hubungi pengawas untuk melanjutkan.`);
+        }
+
         // Minta fullscreen jika diwajibkan
         if (fs && document.fullscreenEnabled && !document.fullscreenElement) {
           document.documentElement.requestFullscreen().catch(() => {});
@@ -218,17 +232,30 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
     const s = setInterval(() => flushAnswers(), 15000);
     const h = setInterval(async () => {
       const r = await POST(`/api/student/sessions/${sessionId}/heartbeat`);
-      if (r.data?.time_locked && !submittedRef.current && !isCheatLockedRef.current) {
-        // Dikunci oleh sistem waktu (bukan pelanggaran)
+
+      // ── Bug-1 & Bug-3 fix: bedakan time_locked karena cheat vs karena waktu habis ──
+      // Heartbeat mengembalikan { time_locked, auto_submitted, cheat_locked }
+      // cheat_locked=true  → dikunci karena pelanggaran, bisa dibuka proktor
+      // time_locked=true + !cheat_locked → waktu habis, submit
+      if (r.data?.cheat_locked && !isCheatLockedRef.current && !submittedRef.current) {
+        // Baru dikunci proktor/sistem karena cheat — jangan submit, tampilkan pesan saja
+        isCheatLockedRef.current = true;
+        const w = r.data?.warnings ?? cheatCountRef.current;
+        setLockedMsg(`Sesi dikunci karena pelanggaran (${w}x). Hubungi pengawas untuk melanjutkan.`);
+      }
+
+      if (r.data?.time_locked && !r.data?.cheat_locked && !submittedRef.current && !isCheatLockedRef.current) {
+        // Waktu habis (bukan cheat lock) — kunci
         setLockedMsg('Waktu ujian Anda telah berakhir. Ujian dikunci oleh sistem.');
         submittedRef.current = true;
       }
+
       // Bug-3 fix: deteksi proktor sudah membuka kunci pelanggaran
-      if (isCheatLockedRef.current && !r.data?.time_locked) {
+      if (isCheatLockedRef.current && !r.data?.cheat_locked && !r.data?.time_locked) {
         isCheatLockedRef.current = false;
         submittedRef.current = false;
-        cheatCountRef.current = 0;
-        setCheatCount(0);
+        cheatCountRef.current = r.data?.warnings ?? 0;
+        setCheatCount(r.data?.warnings ?? 0);
         lastViolationTimeRef.current = Date.now() + 3000; // cooldown 3s setelah unlock
         setLockedMsg('');
       }
@@ -281,9 +308,11 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
       await handleSubmit(true);
     } else if (actionTaken === 'lock') {
       // 🔔 Alarm sesi dikunci — gunakan isCheatLockedRef, BUKAN submittedRef
+      // Bug-2 fix: langsung kunci UI tanpa menunggu refresh/heartbeat
       playAlarm('locked');
-      setLockedMsg(`${limit}x pelanggaran — sesi dikunci. Hubungi pengawas untuk melanjutkan.`);
       isCheatLockedRef.current = true; // bisa dipulihkan oleh proktor
+      submittedRef.current = false;    // JANGAN set true — ini bukan submit
+      setLockedMsg(`${limit}x pelanggaran — sesi dikunci. Hubungi pengawas untuk melanjutkan.`);
     } else {
       // 🔔 Alarm peringatan (makin keras setiap pelanggaran)
       playAlarm('warning', n);
@@ -293,7 +322,9 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
   }, [sessionId, cheatLimit, addToast, playAlarm, flushAnswers]);
 
   // ── Anti-cheat: visibilitychange + fullscreen + keyboard/ctx ──
+  // ── + window blur + pagehide (deteksi notification bar Android & iOS) ──
   useEffect(() => {
+    // ── visibilitychange: mendeteksi tab switch & notification bar (Android Chrome) ──
     const vis = () => {
       if (!document.hidden && !submittedRef.current) {
         // Re-acquire wake lock
@@ -307,6 +338,34 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
         reportViolation('tab_switch');
       }
     };
+
+    // ── window blur: fallback untuk iOS Safari & browser yang visibilitychange-nya tidak konsisten ──
+    // Terpicu saat: notification bar dibuka, pindah app, tab lain diklik, dsb.
+    const onBlur = () => {
+      if (!submittedRef.current && !isCheatLockedRef.current) {
+        // Cooldown internal mencegah dobel-pelanggaran jika blur + visibilitychange keduanya terpicu
+        reportViolation('tab_switch');
+      }
+    };
+
+    // ── pagehide: terpicu saat halaman di-background (terutama iOS Safari) ──
+    const onPageHide = () => {
+      if (!submittedRef.current && !isCheatLockedRef.current) {
+        reportViolation('tab_switch');
+      }
+    };
+
+    // ── window focus / touchstart: re-acquire wake lock & fullscreen saat kembali ──
+    const onFocus = () => {
+      if (!submittedRef.current) {
+        if (!wakeLockRef.current || wakeLockRef.current.released) requestWakeLock();
+        if (enforceFullscreen && document.fullscreenEnabled && !document.fullscreenElement) {
+          setTimeout(() => document.documentElement.requestFullscreen().catch(() => {}), 300);
+        }
+      }
+    };
+
+    // ── fullscreenchange: deteksi keluar fullscreen ──
     const fsChange = () => {
       // Bug-1 fix: update React state saat fullscreen berubah
       setIsFullscreen(!!document.fullscreenElement);
@@ -322,13 +381,20 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
     document.addEventListener('fullscreenchange', fsChange);
     document.addEventListener('contextmenu', ctx);
     document.addEventListener('keydown', key);
+    window.addEventListener('blur', onBlur);
+    window.addEventListener('pagehide', onPageHide);
+    window.addEventListener('focus', onFocus);
     return () => {
       document.removeEventListener('visibilitychange', vis);
       document.removeEventListener('fullscreenchange', fsChange);
       document.removeEventListener('contextmenu', ctx);
       document.removeEventListener('keydown', key);
+      window.removeEventListener('blur', onBlur);
+      window.removeEventListener('pagehide', onPageHide);
+      window.removeEventListener('focus', onFocus);
     };
   }, [enforceFullscreen, reportViolation, requestWakeLock]);
+
 
   const setAnswer = useCallback((qId: string, update: Partial<Answer>) => {
     setAnswers(prev => {

@@ -266,6 +266,9 @@ student.get('/sessions/:sessionId/questions', async (c) => {
     cheat_limit: examCfg?.cheat_limit ?? 3,
     cheat_action: examCfg?.cheat_action ?? 'lock',
     enforce_fullscreen: !!(examCfg?.enforce_fullscreen),
+    // Bug-1 fix: kembalikan state cheat agar ExamRoom bisa restore setelah refresh
+    cheat_warnings: session.cheat_warnings ?? 0,
+    is_time_locked: session.is_time_locked ?? 0,
   }));
 });
 
@@ -354,10 +357,20 @@ student.post('/sessions/:sessionId/heartbeat', async (c) => {
   }
 
   if (session.is_time_locked) {
-    return c.json(ok({ time_locked: true, auto_submitted: false }));
+    // Bug-1/Bug-3 fix: bedakan cheat_locked vs time_locked (waktu habis)
+    // cheat_action='lock' + is_time_locked=1 + belum submitted = dikunci karena cheat
+    const isCheatLock = (session.cheat_action ?? 'lock') === 'lock'
+      && session.status !== 'submitted'
+      && session.status !== 'force_submitted';
+    return c.json(ok({
+      time_locked: true,
+      auto_submitted: false,
+      cheat_locked: isCheatLock,
+      warnings: session.cheat_warnings ?? 0,
+    }));
   }
 
-  return c.json(ok({ time_locked: false, auto_submitted: false }));
+  return c.json(ok({ time_locked: false, auto_submitted: false, cheat_locked: false, warnings: session.cheat_warnings ?? 0 }));
 });
 
 // ── POST cheat ────────────────────────────────────────────────
@@ -432,7 +445,9 @@ student.post('/sessions/:sessionId/submit', async (c) => {
   if (session.status !== 'submitted' && session.status !== 'force_submitted') {
     const timeExpired = isSessionDurationExpired(session);
     if (session.is_time_locked && !timeExpired) {
-      return c.json(err('Waktu ujian dikunci. Hubungi pengawas jika jawaban terakhir belum tersimpan.'), 403);
+      // Bug-3 fix: kalau dikunci karena cheat (bukan waktu habis), tolak submit
+      // Proktor harus buka dulu sebelum bisa submit
+      return c.json(err('Ujian dikunci karena pelanggaran. Hubungi pengawas untuk melanjutkan.'), 403);
     }
 
     await finalizeSession(c.env.DB, session, body.answers || [], timeExpired || session.is_time_locked ? 'force_submitted' : 'submitted');
