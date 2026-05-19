@@ -180,6 +180,12 @@ function ProctorContent() {
                     <div>
                       <p style={{ color: C.text, fontSize: '13px', fontWeight: 700 }}>{t.exam_title}</p>
                       <p style={{ color: C.textMuted, fontSize: '11px', marginTop: '2px' }}>{t.room_name}</p>
+                      {(t.tanggal_tes || t.sesi_tes) && (
+                        <p style={{ color: C.textFaint, fontSize: '10.5px', marginTop: '2px' }}>
+                          {t.tanggal_tes || 'Tanpa tanggal'} · {t.sesi_tes || 'Tanpa sesi'}
+                          {t.jadwal_status === 'aktif' ? ' · sedang berjalan' : ''}
+                        </p>
+                      )}
                     </div>
                     <span style={{ color: C.green, fontSize: '28px', fontWeight: 900, letterSpacing: '0.22em', fontVariantNumeric: 'tabular-nums', fontFamily: 'monospace' }}>{t.token_code}</span>
                   </div>

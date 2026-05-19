@@ -687,17 +687,49 @@ function TokensView({ examId }: { examId: string }) {
   const [tokens, setTokens] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [gen, setGen] = useState(false);
+  const [regenId, setRegenId] = useState<string | null>(null);
   const [filterRoom, setFilterRoom] = useState('all');
+  const [filterGroup, setFilterGroup] = useState('all');
   const fetchT = useCallback(async () => { const r = await GET(`/api/admin/exams/${examId}/tokens`); if (r.success) setTokens(r.data || []); setLoading(false); }, [examId]);
   useEffect(() => { fetchT(); }, [fetchT]);
   const generate = async () => { setGen(true); const r = await POST(`/api/admin/exams/${examId}/tokens/generate`, {}); setGen(false); toast(r.success ? 'success' : 'error', r.message || r.error || 'Gagal'); fetchT(); };
+  const regenerateOne = async (tokenId: string) => {
+    setRegenId(tokenId);
+    const r = await POST(`/api/admin/exams/${examId}/tokens/generate`, { token_id: tokenId });
+    setRegenId(null);
+    toast(r.success ? 'success' : 'error', r.message || r.error || 'Gagal');
+    fetchT();
+  };
   const rooms = Array.from(new Set(tokens.map((t: any) => t.room_name))).sort();
-  const visible = filterRoom === 'all' ? tokens : tokens.filter((t: any) => t.room_name === filterRoom);
+  const groups = Array.from(new Map(tokens.map((t: any) => [`${t.tanggal_tes || ''}|${t.sesi_tes || ''}`, {
+    key: `${t.tanggal_tes || ''}|${t.sesi_tes || ''}`,
+    tanggal_tes: t.tanggal_tes || '',
+    sesi_tes: t.sesi_tes || '',
+  }])).values()).sort((a: any, b: any) => `${a.tanggal_tes} ${a.sesi_tes}`.localeCompare(`${b.tanggal_tes} ${b.sesi_tes}`));
+  const visible = tokens.filter((t: any) => {
+    if (filterRoom !== 'all' && t.room_name !== filterRoom) return false;
+    if (filterGroup !== 'all' && `${t.tanggal_tes || ''}|${t.sesi_tes || ''}` !== filterGroup) return false;
+    return true;
+  });
+  const formatDate = (value?: string) => {
+    if (!value) return 'Tanpa tanggal';
+    return new Date(`${value}T00:00:00+07:00`).toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+  };
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <span style={{ color: C.textMid, fontSize: '11px', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>{visible.length} Token</span>
+        <div>
+          <span style={{ color: C.textMid, fontSize: '11px', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>{visible.length} Token</span>
+          <p style={{ color: C.textFaint, fontSize: '11px', marginTop: '2px' }}>Token dibuat per tanggal, sesi, dan ruangan.</p>
+        </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          {groups.length > 1 && (
+            <select value={filterGroup} onChange={e => setFilterGroup(e.target.value)}
+              style={{ fontSize: '11.5px', fontWeight: 600, padding: '5px 10px', border: `1.5px solid ${C.borderMid}`, borderRadius: '8px', background: C.white, color: C.textMid, cursor: 'pointer', maxWidth: '220px' }}>
+              <option value="all">Semua Sesi</option>
+              {groups.map((g: any) => <option key={g.key} value={g.key}>{formatDate(g.tanggal_tes)} · {g.sesi_tes || 'Tanpa sesi'}</option>)}
+            </select>
+          )}
           {rooms.length > 1 && (
             <select value={filterRoom} onChange={e => setFilterRoom(e.target.value)}
               style={{ fontSize: '11.5px', fontWeight: 600, padding: '5px 10px', border: `1.5px solid ${C.borderMid}`, borderRadius: '8px', background: C.white, color: C.textMid, cursor: 'pointer' }}>
@@ -705,7 +737,7 @@ function TokensView({ examId }: { examId: string }) {
               {rooms.map(r => <option key={r} value={r}>{r}</option>)}
             </select>
           )}
-          <Button size="sm" loading={gen} onClick={generate}><RefreshCw size={13} /> Generate</Button>
+          <Button size="sm" loading={gen} onClick={generate}><RefreshCw size={13} /> Generate Semua</Button>
         </div>
       </div>
       {loading ? <div className="py-12 text-center"><Spinner /></div>
@@ -714,8 +746,18 @@ function TokensView({ examId }: { examId: string }) {
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
               {visible.map((t: any) => (
                 <div key={t.id} style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '12px', padding: '14px 16px' }}>
-                  <p style={{ color: C.textMuted, fontSize: '11px', fontWeight: 600, marginBottom: '4px' }}>{t.room_name}</p>
-                  <p style={{ color: C.green, fontSize: '22px', fontWeight: 900, letterSpacing: '0.18em', fontVariantNumeric: 'tabular-nums' }}>{t.token_code}</p>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '10px', marginBottom: '8px' }}>
+                    <div>
+                      <p style={{ color: C.textMuted, fontSize: '11px', fontWeight: 700 }}>{t.room_name}</p>
+                      <p style={{ color: C.textFaint, fontSize: '10.5px', marginTop: '2px' }}>{formatDate(t.tanggal_tes)} · {t.sesi_tes || 'Tanpa sesi'}</p>
+                    </div>
+                    <button onClick={() => regenerateOne(t.id)} disabled={regenId === t.id}
+                      title="Regenerate token ini"
+                      style={{ width: '28px', height: '28px', borderRadius: '8px', border: `1.5px solid ${C.greenBorder}`, background: C.greenLight, color: C.green, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: regenId === t.id ? 'wait' : 'pointer', flexShrink: 0 }}>
+                      <RefreshCw size={13} />
+                    </button>
+                  </div>
+                  <p style={{ color: C.green, fontSize: '22px', fontWeight: 900, letterSpacing: '0.18em', fontVariantNumeric: 'tabular-nums', fontFamily: 'monospace' }}>{t.token_code}</p>
                 </div>
               ))}
             </div>

@@ -53,6 +53,19 @@ const baseStatements = [
   'CREATE INDEX IF NOT EXISTS idx_cheat_logs_session ON cbt_cheat_logs(session_id)',
 ];
 
+const tokenTableSql = `CREATE TABLE cbt_exam_tokens_new (
+  id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+  exam_id TEXT NOT NULL REFERENCES cbt_exams(id) ON DELETE CASCADE,
+  room_id TEXT NOT NULL REFERENCES cbt_rooms(id) ON DELETE CASCADE,
+  tanggal_tes TEXT NOT NULL DEFAULT '',
+  sesi_tes TEXT NOT NULL DEFAULT '',
+  token_code TEXT NOT NULL,
+  is_active INTEGER DEFAULT 1,
+  expires_at TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(exam_id, room_id, tanggal_tes, sesi_tes)
+)`;
+
 function printUsageAndExit() {
   console.log(`Usage:
   node scripts/cbt-readiness-migration.mjs [--remote|--local] [--database pmb-man1-tasik] [--dry-run]
@@ -169,6 +182,23 @@ async function main() {
 
   for (const sql of baseStatements) {
     await execute(sql);
+  }
+
+  if (await tableExists('cbt_exam_tokens')) {
+    const tokenColumns = await getColumns('cbt_exam_tokens');
+    if (!tokenColumns.has('tanggal_tes') || !tokenColumns.has('sesi_tes')) {
+      await execute('DROP TABLE IF EXISTS cbt_exam_tokens_new');
+      await execute(tokenTableSql);
+      await execute(`INSERT INTO cbt_exam_tokens_new
+        (id, exam_id, room_id, tanggal_tes, sesi_tes, token_code, is_active, expires_at, created_at)
+        SELECT id, exam_id, room_id, '', '', token_code, is_active, expires_at, created_at
+        FROM cbt_exam_tokens`);
+      await execute('DROP TABLE cbt_exam_tokens');
+      await execute('ALTER TABLE cbt_exam_tokens_new RENAME TO cbt_exam_tokens');
+    } else {
+      console.log('[skip] cbt_exam_tokens tanggal/sesi sudah ada');
+    }
+    await execute('CREATE INDEX IF NOT EXISTS idx_cbt_tokens_lookup ON cbt_exam_tokens(exam_id, room_id, tanggal_tes, sesi_tes, token_code)');
   }
 
   console.log('CBT readiness migration selesai.');

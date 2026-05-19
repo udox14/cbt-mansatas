@@ -57,13 +57,15 @@ CREATE TABLE IF NOT EXISTS cbt_exam_tokens (
   id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
   exam_id TEXT NOT NULL REFERENCES cbt_exams(id) ON DELETE CASCADE,
   room_id TEXT NOT NULL REFERENCES cbt_rooms(id) ON DELETE CASCADE,
+  tanggal_tes TEXT NOT NULL DEFAULT '',
+  sesi_tes TEXT NOT NULL DEFAULT '',
   token_code TEXT NOT NULL,
   is_active INTEGER DEFAULT 1,
   expires_at TEXT,
   created_at TEXT DEFAULT (datetime('now')),
-  UNIQUE(exam_id, room_id)
+  UNIQUE(exam_id, room_id, tanggal_tes, sesi_tes)
 );
-CREATE INDEX IF NOT EXISTS idx_cbt_tokens_lookup ON cbt_exam_tokens(exam_id, room_id, token_code);
+CREATE INDEX IF NOT EXISTS idx_cbt_tokens_lookup ON cbt_exam_tokens(exam_id, room_id, tanggal_tes, sesi_tes, token_code);
 
 -- Soal
 CREATE TABLE IF NOT EXISTS cbt_questions (

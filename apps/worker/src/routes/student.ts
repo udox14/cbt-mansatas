@@ -129,12 +129,16 @@ student.post('/exams/:examId/validate-token', async (c) => {
   }
 
   // ── Validasi jadwal untuk pendaftar PMB ──
+  let tanggalTes = '';
+  let sesiTes = '';
   if (userType === 'pendaftar') {
     const jadwal = await c.env.DB.prepare(
       'SELECT sesi_tes, tanggal_tes FROM pendaftar WHERE id = ?'
     ).bind(user.sub).first<any>();
 
     if (jadwal?.sesi_tes && jadwal?.tanggal_tes) {
+      tanggalTes = jadwal.tanggal_tes;
+      sesiTes = jadwal.sesi_tes;
       const parsed = parseSesiJam(jadwal.sesi_tes);
       if (parsed) {
         const status = cekJadwal(jadwal.tanggal_tes, parsed.jamMulai, parsed.jamSelesai);
@@ -147,9 +151,9 @@ student.post('/exams/:examId/validate-token', async (c) => {
   // ── H5: Validasi token + cek expires_at ──
   const tokenRow = await c.env.DB.prepare(
     `SELECT * FROM cbt_exam_tokens
-     WHERE exam_id=? AND room_id=? AND token_code=? AND is_active=1
+     WHERE exam_id=? AND room_id=? AND tanggal_tes=? AND sesi_tes=? AND token_code=? AND is_active=1
        AND (expires_at IS NULL OR expires_at > datetime('now'))`
-  ).bind(examId, user.room_id, token_code).first();
+  ).bind(examId, user.room_id, tanggalTes, sesiTes, token_code).first();
   if (!tokenRow) return c.json(err('Token tidak valid atau sudah kedaluwarsa'), 401);
 
   // ── Cek ujian aktif ──
@@ -202,13 +206,13 @@ student.post('/exams/:examId/validate-token', async (c) => {
 
       if (existing.status === 'submitted' || existing.status === 'force_submitted')
         return c.json(err('Anda sudah menyelesaikan ujian ini'), 400);
-      if (existing.is_time_locked)
+      if (existing.is_time_locked && !isLockedByCheat(existing, exam))
         return c.json(err('Waktu ujian dikunci oleh pengawas. Hubungi pengawas untuk membuka.'), 403);
       if (existing.device_id && existing.device_id !== device_id)
         return c.json(err('Sesi terkunci di perangkat lain. Hubungi pengawas untuk reset.'), 403);
 
       await c.env.DB.prepare(
-        'UPDATE cbt_exam_sessions SET device_id=?, last_heartbeat=?, is_time_locked=0 WHERE id=?'
+        'UPDATE cbt_exam_sessions SET device_id=?, last_heartbeat=? WHERE id=?'
       ).bind(device_id, now(), existing.id).run();
 
       return c.json(ok({
@@ -216,6 +220,9 @@ student.post('/exams/:examId/validate-token', async (c) => {
         question_map: JSON.parse(existing.question_map || '[]'),
         option_map: JSON.parse(existing.option_map || '{}'),
         started_at: existing.started_at, duration_minutes: exam.duration_minutes,
+        locked: !!existing.is_time_locked,
+        cheat_locked: isLockedByCheat(existing, exam),
+        cheat_warnings: existing.cheat_warnings ?? 0,
       }, 'Sesi dilanjutkan'));
     }
     throw e;
@@ -232,7 +239,12 @@ student.get('/sessions/:sessionId/questions', async (c) => {
   if (!session) return c.json(err('Sesi tidak ditemukan'), 404);
   if (session.status === 'submitted' || session.status === 'force_submitted')
     return c.json(err('Ujian sudah selesai'), 400);
-  if (session.is_time_locked)
+
+  const examCfg = await c.env.DB.prepare(
+    'SELECT cheat_limit, cheat_action, enforce_fullscreen, duration_minutes FROM cbt_exams WHERE id=?'
+  ).bind(session.exam_id).first<any>();
+  const cheatLocked = isLockedByCheat(session, examCfg);
+  if (session.is_time_locked && !cheatLocked)
     return c.json(err('Waktu ujian dikunci oleh pengawas'), 403);
 
   const qMap: string[] = JSON.parse(session.question_map || '[]');
@@ -270,10 +282,6 @@ student.get('/sessions/:sessionId/questions', async (c) => {
     'SELECT question_id, selected_option_id, essay_answer, is_doubtful FROM cbt_student_answers WHERE session_id=?'
   ).bind(c.req.param('sessionId')).all();
 
-  const examCfg = await c.env.DB.prepare(
-    'SELECT cheat_limit, cheat_action, enforce_fullscreen FROM cbt_exams WHERE id=?'
-  ).bind(session.exam_id).first<any>();
-
   return c.json(ok({ questions: ordered, answers,
     cheat_limit: examCfg?.cheat_limit ?? 3,
     cheat_action: examCfg?.cheat_action ?? 'lock',
@@ -281,6 +289,7 @@ student.get('/sessions/:sessionId/questions', async (c) => {
     // Bug-1 fix: kembalikan state cheat agar ExamRoom bisa restore setelah refresh
     cheat_warnings: session.cheat_warnings ?? 0,
     is_time_locked: session.is_time_locked ?? 0,
+    cheat_locked: cheatLocked,
   }));
 });
 
@@ -334,7 +343,7 @@ student.post('/sessions/:sessionId/heartbeat', async (c) => {
   const userType = user.source === 'pendaftar' ? 'pendaftar' : 'cbt_user';
 
   const session = await c.env.DB.prepare(
-    `SELECT es.*, e.duration_minutes
+    `SELECT es.*, e.duration_minutes, e.cheat_action, e.cheat_limit
      FROM cbt_exam_sessions es
      JOIN cbt_exams e ON e.id = es.exam_id
      WHERE es.id=? AND es.user_id=? AND es.user_type=?`
@@ -363,21 +372,28 @@ student.post('/sessions/:sessionId/heartbeat', async (c) => {
     return c.json(ok({ time_locked: false, auto_submitted: true }));
   }
 
+  const isCheatLock = isLockedByCheat(session, session);
+  if (session.is_time_locked && isCheatLock) {
+    // Bug-1/Bug-3 fix: bedakan cheat_locked vs time_locked (waktu habis)
+    // cheat_action='lock' + is_time_locked=1 + belum submitted = dikunci karena cheat
+    return c.json(ok({
+      time_locked: true,
+      auto_submitted: false,
+      cheat_locked: isCheatLock,
+      warnings: session.cheat_warnings ?? 0,
+    }));
+  }
+
   if (isSessionDurationExpired(session)) {
     await finalizeSession(c.env.DB, session, [], 'force_submitted');
     return c.json(ok({ time_locked: true, auto_submitted: true }, 'Waktu ujian berakhir dan otomatis dikumpulkan'));
   }
 
   if (session.is_time_locked) {
-    // Bug-1/Bug-3 fix: bedakan cheat_locked vs time_locked (waktu habis)
-    // cheat_action='lock' + is_time_locked=1 + belum submitted = dikunci karena cheat
-    const isCheatLock = (session.cheat_action ?? 'lock') === 'lock'
-      && session.status !== 'submitted'
-      && session.status !== 'force_submitted';
     return c.json(ok({
       time_locked: true,
       auto_submitted: false,
-      cheat_locked: isCheatLock,
+      cheat_locked: false,
       warnings: session.cheat_warnings ?? 0,
     }));
   }
@@ -497,6 +513,15 @@ function isSessionDurationExpired(session: any) {
   const durationMinutes = Number(session.duration_minutes || 0);
   if (!Number.isFinite(startedAt) || !durationMinutes) return false;
   return Date.now() >= startedAt + durationMinutes * 60 * 1000;
+}
+
+function isLockedByCheat(session: any, exam: any) {
+  if (!session?.is_time_locked) return false;
+  if (session.status === 'submitted' || session.status === 'force_submitted') return false;
+  const cheatAction = exam?.cheat_action ?? session.cheat_action ?? 'lock';
+  const cheatLimit = Number(exam?.cheat_limit ?? session.cheat_limit ?? 3);
+  if (cheatAction !== 'lock') return false;
+  return Number(session.cheat_warnings || 0) >= cheatLimit;
 }
 
 async function finalizeSession(db: D1Database, session: any, answers: any[], status: 'submitted' | 'force_submitted') {

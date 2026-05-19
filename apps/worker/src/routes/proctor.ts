@@ -5,7 +5,7 @@
 import { Hono } from 'hono';
 import type { Env } from '../types';
 import { authMiddleware, requireRole } from '../middleware/auth';
-import { ok, err, now } from '../utils/helpers';
+import { ok, err, now, parseSesiJam, cekJadwal } from '../utils/helpers';
 
 const VIOLATION_LABELS: Record<string, string> = {
   tab_switch:       'Pindah Tab / Minimize Window',
@@ -24,9 +24,16 @@ proctor.get('/token', async (c) => {
      JOIN cbt_exams e ON e.id = et.exam_id
      JOIN cbt_rooms r ON r.id = et.room_id
      WHERE et.room_id = ? AND et.is_active = 1 AND e.active_status = 'active'
-     ORDER BY e.title`
+     ORDER BY et.tanggal_tes, et.sesi_tes, e.title`
   ).bind(user.room_id).all();
-  return c.json(ok(results));
+  const enriched = (results as any[]).map(t => {
+    const parsed = parseSesiJam(t.sesi_tes || '');
+    const jadwal_status = t.tanggal_tes && parsed
+      ? cekJadwal(t.tanggal_tes, parsed.jamMulai, parsed.jamSelesai)
+      : 'no_schedule';
+    return { ...t, jadwal_status };
+  }).filter(t => t.jadwal_status !== 'selesai');
+  return c.json(ok(enriched));
 });
 
 proctor.get('/sessions', async (c) => {

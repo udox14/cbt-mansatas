@@ -130,6 +130,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
   // Bug-3 fix: pisahkan 'dikunci oleh pelanggaran' dari 'sudah disubmit'
   // isCheatLockedRef=true berarti sesi dikunci proktor, BISA dipulihkan
   const isCheatLockedRef = useRef(false);
+  const isPageLeavingRef = useRef(false);
   const cheatCountRef = useRef(0);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
   // Bug-2 fix: cooldown 4 detik antar-pelanggaran
@@ -163,7 +164,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
     if (saved) setFontSize(parseInt(saved));
     // Aktifkan wake lock secepatnya
     requestWakeLock();
-    GET<{ questions: Question[]; answers: any[]; cheat_limit: number; cheat_action: string; enforce_fullscreen: boolean; cheat_warnings: number; is_time_locked: number }>(
+    GET<{ questions: Question[]; answers: any[]; cheat_limit: number; cheat_action: string; enforce_fullscreen: boolean; cheat_warnings: number; is_time_locked: number; cheat_locked?: boolean }>(
       `/api/student/sessions/${sessionId}/questions`
     ).then(r => {
       if (r.success && r.data) {
@@ -191,7 +192,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
         const warnings = r.data.cheat_warnings ?? 0;
         cheatCountRef.current = warnings;
         setCheatCount(warnings);
-        if (r.data.is_time_locked && action === 'lock') {
+        if ((r.data.cheat_locked || r.data.is_time_locked) && action === 'lock') {
           // Dikunci karena pelanggaran — bisa dibuka proktor
           isCheatLockedRef.current = true;
           submittedRef.current = false; // jangan auto-submit!
@@ -220,7 +221,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
     const tick = () => {
       const left = Math.max(0, Math.floor((end - Date.now()) / 1000));
       setTimeLeft(left);
-      if (left <= 0 && !submittedRef.current) handleSubmit(true);
+      if (left <= 0 && !submittedRef.current && !isCheatLockedRef.current) handleSubmit(true);
     };
     tick();
     const iv = setInterval(tick, 1000);
@@ -334,7 +335,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
           setTimeout(() => document.documentElement.requestFullscreen().catch(() => {}), 300);
         }
       }
-      if (document.hidden && !submittedRef.current && !isCheatLockedRef.current) {
+      if (document.hidden && !submittedRef.current && !isCheatLockedRef.current && !isPageLeavingRef.current) {
         reportViolation('tab_switch');
       }
     };
@@ -342,17 +343,15 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
     // ── window blur: fallback untuk iOS Safari & browser yang visibilitychange-nya tidak konsisten ──
     // Terpicu saat: notification bar dibuka, pindah app, tab lain diklik, dsb.
     const onBlur = () => {
-      if (!submittedRef.current && !isCheatLockedRef.current) {
+      if (!submittedRef.current && !isCheatLockedRef.current && !isPageLeavingRef.current) {
         // Cooldown internal mencegah dobel-pelanggaran jika blur + visibilitychange keduanya terpicu
         reportViolation('tab_switch');
       }
     };
 
     // ── pagehide: terpicu saat halaman di-background (terutama iOS Safari) ──
-    const onPageHide = () => {
-      if (!submittedRef.current && !isCheatLockedRef.current) {
-        reportViolation('tab_switch');
-      }
+    const onBeforeUnload = () => {
+      isPageLeavingRef.current = true;
     };
 
     // ── window focus / touchstart: re-acquire wake lock & fullscreen saat kembali ──
@@ -382,7 +381,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
     document.addEventListener('contextmenu', ctx);
     document.addEventListener('keydown', key);
     window.addEventListener('blur', onBlur);
-    window.addEventListener('pagehide', onPageHide);
+    window.addEventListener('beforeunload', onBeforeUnload);
     window.addEventListener('focus', onFocus);
     return () => {
       document.removeEventListener('visibilitychange', vis);
@@ -390,7 +389,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
       document.removeEventListener('contextmenu', ctx);
       document.removeEventListener('keydown', key);
       window.removeEventListener('blur', onBlur);
-      window.removeEventListener('pagehide', onPageHide);
+      window.removeEventListener('beforeunload', onBeforeUnload);
       window.removeEventListener('focus', onFocus);
     };
   }, [enforceFullscreen, reportViolation, requestWakeLock]);
@@ -417,6 +416,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
   }, [sessionId]);
 
   const handleSubmit = useCallback(async (force = false) => {
+    if (isCheatLockedRef.current) return;
     if (submittedRef.current && !force) return;
     submittedRef.current = true;
     setSubmitting(true);

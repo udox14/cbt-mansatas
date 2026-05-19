@@ -532,23 +532,64 @@ admin.delete('/questions/:id', async (c) => {
 
 admin.get('/exams/:examId/tokens', async (c) => {
   const { results } = await c.env.DB.prepare(
-    `SELECT et.*, r.room_name FROM cbt_exam_tokens et JOIN cbt_rooms r ON r.id = et.room_id WHERE et.exam_id=? ORDER BY r.room_name`
+    `SELECT et.*, r.room_name
+     FROM cbt_exam_tokens et
+     JOIN cbt_rooms r ON r.id = et.room_id
+     WHERE et.exam_id=?
+     ORDER BY et.tanggal_tes, et.sesi_tes, r.room_name`
   ).bind(c.req.param('examId')).all();
   return c.json(ok(results));
 });
 
 admin.post('/exams/:examId/tokens/generate', async (c) => {
   const examId = c.req.param('examId');
-  const { room_ids } = await c.req.json<{ room_ids?: string[] }>();
+  const body = await c.req.json<{
+    room_ids?: string[];
+    groups?: { tanggal_tes?: string; sesi_tes?: string }[];
+    token_id?: string;
+  }>();
+
+  if (body.token_id) {
+    const token = await c.env.DB.prepare(
+      'SELECT id FROM cbt_exam_tokens WHERE id=? AND exam_id=?'
+    ).bind(body.token_id, examId).first();
+    if (!token) return c.json(err('Token tidak ditemukan'), 404);
+    await c.env.DB.prepare(
+      'UPDATE cbt_exam_tokens SET token_code=?, is_active=1, created_at=datetime(\'now\') WHERE id=? AND exam_id=?'
+    ).bind(generateToken(), body.token_id, examId).run();
+    return c.json(ok({ generated: 1 }, 'Token berhasil digenerate ulang'));
+  }
+
+  const { room_ids, groups } = body;
   const targetRooms = room_ids?.length
     ? room_ids
     : (await c.env.DB.prepare('SELECT id FROM cbt_rooms').all()).results.map((r: any) => r.id);
-  const stmts = targetRooms.map((rid: string) =>
-    c.env.DB.prepare('INSERT OR REPLACE INTO cbt_exam_tokens (id, exam_id, room_id, token_code, is_active) VALUES (?,?,?,?,1)')
-      .bind(newId(), examId, rid, generateToken())
-  );
+  const targetGroups = groups?.length
+    ? groups.map(g => ({ tanggal_tes: g.tanggal_tes || '', sesi_tes: g.sesi_tes || '' }))
+    : (await c.env.DB.prepare(
+        `SELECT DISTINCT tanggal_tes, sesi_tes
+         FROM pendaftar
+         WHERE tanggal_tes IS NOT NULL AND tanggal_tes != ''
+           AND sesi_tes IS NOT NULL AND sesi_tes != ''
+           AND ${EXCLUDE_JALUR_COND}
+         ORDER BY tanggal_tes, sesi_tes`
+      ).all()).results.map((g: any) => ({ tanggal_tes: g.tanggal_tes || '', sesi_tes: g.sesi_tes || '' }));
+
+  const effectiveGroups = targetGroups.length ? targetGroups : [{ tanggal_tes: '', sesi_tes: '' }];
+  const stmts = [];
+  for (const rid of targetRooms) {
+    for (const g of effectiveGroups) {
+      stmts.push(
+        c.env.DB.prepare(
+          `INSERT OR REPLACE INTO cbt_exam_tokens
+           (id, exam_id, room_id, tanggal_tes, sesi_tes, token_code, is_active)
+           VALUES (?,?,?,?,?,?,1)`
+        ).bind(newId(), examId, rid, g.tanggal_tes, g.sesi_tes, generateToken())
+      );
+    }
+  }
   for (let i = 0; i < stmts.length; i += 100) { await c.env.DB.batch(stmts.slice(i, i + 100)); }
-  return c.json(ok({ generated: targetRooms.length }, 'Token berhasil digenerate'));
+  return c.json(ok({ generated: stmts.length }, 'Token berhasil digenerate'));
 });
 
 // ══════════════════════════════════════════════════════════════
