@@ -1,5 +1,6 @@
 'use client';
 import { useState, useRef } from 'react';
+import * as XLSX from 'xlsx';
 import { Button, Modal, Badge, Spinner } from '@/components/ui';
 import { POST } from '@/lib/api';
 
@@ -8,7 +9,6 @@ import { POST } from '@/lib/api';
 // ═══════════════════════════════════════════════════════════════
 
 // ── CDN Loader ───────────────────────────────────────────────
-let sheetjsLoaded = false;
 let mammothLoaded = false;
 
 function loadScript(src: string): Promise<void> {
@@ -20,12 +20,6 @@ function loadScript(src: string): Promise<void> {
     s.onerror = () => reject(new Error(`Gagal memuat ${src}`));
     document.head.appendChild(s);
   });
-}
-
-async function ensureSheetJS() {
-  if (sheetjsLoaded && (window as any).XLSX) return;
-  await loadScript('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js');
-  sheetjsLoaded = true;
 }
 
 async function ensureMammoth() {
@@ -85,8 +79,6 @@ export default function BulkImport({ type, examId, onSuccess, onClose, open }: B
   const parseExcel = async (file: File) => {
     setError('');
     try {
-      await ensureSheetJS();
-      const XLSX = (window as any).XLSX;
       const data = await file.arrayBuffer();
       const wb = XLSX.read(data, { type: 'array' });
       const ws = wb.Sheets[wb.SheetNames[0]];

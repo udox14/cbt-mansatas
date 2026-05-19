@@ -1,24 +1,9 @@
 'use client';
+import * as XLSX from 'xlsx';
 
 // ═══════════════════════════════════════════════════════════════
-// XLSX Export (SheetJS from CDN, client-side)
+// XLSX Export (SheetJS via npm, bundled)
 // ═══════════════════════════════════════════════════════════════
-
-let loaded = false;
-
-async function ensureSheetJS(): Promise<void> {
-  if (loaded && (window as any).XLSX) return;
-  return new Promise((resolve, reject) => {
-    if (document.querySelector('script[src*="xlsx"]')) {
-      loaded = true; resolve(); return;
-    }
-    const s = document.createElement('script');
-    s.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
-    s.onload = () => { loaded = true; resolve(); };
-    s.onerror = () => reject(new Error('Gagal memuat SheetJS'));
-    document.head.appendChild(s);
-  });
-}
 
 interface ExportColumn {
   key: string;
@@ -32,9 +17,6 @@ export async function exportToXlsx(
   filename: string,
   sheetName = 'Data'
 ) {
-  await ensureSheetJS();
-  const XLSX = (window as any).XLSX;
-
   // Build header row
   const header = columns.map(c => c.label);
 
@@ -46,9 +28,6 @@ export async function exportToXlsx(
 
   // Set column widths
   ws['!cols'] = columns.map(c => ({ wch: c.width || 15 }));
-
-  // Style header (bold via cell format - limited in SheetJS free)
-  // SheetJS community edition doesn't support styling, but widths work
 
   // Create workbook
   const wb = XLSX.utils.book_new();
