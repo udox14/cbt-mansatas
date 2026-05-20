@@ -363,13 +363,13 @@ student.post('/sessions/:sessionId/heartbeat', async (c) => {
       const parsed = parseSesiJam(jadwal.sesi_tes);
       if (parsed && cekJadwal(jadwal.tanggal_tes, parsed.jamMulai, parsed.jamSelesai) === 'selesai') {
         await finalizeSession(c.env.DB, session, [], 'force_submitted');
-        return c.json(ok({ time_locked: true, auto_submitted: true }, 'Waktu ujian berakhir dan otomatis dikumpulkan'));
+        return c.json(ok({ time_locked: true, auto_submitted: true, started_at: session.started_at }, 'Waktu ujian berakhir dan otomatis dikumpulkan'));
       }
     }
   }
 
   if (session.status === 'submitted' || session.status === 'force_submitted') {
-    return c.json(ok({ time_locked: false, auto_submitted: true }));
+    return c.json(ok({ time_locked: false, auto_submitted: true, started_at: session.started_at }));
   }
 
   const isCheatLock = isLockedByCheat(session, session);
@@ -381,12 +381,13 @@ student.post('/sessions/:sessionId/heartbeat', async (c) => {
       auto_submitted: false,
       cheat_locked: isCheatLock,
       warnings: session.cheat_warnings ?? 0,
+      started_at: session.started_at,
     }));
   }
 
   if (isSessionDurationExpired(session)) {
     await finalizeSession(c.env.DB, session, [], 'force_submitted');
-    return c.json(ok({ time_locked: true, auto_submitted: true }, 'Waktu ujian berakhir dan otomatis dikumpulkan'));
+    return c.json(ok({ time_locked: true, auto_submitted: true, started_at: session.started_at }, 'Waktu ujian berakhir dan otomatis dikumpulkan'));
   }
 
   if (session.is_time_locked) {
@@ -395,10 +396,11 @@ student.post('/sessions/:sessionId/heartbeat', async (c) => {
       auto_submitted: false,
       cheat_locked: false,
       warnings: session.cheat_warnings ?? 0,
+      started_at: session.started_at,
     }));
   }
 
-  return c.json(ok({ time_locked: false, auto_submitted: false, cheat_locked: false, warnings: session.cheat_warnings ?? 0 }));
+  return c.json(ok({ time_locked: false, auto_submitted: false, cheat_locked: false, warnings: session.cheat_warnings ?? 0, started_at: session.started_at }));
 });
 
 // ── POST cheat ────────────────────────────────────────────────

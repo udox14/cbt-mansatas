@@ -133,10 +133,25 @@ proctor.post('/sessions/:id/unlock', async (c) => {
   if (!session) return c.json(err('Sesi tidak ditemukan di ruangan Anda'), 404);
   if (session.status === 'submitted' || session.status === 'force_submitted')
     return c.json(err('Ujian sudah selesai, tidak bisa dibuka'), 400);
+
+  let adjustedStartedAt = session.started_at;
+  if (Number(session.cheat_warnings || 0) > 0) {
+    const latestLock = await c.env.DB.prepare(
+      'SELECT happened_at FROM cbt_cheat_logs WHERE session_id = ? ORDER BY happened_at DESC LIMIT 1'
+    ).bind(session.id).first<any>();
+
+    const startedMs = new Date(session.started_at).getTime();
+    const lockedAtMs = latestLock?.happened_at ? new Date(latestLock.happened_at).getTime() : NaN;
+    const unlockedAtMs = Date.now();
+    if (Number.isFinite(startedMs) && Number.isFinite(lockedAtMs) && lockedAtMs <= unlockedAtMs) {
+      adjustedStartedAt = new Date(startedMs + (unlockedAtMs - lockedAtMs)).toISOString();
+    }
+  }
+
   // Reset cheat_warnings juga agar peserta tidak langsung kena lock lagi setelah dibuka
   await c.env.DB.prepare(
-    `UPDATE cbt_exam_sessions SET is_time_locked = 0, cheat_warnings = 0, last_heartbeat = ? WHERE id = ?`
-  ).bind(now(), c.req.param('id')).run();
+    `UPDATE cbt_exam_sessions SET is_time_locked = 0, cheat_warnings = 0, started_at = ?, last_heartbeat = ? WHERE id = ?`
+  ).bind(adjustedStartedAt, now(), c.req.param('id')).run();
   return c.json(ok(null, 'Sesi berhasil dibuka'));
 });
 

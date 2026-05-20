@@ -113,6 +113,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
   const [showConfirm, setShowConfirm] = useState(false);
   const [fontSize, setFontSize] = useState(16);
   const [timeLeft, setTimeLeft] = useState(0);
+  const [effectiveStartedAt, setEffectiveStartedAt] = useState(startedAt);
   const [cheatCount, setCheatCount] = useState(0);
   // Konfigurasi anti-cheat dari server
   const [cheatLimit, setCheatLimit] = useState(3);
@@ -139,6 +140,10 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
   const VIOLATION_COOLDOWN_MS = 4000;
   // ── M4: answersRef selalu up-to-date (fix stale closure) ──
   const answersRef = useRef<Map<string, Answer>>(new Map());
+
+  useEffect(() => {
+    setEffectiveStartedAt(startedAt);
+  }, [startedAt]);
 
   // ── Screen Wake Lock: cegah layar mati selama ujian ─────────
   const requestWakeLock = useCallback(async () => {
@@ -245,7 +250,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
 
   // Countdown timer
   useEffect(() => {
-    const end = new Date(startedAt).getTime() + durationMinutes * 60 * 1000;
+    const end = new Date(effectiveStartedAt).getTime() + durationMinutes * 60 * 1000;
     const tick = () => {
       const left = Math.max(0, Math.floor((end - Date.now()) / 1000));
       setTimeLeft(left);
@@ -254,13 +259,14 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
     tick();
     const iv = setInterval(tick, 1000);
     return () => clearInterval(iv);
-  }, [startedAt, durationMinutes]);
+  }, [effectiveStartedAt, durationMinutes]);
 
   // Auto-sync answers + heartbeat
   useEffect(() => {
     const s = setInterval(() => flushAnswers(), 15000);
     const h = setInterval(async () => {
       const r = await POST(`/api/student/sessions/${sessionId}/heartbeat`);
+      if (r.data?.started_at) setEffectiveStartedAt(r.data.started_at);
 
       // ── Bug-1 & Bug-3 fix: bedakan time_locked karena cheat vs karena waktu habis ──
       // Heartbeat mengembalikan { time_locked, auto_submitted, cheat_locked }
