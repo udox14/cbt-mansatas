@@ -688,6 +688,8 @@ function TokensView({ examId }: { examId: string }) {
   const [loading, setLoading] = useState(true);
   const [gen, setGen] = useState(false);
   const [regenId, setRegenId] = useState<string | null>(null);
+  const [manualToken, setManualToken] = useState('');
+  const [settingManual, setSettingManual] = useState(false);
   const [filterRoom, setFilterRoom] = useState('all');
   const [filterGroup, setFilterGroup] = useState('all');
   const fetchT = useCallback(async () => { const r = await GET(`/api/admin/exams/${examId}/tokens`); if (r.success) setTokens(r.data || []); setLoading(false); }, [examId]);
@@ -699,6 +701,15 @@ function TokensView({ examId }: { examId: string }) {
     setRegenId(null);
     toast(r.success ? 'success' : 'error', r.message || r.error || 'Gagal');
     fetchT();
+  };
+  const setTokenManual = async () => {
+    const token_code = manualToken.trim().toUpperCase();
+    if (!token_code) { toast('error', 'Isi token manual dulu'); return; }
+    setSettingManual(true);
+    const r = await POST(`/api/admin/exams/${examId}/tokens/set-code`, { token_code });
+    setSettingManual(false);
+    toast(r.success ? 'success' : 'error', r.message || r.error || 'Gagal');
+    if (r.success) { setManualToken(token_code); fetchT(); }
   };
   const rooms = Array.from(new Set(tokens.map((t: any) => t.room_name))).sort();
   const groups = Array.from(new Map(tokens.map((t: any) => [`${t.tanggal_tes || ''}|${t.sesi_tes || ''}`, {
@@ -722,7 +733,7 @@ function TokensView({ examId }: { examId: string }) {
           <span style={{ color: C.textMid, fontSize: '11px', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>{visible.length} Token</span>
           <p style={{ color: C.textFaint, fontSize: '11px', marginTop: '2px' }}>Token dibuat per tanggal, sesi, dan ruangan.</p>
         </div>
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           {groups.length > 1 && (
             <select value={filterGroup} onChange={e => setFilterGroup(e.target.value)}
               style={{ fontSize: '11.5px', fontWeight: 600, padding: '5px 10px', border: `1.5px solid ${C.borderMid}`, borderRadius: '8px', background: C.white, color: C.textMid, cursor: 'pointer', maxWidth: '220px' }}>
@@ -737,6 +748,13 @@ function TokensView({ examId }: { examId: string }) {
               {rooms.map(r => <option key={r} value={r}>{r}</option>)}
             </select>
           )}
+          <input
+            value={manualToken}
+            onChange={e => setManualToken(e.target.value.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 20))}
+            placeholder="TOKEN SAMA"
+            style={{ width: '128px', fontSize: '12px', fontWeight: 800, letterSpacing: '0.08em', padding: '7px 10px', border: `1.5px solid ${C.borderMid}`, borderRadius: '9px', background: C.white, color: C.text, outline: 'none', textTransform: 'uppercase' }}
+          />
+          <Button variant="secondary" size="sm" loading={settingManual} disabled={!manualToken.trim()} onClick={setTokenManual}>Set Semua</Button>
           <Button size="sm" loading={gen} onClick={generate}><RefreshCw size={13} /> Generate Semua</Button>
         </div>
       </div>
@@ -890,6 +908,8 @@ function AssignmentsView({ examId }: { examId: string }) {
   const [candidates, setCandidates] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [selectedAssignments, setSelectedAssignments] = useState<Set<string>>(new Set());
+  const [deletingAssignments, setDeletingAssignments] = useState(false);
   // Per-Ruangan state
   const [showAddRoom, setShowAddRoom] = useState(false);
   const [rooms, setRooms] = useState<any[]>([]);
@@ -981,7 +1001,38 @@ function AssignmentsView({ examId }: { examId: string }) {
     else toast('error', r.error || 'Gagal');
   };
 
-  const removeAssignment = async (id: string) => { await DEL(`/api/admin/exams/${examId}/assignments/${id}`); toast('success', 'Dihapus'); fetchData(); };
+  const removeAssignment = async (id: string) => {
+    await DEL(`/api/admin/exams/${examId}/assignments/${id}`);
+    setSelectedAssignments(prev => { const n = new Set(prev); n.delete(id); return n; });
+    toast('success', 'Dihapus');
+    fetchData();
+  };
+  const toggleAssignmentSel = (id: string) => setSelectedAssignments(prev => {
+    const n = new Set(prev);
+    n.has(id) ? n.delete(id) : n.add(id);
+    return n;
+  });
+  const toggleAllAssignments = (list: any[]) => {
+    const ids = list.map((a: any) => a.id);
+    setSelectedAssignments(prev => {
+      const n = new Set(prev);
+      const allSel = ids.length > 0 && ids.every(id => n.has(id));
+      ids.forEach(id => allSel ? n.delete(id) : n.add(id));
+      return n;
+    });
+  };
+  const deleteSelectedAssignments = async () => {
+    const ids = pesertaList.map((a: any) => a.id).filter((id: string) => selectedAssignments.has(id));
+    if (!ids.length) { toast('error', 'Pilih minimal 1 peserta'); return; }
+    setDeletingAssignments(true);
+    const r = await POST(`/api/admin/exams/${examId}/assignments/batch-delete`, { ids });
+    setDeletingAssignments(false);
+    if (r.success) {
+      toast('success', r.message || `${ids.length} assignment dihapus`);
+      setSelectedAssignments(new Set());
+      fetchData();
+    } else toast('error', r.error || 'Gagal menghapus');
+  };
 
   if (loading) return <div className="py-12 text-center"><Spinner /></div>;
 
@@ -1010,14 +1061,35 @@ function AssignmentsView({ examId }: { examId: string }) {
     return <span style={{ background: s.bg, color: s.color, fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '999px' }}>{s.label}</span>;
   };
 
-  const AssignTable = ({ list, cols }: { list: any[]; cols: { label: string; center?: boolean }[] }) => (
-    list.length === 0 ? <EmptyState title="Belum ada assignment" /> : (
+  const AssignTable = ({ list, cols, selectable = false }: { list: any[]; cols: { label: string; center?: boolean }[]; selectable?: boolean }) => {
+    const allSelected = selectable && list.length > 0 && list.every((a: any) => selectedAssignments.has(a.id));
+    return list.length === 0 ? <EmptyState title="Belum ada assignment" /> : (
       <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '12px', overflow: 'hidden' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-          <TableHead cols={cols} />
+          <thead>
+            <tr style={{ background: C.bg, borderBottom: `1.5px solid ${C.borderMid}` }}>
+              {selectable && (
+                <th style={{ width: '46px', padding: '9px 12px', textAlign: 'center' }}>
+                  <button type="button" onClick={() => toggleAllAssignments(list)} title={allSelected ? 'Batal pilih semua' : 'Pilih semua'} style={{ display: 'inline-flex', background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>
+                    <Chk size={17} check={allSelected} />
+                  </button>
+                </th>
+              )}
+              {cols.map(c => (
+                <th key={c.label} style={{ padding: '9px 14px', textAlign: c.center ? 'center' : 'left', color: C.textMid, fontSize: '10.5px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>{c.label}</th>
+              ))}
+            </tr>
+          </thead>
           <tbody>
             {list.map((a: any, i: number) => (
               <tr key={a.id} style={{ borderBottom: i < list.length - 1 ? `1px solid ${C.borderLight}` : 'none' }}>
+                {selectable && (
+                  <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                    <button type="button" onClick={() => toggleAssignmentSel(a.id)} title="Pilih assignment" style={{ display: 'inline-flex', background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>
+                      <Chk size={17} check={selectedAssignments.has(a.id)} />
+                    </button>
+                  </td>
+                )}
                 <td style={{ padding: '10px 14px', color: C.textMuted }}>{i + 1}</td>
                 <td style={{ padding: '10px 14px', color: C.text, fontWeight: 700 }}>{a.full_name || '—'}</td>
                 {a.user_type !== 'room' && a.user_type !== 'sesi' && <td style={{ padding: '10px 14px', color: C.textMuted, fontFamily: 'monospace' }}>{a.nisn || '—'}</td>}
@@ -1030,8 +1102,10 @@ function AssignmentsView({ examId }: { examId: string }) {
           </tbody>
         </table>
       </div>
-    )
-  );
+    );
+  };
+  const selectedPesertaAssignments = pesertaList.filter((a: any) => selectedAssignments.has(a.id)).length;
+  const allPesertaAssignmentsSelected = pesertaList.length > 0 && selectedPesertaAssignments === pesertaList.length;
 
   return (
     <div className="space-y-3">
@@ -1053,13 +1127,25 @@ function AssignmentsView({ examId }: { examId: string }) {
       {/* Tab: Per Peserta */}
       {tab === 'peserta' && (
         <div className="space-y-3">
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
             <p style={{ color: C.textFaint, fontSize: '10.5px' }}>Peserta yang di-assign bisa mengakses ujian terlepas dari filter jalur.</p>
-            <button onClick={openAddPeserta} style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: C.green, color: '#fff', fontSize: '12px', fontWeight: 700, padding: '8px 14px', borderRadius: '10px', border: 'none', cursor: 'pointer' }}>
-              <Plus size={13} strokeWidth={2.5} /> Tambah
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+              {pesertaList.length > 0 && (
+                <button onClick={() => toggleAllAssignments(pesertaList)} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: C.white, color: C.textMid, fontSize: '12px', fontWeight: 700, padding: '8px 12px', borderRadius: '10px', border: `1.5px solid ${C.borderMid}`, cursor: 'pointer' }}>
+                  <Chk size={15} check={allPesertaAssignmentsSelected} /> {allPesertaAssignmentsSelected ? 'Batal Semua' : 'Pilih Semua'}
+                </button>
+              )}
+              {selectedPesertaAssignments > 0 && (
+                <button onClick={deleteSelectedAssignments} disabled={deletingAssignments} style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: '#dc2626', color: '#fff', fontSize: '12px', fontWeight: 700, padding: '8px 12px', borderRadius: '10px', border: 'none', cursor: 'pointer', opacity: deletingAssignments ? 0.65 : 1 }}>
+                  {deletingAssignments ? <Spinner size={13} /> : <Trash2 size={13} strokeWidth={2.5} />} Hapus {selectedPesertaAssignments}
+                </button>
+              )}
+              <button onClick={openAddPeserta} style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: C.green, color: '#fff', fontSize: '12px', fontWeight: 700, padding: '8px 14px', borderRadius: '10px', border: 'none', cursor: 'pointer' }}>
+                <Plus size={13} strokeWidth={2.5} /> Tambah
+              </button>
+            </div>
           </div>
-          <AssignTable list={pesertaList} cols={[{ label: '#' }, { label: 'Nama' }, { label: 'NISN' }, { label: 'Tipe' }, { label: 'Aksi', center: true }]} />
+          <AssignTable selectable list={pesertaList} cols={[{ label: '#' }, { label: 'Nama' }, { label: 'NISN' }, { label: 'Tipe' }, { label: 'Aksi', center: true }]} />
           <Modal open={showAddPeserta} onClose={() => setShowAddPeserta(false)} title="Assign Per Peserta" size="lg">
             <div className="space-y-3">
               <Input placeholder="Cari nama, NISN, atau jalur..." value={search} onChange={e => setSearch(e.target.value)} />

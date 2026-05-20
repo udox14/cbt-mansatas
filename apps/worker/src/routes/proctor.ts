@@ -41,19 +41,48 @@ proctor.get('/sessions', async (c) => {
   if (!user.room_id) return c.json(err('Anda belum di-assign ke ruangan'), 400);
   const examId = c.req.query('exam_id');
   let sql = `
-    SELECT es.id, es.exam_id, es.user_id, es.user_type, es.status, es.cheat_warnings,
-           es.started_at, es.finished_at, es.last_heartbeat, es.device_id, es.is_time_locked,
-           COALESCE(p.nama_lengkap, cu.nama_lengkap) as full_name,
-           COALESCE(p.nisn, cu.nisn) as nisn,
-           COALESCE(p.sesi_tes, '') as sesi_tes,
-           e.title as exam_title,
-           e.duration_minutes,
+    WITH active_tokens AS (
+      SELECT DISTINCT et.exam_id, et.room_id, et.tanggal_tes, et.sesi_tes,
+             e.title as exam_title, e.duration_minutes, r.room_name
+      FROM cbt_exam_tokens et
+      JOIN cbt_exams e ON e.id = et.exam_id
+      JOIN cbt_rooms r ON r.id = et.room_id
+      WHERE et.room_id = ? AND et.is_active = 1 AND e.active_status = 'active'
+    ),
+    participants AS (
+      SELECT t.exam_id, t.room_id, t.tanggal_tes as token_tanggal_tes, t.sesi_tes as token_sesi_tes,
+             t.exam_title, t.duration_minutes, p.id as user_id, 'pendaftar' as user_type,
+             p.nama_lengkap as full_name, p.nisn as nisn, COALESCE(p.sesi_tes, '') as sesi_tes,
+             COALESCE(p.tanggal_tes, '') as tanggal_tes
+      FROM active_tokens t
+      JOIN pendaftar p ON p.ruang_tes = t.room_name
+       AND (t.tanggal_tes = '' OR p.tanggal_tes = t.tanggal_tes)
+       AND (t.sesi_tes = '' OR p.sesi_tes = t.sesi_tes)
+      WHERE UPPER(p.jalur) NOT LIKE '%PRESTASI%'
+
+      UNION ALL
+
+      SELECT t.exam_id, t.room_id, t.tanggal_tes as token_tanggal_tes, t.sesi_tes as token_sesi_tes,
+             t.exam_title, t.duration_minutes, cu.id as user_id, 'cbt_user' as user_type,
+             cu.nama_lengkap as full_name, cu.nisn as nisn, '' as sesi_tes, '' as tanggal_tes
+      FROM active_tokens t
+      JOIN cbt_users cu ON cu.room_id = t.room_id
+       AND cu.role = 'student'
+       AND cu.is_active = 1
+       AND t.tanggal_tes = ''
+       AND t.sesi_tes = ''
+    )
+    SELECT es.id, p.exam_id, p.user_id, p.user_type,
+           COALESCE(es.status, 'not_started') as status,
+           COALESCE(es.cheat_warnings, 0) as cheat_warnings,
+           es.started_at, es.finished_at, es.last_heartbeat, es.device_id,
+           COALESCE(es.is_time_locked, 0) as is_time_locked,
+           p.full_name, p.nisn, p.sesi_tes, p.tanggal_tes,
+           p.exam_title, p.duration_minutes,
            COALESCE(ac.answered_count, 0) as answered_count,
            COALESCE(qc.total_questions, 0) as total_questions
-    FROM cbt_exam_sessions es
-    JOIN cbt_exams e ON e.id = es.exam_id
-    LEFT JOIN pendaftar p ON es.user_id = p.id AND es.user_type = 'pendaftar'
-    LEFT JOIN cbt_users cu ON es.user_id = cu.id AND es.user_type = 'cbt_user'
+    FROM participants p
+    LEFT JOIN cbt_exam_sessions es ON es.exam_id = p.exam_id AND es.user_id = p.user_id AND es.user_type = p.user_type
     LEFT JOIN (
       SELECT session_id, COUNT(*) as answered_count
       FROM cbt_student_answers
@@ -63,19 +92,21 @@ proctor.get('/sessions', async (c) => {
       SELECT exam_id, COUNT(*) as total_questions
       FROM cbt_questions
       GROUP BY exam_id
-    ) qc ON qc.exam_id = es.exam_id
-    WHERE es.room_id = ? AND (p.id IS NOT NULL OR cu.id IS NOT NULL)`;
+    ) qc ON qc.exam_id = p.exam_id
+    WHERE 1 = 1`;
   const params: any[] = [user.room_id];
-  if (examId) { sql += ' AND es.exam_id = ?'; params.push(examId); }
+  if (examId) { sql += ' AND p.exam_id = ?'; params.push(examId); }
   sql += ' ORDER BY full_name';
   const { results } = await c.env.DB.prepare(sql).bind(...params).all();
   const enriched = results.map((s: any) => {
-    const diff = Date.now() - new Date(s.last_heartbeat).getTime();
+    const hasStarted = !!s.id;
+    const diff = hasStarted ? Date.now() - new Date(s.last_heartbeat).getTime() : Number.POSITIVE_INFINITY;
     let live_status = 'offline';
-    if (s.status === 'submitted' || s.status === 'force_submitted') live_status = 'selesai';
+    if (!hasStarted) live_status = 'belum_mulai';
+    else if (s.status === 'submitted' || s.status === 'force_submitted') live_status = 'selesai';
     else if (s.is_time_locked) live_status = 'dikunci';
     else if (diff < 30000) live_status = 'online';
-    return { ...s, live_status };
+    return { ...s, has_started: hasStarted, live_status };
   });
   return c.json(ok(enriched));
 });

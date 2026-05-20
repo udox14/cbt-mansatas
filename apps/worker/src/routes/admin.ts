@@ -596,6 +596,43 @@ admin.post('/exams/:examId/tokens/generate', async (c) => {
 // R2 UPLOAD
 // ══════════════════════════════════════════════════════════════
 
+admin.post('/exams/:examId/tokens/set-code', async (c) => {
+  const examId = c.req.param('examId');
+  const body = await c.req.json<{ token_code?: string }>();
+  const tokenCode = (body.token_code || '').trim().toUpperCase();
+  if (!/^[A-Z0-9]{4,20}$/.test(tokenCode)) {
+    return c.json(err('Token manual harus 4-20 karakter, hanya huruf dan angka'), 400);
+  }
+
+  const targetRooms = (await c.env.DB.prepare('SELECT id FROM cbt_rooms').all()).results.map((r: any) => r.id);
+  if (!targetRooms.length) return c.json(err('Belum ada ruangan'), 400);
+
+  const targetGroups = (await c.env.DB.prepare(
+    `SELECT DISTINCT tanggal_tes, sesi_tes
+     FROM pendaftar
+     WHERE tanggal_tes IS NOT NULL AND tanggal_tes != ''
+       AND sesi_tes IS NOT NULL AND sesi_tes != ''
+       AND ${EXCLUDE_JALUR_COND}
+     ORDER BY tanggal_tes, sesi_tes`
+  ).all()).results.map((g: any) => ({ tanggal_tes: g.tanggal_tes || '', sesi_tes: g.sesi_tes || '' }));
+
+  const effectiveGroups = targetGroups.length ? targetGroups : [{ tanggal_tes: '', sesi_tes: '' }];
+  const stmts = [];
+  for (const rid of targetRooms) {
+    for (const g of effectiveGroups) {
+      stmts.push(
+        c.env.DB.prepare(
+          `INSERT OR REPLACE INTO cbt_exam_tokens
+           (id, exam_id, room_id, tanggal_tes, sesi_tes, token_code, is_active, created_at)
+           VALUES (?,?,?,?,?,?,1,datetime('now'))`
+        ).bind(newId(), examId, rid, g.tanggal_tes, g.sesi_tes, tokenCode)
+      );
+    }
+  }
+  for (let i = 0; i < stmts.length; i += 100) { await c.env.DB.batch(stmts.slice(i, i + 100)); }
+  return c.json(ok({ updated: stmts.length, token_code: tokenCode }, `Token diset menjadi ${tokenCode}`));
+});
+
 admin.post('/upload', async (c) => {
   const formData = await c.req.formData();
   const file = formData.get('file') as unknown as File;
@@ -764,6 +801,18 @@ admin.post('/exams/:examId/assignments/group', async (c) => {
   );
   for (let i = 0; i < stmts.length; i += 100) await c.env.DB.batch(stmts.slice(i, i + 100));
   return c.json(ok({ added: groups.length }, `${groups.length} kelompok tes di-assign`));
+});
+
+admin.post('/exams/:examId/assignments/batch-delete', async (c) => {
+  const examId = c.req.param('examId');
+  const { ids } = await c.req.json<{ ids: string[] }>();
+  const cleanIds = Array.from(new Set((ids || []).filter(Boolean)));
+  if (!cleanIds.length) return c.json(err('Pilih minimal 1 assignment'), 400);
+  const stmts = cleanIds.map(id =>
+    c.env.DB.prepare('DELETE FROM cbt_exam_assignments WHERE id=? AND exam_id=?').bind(id, examId)
+  );
+  for (let i = 0; i < stmts.length; i += 100) await c.env.DB.batch(stmts.slice(i, i + 100));
+  return c.json(ok({ deleted: cleanIds.length }, `${cleanIds.length} assignment dihapus`));
 });
 
 admin.delete('/exams/:examId/assignments/:id', async (c) => {

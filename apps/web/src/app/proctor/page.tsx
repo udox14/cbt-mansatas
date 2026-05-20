@@ -49,6 +49,7 @@ function ProctorContent() {
   const [sessions, setSessions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterExam, setFilterExam] = useState('all');
+  const [filterStart, setFilterStart] = useState<'all' | 'started' | 'not_started'>('all');
   const [resetTarget, setResetTarget] = useState<any>(null);
   const [unlockTarget, setUnlockTarget] = useState<any>(null);
   const [forceTarget, setForceTarget] = useState<any>(null);
@@ -117,13 +118,19 @@ function ProctorContent() {
   if (authLoading || loading) return <LoadingScreen />;
   if (!user) return null;
 
-  // Filter by exam
-  const filtered = filterExam === 'all' ? sessions : sessions.filter((s: any) => s.exam_id === filterExam);
+  // Filter by exam and start status
+  const filteredByExam = filterExam === 'all' ? sessions : sessions.filter((s: any) => s.exam_id === filterExam);
+  const filtered = filteredByExam.filter((s: any) => {
+    if (filterStart === 'started') return s.has_started;
+    if (filterStart === 'not_started') return !s.has_started;
+    return true;
+  });
 
   const online   = filtered.filter((s: any) => s.live_status === 'online').length;
   const finished = filtered.filter((s: any) => s.live_status === 'selesai').length;
   const locked   = filtered.filter((s: any) => s.live_status === 'dikunci').length;
-  const offline  = filtered.length - online - finished - locked;
+  const notStarted = filtered.filter((s: any) => s.live_status === 'belum_mulai').length;
+  const offline  = filtered.length - online - finished - locked - notStarted;
 
   // Unique exams from sessions
   const examOptions = Array.from(new Map(sessions.map((s: any) => [s.exam_id, s.exam_title])).entries());
@@ -131,6 +138,7 @@ function ProctorContent() {
   const stats = [
     { n: online,   label: 'Online',  icon: Wifi,         color: C.green,    bg: C.greenLight  },
     { n: offline,  label: 'Offline', icon: WifiOff,      color: '#dc2626',  bg: '#fef2f2'     },
+    { n: notStarted, label: 'Belum Mulai', icon: Clock,  color: C.textMuted, bg: '#f1f1f0'     },
     { n: locked,   label: 'Dikunci', icon: Lock,         color: '#b45309',  bg: '#fffbeb',    pulse: locked > 0 && newLockAlert },
     { n: finished, label: 'Selesai', icon: CheckCircle2, color: '#6b7c6e',  bg: '#f1f1f0'     },
   ];
@@ -203,7 +211,7 @@ function ProctorContent() {
         )}
 
         {/* STATS */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '10px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(112px,1fr))', gap: '10px' }}>
           {stats.map(s => (
             <div key={s.label} style={{ background: C.white, border: `1.5px solid ${(s as any).pulse ? '#dc2626' : C.borderMid}`, borderRadius: '14px', padding: '14px', textAlign: 'center', transition: 'border-color 0.3s' }}>
               <div style={{ width: '32px', height: '32px', borderRadius: '10px', background: s.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 8px' }}>
@@ -219,13 +227,21 @@ function ProctorContent() {
         <section>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px', gap: '10px', flexWrap: 'wrap' }}>
             <p style={{ color: C.textMid, fontSize: '11px', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Monitoring Peserta ({filtered.length})</p>
-            {examOptions.length > 1 && (
-              <select value={filterExam} onChange={e => setFilterExam(e.target.value)}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px', flexWrap: 'wrap' }}>
+              <select value={filterStart} onChange={e => setFilterStart(e.target.value as any)}
                 style={{ fontSize: '11.5px', fontWeight: 600, padding: '5px 12px', border: `1.5px solid ${C.borderMid}`, borderRadius: '8px', background: C.white, color: C.textMid, cursor: 'pointer' }}>
-                <option value="all">Semua Ujian</option>
-                {examOptions.map(([id, title]) => <option key={id} value={id}>{title as string}</option>)}
+                <option value="all">Semua Status</option>
+                <option value="started">Sudah Mulai</option>
+                <option value="not_started">Belum Mulai</option>
               </select>
-            )}
+              {examOptions.length > 1 && (
+                <select value={filterExam} onChange={e => setFilterExam(e.target.value)}
+                  style={{ fontSize: '11.5px', fontWeight: 600, padding: '5px 12px', border: `1.5px solid ${C.borderMid}`, borderRadius: '8px', background: C.white, color: C.textMid, cursor: 'pointer' }}>
+                  <option value="all">Semua Ujian</option>
+                  {examOptions.map(([id, title]) => <option key={id} value={id}>{title as string}</option>)}
+                </select>
+              )}
+            </div>
           </div>
 
           {filtered.length === 0
@@ -242,26 +258,28 @@ function ProctorContent() {
                   </thead>
                   <tbody>
                     {filtered.map((s: any, i: number) => {
+                      const hasStarted = !!s.has_started;
                       const isOnline  = s.live_status === 'online';
                       const isDone    = s.live_status === 'selesai';
                       const isLocked  = s.live_status === 'dikunci';
+                      const isNotStarted = s.live_status === 'belum_mulai';
                       // #4: Sisa waktu
                       const rem = (!isDone && s.started_at && s.duration_minutes)
                         ? getRemainingTime(s.started_at, s.duration_minutes)
                         : null;
                       return (
-                        <tr key={s.id} style={{ borderBottom: i < filtered.length - 1 ? `1px solid ${C.borderLight}` : 'none', background: isLocked ? '#fffbeb' : 'transparent' }}>
+                        <tr key={s.id || `${s.exam_id}-${s.user_type}-${s.user_id}`} style={{ borderBottom: i < filtered.length - 1 ? `1px solid ${C.borderLight}` : 'none', background: isLocked ? '#fffbeb' : isNotStarted ? '#f7f8f7' : 'transparent' }}>
                           <td style={{ padding: '10px 14px' }}>
-                            <p style={{ color: C.text, fontWeight: 700 }}>{s.full_name}</p>
+                            <p style={{ color: isNotStarted ? C.textMuted : C.text, fontWeight: 700 }}>{s.full_name}</p>
                             <p style={{ color: C.textFaint, fontSize: '10px', marginTop: '1px', fontFamily: 'monospace' }}>{s.nisn}</p>
                           </td>
                           <td style={{ padding: '10px 14px', textAlign: 'center' }}>
                             <span style={{
-                              background: isDone ? '#f1f1f0' : isLocked ? '#fffbeb' : isOnline ? C.greenLight : '#fef2f2',
-                              color: isDone ? '#6b7c6e' : isLocked ? '#b45309' : isOnline ? '#2d6644' : '#dc2626',
+                              background: isNotStarted ? '#f1f1f0' : isDone ? '#f1f1f0' : isLocked ? '#fffbeb' : isOnline ? C.greenLight : '#fef2f2',
+                              color: isNotStarted ? C.textMuted : isDone ? '#6b7c6e' : isLocked ? '#b45309' : isOnline ? '#2d6644' : '#dc2626',
                               fontSize: '10px', fontWeight: 700, padding: '3px 9px', borderRadius: '999px',
                             }}>
-                              {isDone ? 'Selesai' : isLocked ? '🔒 Dikunci' : isOnline ? 'Online' : 'Offline'}
+                              {isNotStarted ? 'Belum Mulai' : isDone ? 'Selesai' : isLocked ? '🔒 Dikunci' : isOnline ? 'Online' : 'Offline'}
                             </span>
                           </td>
                           <td style={{ padding: '10px 14px', textAlign: 'center', color: C.textMuted, fontFamily: 'monospace', fontWeight: 600 }}>{s.answered_count}/{s.total_questions}</td>
@@ -273,8 +291,8 @@ function ProctorContent() {
                           <td style={{ padding: '10px 14px', textAlign: 'center' }}>
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', flexWrap: 'wrap' }}>
                               {/* Log pelanggaran */}
-                              <button onClick={() => openLog(s)}
-                                style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', color: '#1a5fa8', fontSize: '11px', fontWeight: 700, background: '#e0f0ff', border: '1.5px solid #bfdbfe', borderRadius: '8px', padding: '4px 8px', cursor: 'pointer' }}
+                              <button onClick={() => hasStarted && openLog(s)} disabled={!hasStarted}
+                                style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', color: hasStarted ? '#1a5fa8' : C.textFaint, fontSize: '11px', fontWeight: 700, background: hasStarted ? '#e0f0ff' : '#f1f1f0', border: `1.5px solid ${hasStarted ? '#bfdbfe' : C.borderLight}`, borderRadius: '8px', padding: '4px 8px', cursor: hasStarted ? 'pointer' : 'not-allowed' }}
                                 title="Lihat log pelanggaran">
                                 <ClipboardList size={11} strokeWidth={2.5} />
                                 {s.cheat_warnings > 0 ? s.cheat_warnings : ''}
@@ -286,14 +304,14 @@ function ProctorContent() {
                                 </button>
                               )}
                               {/* #10: Force submit */}
-                              {!isDone && (
+                              {hasStarted && !isDone && (
                                 <button onClick={() => setForceTarget(s)} style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', color: '#dc2626', fontSize: '11px', fontWeight: 700, background: '#fef2f2', border: '1.5px solid #fecaca', borderRadius: '8px', padding: '4px 8px', cursor: 'pointer' }}
                                   title="Paksa kumpulkan ujian">
                                   <Send size={10} strokeWidth={2.5} />
                                 </button>
                               )}
                               {/* #2: Rename Reset → Ganti Perangkat */}
-                              {!isDone && !isLocked && (
+                              {hasStarted && !isDone && !isLocked && (
                                 <button onClick={() => setResetTarget(s)} style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', color: C.green, fontSize: '11px', fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer' }}
                                   title="Reset jika peserta ganti perangkat">
                                   <RefreshCw size={11} strokeWidth={2.5} />
