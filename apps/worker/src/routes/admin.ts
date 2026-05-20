@@ -417,7 +417,7 @@ admin.post('/exams', async (c) => {
   const cheatLimit = Number(b.cheat_limit ?? 3);
   if (!Number.isInteger(cheatLimit) || cheatLimit < 1 || cheatLimit > 50)
     return c.json(err('Cheat limit harus antara 1–50'), 400);
-  if (b.cheat_action && !['lock', 'auto_submit'].includes(b.cheat_action))
+  if (b.cheat_action && b.cheat_action !== 'lock')
     return c.json(err('Cheat action tidak valid'), 400);
   if (b.active_status && !['draft', 'active', 'finished'].includes(b.active_status))
     return c.json(err('Status tidak valid'), 400);
@@ -432,7 +432,7 @@ admin.post('/exams', async (c) => {
     b.rules_text || null, b.completion_message || 'Ujian telah selesai. Terima kasih.',
     b.is_score_visible ? 1 : 0, b.randomize_questions ? 1 : 0,
     b.randomize_options ? 1 : 0, b.active_status || 'draft', b.passing_score || 0, user.sub,
-    b.target_jalur || null, cheatLimit, b.cheat_action || 'lock', b.enforce_fullscreen ? 1 : 0
+    b.target_jalur || null, cheatLimit, 'lock', b.enforce_fullscreen ? 1 : 0
   ).run();
   return c.json(ok({ id }, 'Ujian dibuat'), 201);
 });
@@ -449,7 +449,7 @@ admin.put('/exams/:id', async (c) => {
   const cheatLimit = Number(b.cheat_limit ?? 3);
   if (!Number.isInteger(cheatLimit) || cheatLimit < 1 || cheatLimit > 50)
     return c.json(err('Cheat limit harus antara 1–50'), 400);
-  if (b.cheat_action && !['lock', 'auto_submit'].includes(b.cheat_action))
+  if (b.cheat_action && b.cheat_action !== 'lock')
     return c.json(err('Cheat action tidak valid'), 400);
   if (b.active_status && !['draft', 'active', 'finished'].includes(b.active_status))
     return c.json(err('Status tidak valid'), 400);
@@ -462,7 +462,7 @@ admin.put('/exams/:id', async (c) => {
   ).bind(b.title.trim(), b.description, duration, b.rules_text, b.completion_message,
     b.is_score_visible ? 1 : 0, b.randomize_questions ? 1 : 0, b.randomize_options ? 1 : 0,
     b.active_status, b.passing_score || 0, b.target_jalur || null,
-    cheatLimit, b.cheat_action || 'lock', b.enforce_fullscreen ? 1 : 0,
+    cheatLimit, 'lock', b.enforce_fullscreen ? 1 : 0,
     now(), c.req.param('id')
   ).run();
   return c.json(ok(null, 'Ujian diperbarui'));

@@ -116,8 +116,8 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
   const [cheatCount, setCheatCount] = useState(0);
   // Konfigurasi anti-cheat dari server
   const [cheatLimit, setCheatLimit] = useState(3);
-  const [cheatAction, setCheatAction] = useState<'lock' | 'auto_submit'>('lock');
   const [enforceFullscreen, setEnforceFullscreen] = useState(false);
+  const [fullscreenSupported, setFullscreenSupported] = useState(true);
   // Bug-1 fix: track fullscreen sebagai React state agar tombol render reaktif
   const [isFullscreen, setIsFullscreen] = useState(false);
   // Toast peringatan
@@ -133,6 +133,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
   const isPageLeavingRef = useRef(false);
   const cheatCountRef = useRef(0);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
+  const fullscreenUnsupportedToastRef = useRef(false);
   // Bug-2 fix: cooldown 4 detik antar-pelanggaran
   const lastViolationTimeRef = useRef(0);
   const VIOLATION_COOLDOWN_MS = 4000;
@@ -158,6 +159,26 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
     setToasts(prev => prev.filter(t => t.id !== id));
   }, []);
 
+  const enterFullscreen = useCallback(async () => {
+    if (!enforceFullscreen || document.fullscreenElement) return true;
+    if (!fullscreenSupported) {
+      if (!fullscreenUnsupportedToastRef.current) {
+        fullscreenUnsupportedToastRef.current = true;
+        addToast('Mode fullscreen tidak didukung di iPhone Safari. Pelanggaran tetap akan dicatat.');
+      }
+      return true;
+    }
+
+    try {
+      await document.documentElement.requestFullscreen();
+      setIsFullscreen(true);
+      return true;
+    } catch {
+      addToast('Klik tombol "Masuk Fullscreen" untuk melanjutkan ujian.');
+      return false;
+    }
+  }, [enforceFullscreen, fullscreenSupported, addToast]);
+
   // Load questions + saved answers + config anti-cheat
   useEffect(() => {
     const saved = localStorage.getItem(`cbt_font_${sessionId}`);
@@ -180,11 +201,16 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
         if (pos) setCurrent(parseInt(pos) || 0);
         // Konfigurasi anti-cheat
         const limit = r.data.cheat_limit ?? 3;
-        const action = (r.data.cheat_action ?? 'lock') as 'lock' | 'auto_submit';
         const fs = !!r.data.enforce_fullscreen;
+        const supportsFs = !!document.fullscreenEnabled && typeof document.documentElement.requestFullscreen === 'function';
         setCheatLimit(limit);
-        setCheatAction(action);
         setEnforceFullscreen(fs);
+        setFullscreenSupported(supportsFs);
+        setIsFullscreen(!!document.fullscreenElement);
+        if (fs && !supportsFs && !fullscreenUnsupportedToastRef.current) {
+          fullscreenUnsupportedToastRef.current = true;
+          addToast('Mode fullscreen tidak didukung di iPhone Safari. Pelanggaran tetap akan dicatat.');
+        }
 
         // ── Bug-1 fix: restore cheat state dari server saat resume ──
         // Jika sesi sedang dikunci karena cheat (bukan waktu habis),
@@ -192,7 +218,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
         const warnings = r.data.cheat_warnings ?? 0;
         cheatCountRef.current = warnings;
         setCheatCount(warnings);
-        if ((r.data.cheat_locked || r.data.is_time_locked) && action === 'lock') {
+        if (r.data.cheat_locked || r.data.is_time_locked) {
           // Dikunci karena pelanggaran — bisa dibuka proktor
           isCheatLockedRef.current = true;
           submittedRef.current = false; // jangan auto-submit!
@@ -200,8 +226,10 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
         }
 
         // Minta fullscreen jika diwajibkan
-        if (fs && document.fullscreenEnabled && !document.fullscreenElement) {
-          document.documentElement.requestFullscreen().catch(() => {});
+        if (fs && supportsFs && !document.fullscreenElement) {
+          document.documentElement.requestFullscreen()
+            .then(() => setIsFullscreen(true))
+            .catch(() => {});
         }
       }
       setLoading(false);
@@ -301,19 +329,12 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
     const actionTaken = r.data?.action_taken;
     const remaining = limit - n;
 
-    if (actionTaken === 'auto_submit') {
-      // 🔔 Alarm dikumpulkan paksa
+    if (actionTaken === 'lock') {
+      // Alarm sesi dikunci.
       playAlarm('locked');
-      setLockedMsg(`${limit}x pelanggaran — ujian otomatis dikumpulkan.`);
-      submittedRef.current = true;
-      await handleSubmit(true);
-    } else if (actionTaken === 'lock') {
-      // 🔔 Alarm sesi dikunci — gunakan isCheatLockedRef, BUKAN submittedRef
-      // Bug-2 fix: langsung kunci UI tanpa menunggu refresh/heartbeat
-      playAlarm('locked');
-      isCheatLockedRef.current = true; // bisa dipulihkan oleh proktor
-      submittedRef.current = false;    // JANGAN set true — ini bukan submit
-      setLockedMsg(`${limit}x pelanggaran — sesi dikunci. Hubungi pengawas untuk melanjutkan.`);
+      setLockedMsg(`${limit}x pelanggaran - sesi dikunci. Hubungi pengawas untuk melanjutkan.`);
+      isCheatLockedRef.current = true;
+      submittedRef.current = false;
     } else {
       // 🔔 Alarm peringatan (makin keras setiap pelanggaran)
       playAlarm('warning', n);
@@ -331,8 +352,12 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
         // Re-acquire wake lock
         if (!wakeLockRef.current || wakeLockRef.current.released) requestWakeLock();
         // Bug-1 fix: coba masuk fullscreen kembali setelah layar nyala
-        if (enforceFullscreen && document.fullscreenEnabled && !document.fullscreenElement) {
-          setTimeout(() => document.documentElement.requestFullscreen().catch(() => {}), 300);
+        if (enforceFullscreen && fullscreenSupported && !document.fullscreenElement) {
+          setTimeout(() => {
+            document.documentElement.requestFullscreen()
+              .then(() => setIsFullscreen(true))
+              .catch(() => {});
+          }, 300);
         }
       }
       if (document.hidden && !submittedRef.current && !isCheatLockedRef.current && !isPageLeavingRef.current) {
@@ -358,8 +383,12 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
     const onFocus = () => {
       if (!submittedRef.current) {
         if (!wakeLockRef.current || wakeLockRef.current.released) requestWakeLock();
-        if (enforceFullscreen && document.fullscreenEnabled && !document.fullscreenElement) {
-          setTimeout(() => document.documentElement.requestFullscreen().catch(() => {}), 300);
+        if (enforceFullscreen && fullscreenSupported && !document.fullscreenElement) {
+          setTimeout(() => {
+            document.documentElement.requestFullscreen()
+              .then(() => setIsFullscreen(true))
+              .catch(() => {});
+          }, 300);
         }
       }
     };
@@ -368,7 +397,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
     const fsChange = () => {
       // Bug-1 fix: update React state saat fullscreen berubah
       setIsFullscreen(!!document.fullscreenElement);
-      if (!document.fullscreenElement && !submittedRef.current && !isCheatLockedRef.current && enforceFullscreen) {
+      if (!document.fullscreenElement && !submittedRef.current && !isCheatLockedRef.current && enforceFullscreen && fullscreenSupported) {
         reportViolation('fullscreen_exit');
       }
     };
@@ -392,7 +421,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
       window.removeEventListener('beforeunload', onBeforeUnload);
       window.removeEventListener('focus', onFocus);
     };
-  }, [enforceFullscreen, reportViolation, requestWakeLock]);
+  }, [enforceFullscreen, fullscreenSupported, reportViolation, requestWakeLock]);
 
 
   const setAnswer = useCallback((qId: string, update: Partial<Answer>) => {
@@ -408,16 +437,18 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
     });
   }, [sessionId]);
 
-  const goTo = useCallback((i: number) => {
+  const goTo = useCallback(async (i: number) => {
+    if (!(await enterFullscreen())) return;
     setCurrent(i);
     setShowGrid(false);
     localStorage.setItem(`cbt_pos_${sessionId}`, String(i));
     window.scrollTo(0, 0);
-  }, [sessionId]);
+  }, [sessionId, enterFullscreen]);
 
   const handleSubmit = useCallback(async (force = false) => {
     if (isCheatLockedRef.current) return;
     if (submittedRef.current && !force) return;
+    if (!force && !(await enterFullscreen())) return;
     submittedRef.current = true;
     setSubmitting(true);
     setShowConfirm(false);
@@ -435,7 +466,17 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
     localStorage.removeItem(`cbt_answers_${sessionId}`);
     localStorage.removeItem(`cbt_pos_${sessionId}`);
     onFinish(r.data || {});
-  }, [sessionId, onFinish]);
+  }, [sessionId, onFinish, enterFullscreen]);
+
+  const openGrid = useCallback(async () => {
+    if (!(await enterFullscreen())) return;
+    setShowGrid(true);
+  }, [enterFullscreen]);
+
+  const openConfirm = useCallback(async () => {
+    if (!(await enterFullscreen())) return;
+    setShowConfirm(true);
+  }, [enterFullscreen]);
 
   const changeFontSize = (d: number) => {
     const n = Math.max(12, Math.min(24, fontSize + d));
@@ -458,6 +499,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
   const ss = timeLeft % 60;
   const urgent = timeLeft < 300;
   const isLast = current === questions.length - 1;
+  const needsFullscreen = enforceFullscreen && fullscreenSupported && !isFullscreen && !submittedRef.current && !isCheatLockedRef.current;
 
   return (
     <div className="no-select" style={{ minHeight: '100vh', background: C.bg, display: 'flex', flexDirection: 'column', fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}>
@@ -479,6 +521,56 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
       )}
 
       {/* ── HEADER ── */}
+      {needsFullscreen && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 60,
+          background: 'rgba(244,246,244,0.92)',
+          backdropFilter: 'blur(7px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: '20px',
+        }}>
+          <div style={{
+            width: '100%', maxWidth: '360px',
+            background: C.white,
+            border: `1.5px solid ${C.greenBorder}`,
+            borderRadius: '22px',
+            boxShadow: '0 18px 45px rgba(30,46,34,0.18)',
+            padding: '22px',
+            textAlign: 'center',
+          }}>
+            <div style={{
+              width: '54px', height: '54px', borderRadius: '18px',
+              background: '#fffbeb',
+              border: '1.5px solid #fde68a',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              margin: '0 auto 14px',
+            }}>
+              <Maximize size={23} strokeWidth={2.5} color="#b45309" />
+            </div>
+            <p style={{ color: C.text, fontSize: '17px', fontWeight: 900, marginBottom: '7px' }}>
+              Mode fullscreen wajib
+            </p>
+            <p style={{ color: C.textMuted, fontSize: '12.5px', lineHeight: 1.55, marginBottom: '16px' }}>
+              Klik tombol di bawah untuk kembali ke fullscreen dan melanjutkan ujian.
+            </p>
+            <button
+              onClick={enterFullscreen}
+              style={{
+                width: '100%',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '7px',
+                background: C.green, color: '#fff',
+                border: 'none', borderRadius: '14px',
+                padding: '13px 16px',
+                fontSize: '13px', fontWeight: 800,
+                cursor: 'pointer',
+              }}
+            >
+              <Maximize size={14} strokeWidth={2.5} /> Masuk Fullscreen
+            </button>
+          </div>
+        </div>
+      )}
+
       <header style={{ position: 'sticky', top: toasts.length > 0 ? 'auto' : 0, zIndex: 40, background: C.white, borderBottom: `1.5px solid ${C.border}` }}>
         <div style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', maxWidth: '680px', margin: '0 auto' }}>
 
@@ -514,9 +606,9 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
               </span>
             )}
             {/* Bug-1 fix: gunakan isFullscreen state (reaktif), bukan document.fullscreenElement langsung */}
-            {enforceFullscreen && !isFullscreen && (
+            {enforceFullscreen && fullscreenSupported && !isFullscreen && (
               <button
-                onClick={() => document.documentElement.requestFullscreen().catch(() => {})}
+                onClick={enterFullscreen}
                 style={{ width: '28px', height: '28px', borderRadius: '8px', background: '#fffbeb', border: '1.5px solid #fde68a', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
                 title="Masuk fullscreen"
               >
@@ -621,7 +713,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
       </main>
 
       {/* ── FLOATING GRID BUTTON ── */}
-      <button onClick={() => setShowGrid(true)}
+      <button onClick={openGrid}
         style={{
           position: 'fixed', bottom: '70px', right: '16px', zIndex: 38,
           width: '48px', height: '48px', borderRadius: '14px',
@@ -644,7 +736,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
           </button>
 
           {isLast ? (
-            <button onClick={() => setShowConfirm(true)}
+            <button onClick={openConfirm}
               style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '10px 20px', borderRadius: '12px', fontSize: '13px', fontWeight: 800, background: '#1a5fa8', color: '#fff', border: 'none', cursor: 'pointer' }}>
               <Send size={13} strokeWidth={2.5} /> Kirim
             </button>
@@ -702,7 +794,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
 
         {/* kirim button */}
         <div style={{ borderTop: `1.5px solid ${C.borderLight}`, paddingTop: '14px' }}>
-          <button onClick={() => { setShowGrid(false); setShowConfirm(true); }}
+          <button onClick={async () => { if (await enterFullscreen()) { setShowGrid(false); setShowConfirm(true); } }}
             style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#1a5fa8', color: '#fff', border: 'none', padding: '13px 18px', borderRadius: '14px', cursor: 'pointer' }}>
             <span style={{ fontSize: '14px', fontWeight: 800 }}>Kirim Ujian</span>
             <span style={{ width: '32px', height: '32px', background: 'rgba(255,255,255,0.15)', borderRadius: '9px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

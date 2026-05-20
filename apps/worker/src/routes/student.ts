@@ -284,7 +284,7 @@ student.get('/sessions/:sessionId/questions', async (c) => {
 
   return c.json(ok({ questions: ordered, answers,
     cheat_limit: examCfg?.cheat_limit ?? 3,
-    cheat_action: examCfg?.cheat_action ?? 'lock',
+    cheat_action: 'lock',
     enforce_fullscreen: !!(examCfg?.enforce_fullscreen),
     // Bug-1 fix: kembalikan state cheat agar ExamRoom bisa restore setelah refresh
     cheat_warnings: session.cheat_warnings ?? 0,
@@ -418,7 +418,6 @@ student.post('/sessions/:sessionId/cheat', async (c) => {
   if (!session) return c.json(err('Sesi tidak ditemukan'), 404);
 
   const cheatLimit  = session.cheat_limit  ?? 3;
-  const cheatAction = session.cheat_action ?? 'lock';
   const newW = (session.cheat_warnings || 0) + 1;
   const limitReached = newW >= cheatLimit;
 
@@ -429,18 +428,10 @@ student.post('/sessions/:sessionId/cheat', async (c) => {
   let actionTaken: string | null = null;
 
   if (limitReached) {
-    if (cheatAction === 'auto_submit') {
-      await c.env.DB.prepare(
-        `UPDATE cbt_exam_sessions SET cheat_warnings=?, status='force_submitted', finished_at=?, last_heartbeat=? WHERE id=? AND user_id=? AND user_type=?`
-      ).bind(newW, now(), now(), sessionId, user.sub, userType).run();
-      try { await computeScore(c.env.DB, sessionId, session.exam_id, session.user_id, session.user_type); } catch {}
-      actionTaken = 'auto_submit';
-    } else {
-      await c.env.DB.prepare(
-        `UPDATE cbt_exam_sessions SET cheat_warnings=?, is_time_locked=1, last_heartbeat=? WHERE id=? AND user_id=? AND user_type=?`
-      ).bind(newW, now(), sessionId, user.sub, userType).run();
-      actionTaken = 'lock';
-    }
+    await c.env.DB.prepare(
+      `UPDATE cbt_exam_sessions SET cheat_warnings=?, is_time_locked=1, last_heartbeat=? WHERE id=? AND user_id=? AND user_type=?`
+    ).bind(newW, now(), sessionId, user.sub, userType).run();
+    actionTaken = 'lock';
   } else {
     await c.env.DB.prepare(
       `UPDATE cbt_exam_sessions SET cheat_warnings=?, last_heartbeat=? WHERE id=? AND user_id=? AND user_type=?`
@@ -452,7 +443,7 @@ student.post('/sessions/:sessionId/cheat', async (c) => {
     limit: cheatLimit,
     action_taken: actionTaken,
     locked: actionTaken === 'lock',
-    force_submitted: actionTaken === 'auto_submit',
+    force_submitted: false,
   }));
 });
 
@@ -518,9 +509,7 @@ function isSessionDurationExpired(session: any) {
 function isLockedByCheat(session: any, exam: any) {
   if (!session?.is_time_locked) return false;
   if (session.status === 'submitted' || session.status === 'force_submitted') return false;
-  const cheatAction = exam?.cheat_action ?? session.cheat_action ?? 'lock';
   const cheatLimit = Number(exam?.cheat_limit ?? session.cheat_limit ?? 3);
-  if (cheatAction !== 'lock') return false;
   return Number(session.cheat_warnings || 0) >= cheatLimit;
 }
 

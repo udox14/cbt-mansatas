@@ -247,7 +247,8 @@ function ExamsPage() {
   const saveExam = async () => {
     if (!editExam?.title) { toast('error', 'Judul wajib'); return; }
     setSaving(true);
-    const r = editExam.id ? await PUT(`/api/admin/exams/${editExam.id}`, editExam) : await POST('/api/admin/exams', editExam);
+    const payload = { ...editExam, cheat_action: 'lock' };
+    const r = editExam.id ? await PUT(`/api/admin/exams/${editExam.id}`, payload) : await POST('/api/admin/exams', payload);
     setSaving(false);
     if (r.success) { toast('success', 'Berhasil'); setEditExam(null); fetchExams(); } else toast('error', r.error || 'Gagal');
   };
@@ -388,11 +389,10 @@ function ExamsPage() {
                 <div>
                   <Select
                     label="Aksi Saat Batas Tercapai"
-                    value={(editExam as any).cheat_action ?? 'lock'}
-                    onChange={e => setEditExam({ ...editExam, cheat_action: e.target.value })}
+                    value="lock"
+                    onChange={() => setEditExam({ ...editExam, cheat_action: 'lock' })}
                     options={[
                       { value: 'lock', label: '🔒 Kunci Sesi (Proktor buka)' },
-                      { value: 'auto_submit', label: '📤 Submit Otomatis' }
                     ]}
                   />
                   <p className="text-[10px] text-amber-700 mt-1">"Kunci" = proktor bisa buka kembali sesi</p>
@@ -522,11 +522,10 @@ function ExamsPage() {
                 <div>
                   <Select
                     label="Aksi Saat Batas Tercapai"
-                    value={(editExam as any).cheat_action ?? 'lock'}
-                    onChange={e => setEditExam({ ...editExam, cheat_action: e.target.value })}
+                    value="lock"
+                    onChange={() => setEditExam({ ...editExam, cheat_action: 'lock' })}
                     options={[
                       { value: 'lock', label: '🔒 Kunci Sesi (Proktor buka)' },
-                      { value: 'auto_submit', label: '📤 Submit Otomatis' }
                     ]}
                   />
                   <p className="text-[10px] text-amber-700 mt-1">"Kunci" = proktor bisa buka kembali sesi</p>
