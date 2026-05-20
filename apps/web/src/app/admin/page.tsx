@@ -813,7 +813,7 @@ function MonitorView({ examId }: { examId: string }) {
   const rooms = Array.from(new Set(sessions.map((s: any) => s.room_name).filter(Boolean))).sort();
   const visible = filterRoom === 'all' ? sessions : sessions.filter((s: any) => s.room_name === filterRoom);
   const online = visible.filter((s: any) => s.status === 'active' && (Date.now() - new Date(s.last_heartbeat).getTime()) < 30000).length;
-  const done = visible.filter((s: any) => s.status === 'submitted' || s.status === 'force_submitted').length;
+  const done = visible.filter((s: any) => s.status === 'submitted').length;
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -843,7 +843,7 @@ function MonitorView({ examId }: { examId: string }) {
             <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '12px', overflow: 'hidden' }}>
               {visible.map((s: any, i: number) => {
                 const isOnline = s.status === 'active' && (Date.now() - new Date(s.last_heartbeat).getTime()) < 30000;
-                const isDone = s.status === 'submitted' || s.status === 'force_submitted';
+                const isDone = s.status === 'submitted';
                 const isLocked = s.is_time_locked && !isDone;
                 return (
                   <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 14px', borderBottom: i < visible.length - 1 ? `1px solid ${C.borderLight}` : 'none' }}>

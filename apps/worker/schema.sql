@@ -102,7 +102,7 @@ CREATE TABLE IF NOT EXISTS cbt_exam_sessions (
   user_type TEXT NOT NULL DEFAULT 'pendaftar' CHECK (user_type IN ('pendaftar', 'cbt_user')),
   room_id TEXT NOT NULL,
   device_id TEXT,
-  status TEXT DEFAULT 'active' CHECK (status IN ('active', 'paused', 'submitted', 'force_submitted')),
+  status TEXT DEFAULT 'active' CHECK (status IN ('active', 'paused', 'submitted')),
   cheat_warnings INTEGER DEFAULT 0,
   question_map TEXT,
   option_map TEXT,

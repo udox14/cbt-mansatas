@@ -204,7 +204,7 @@ student.post('/exams/:examId/validate-token', async (c) => {
 
       if (!existing) throw e; // Error lain, re-throw
 
-      if (existing.status === 'submitted' || existing.status === 'force_submitted')
+      if (existing.status === 'submitted')
         return c.json(err('Anda sudah menyelesaikan ujian ini'), 400);
       if (existing.is_time_locked && !isLockedByCheat(existing, exam))
         return c.json(err('Waktu ujian dikunci oleh pengawas. Hubungi pengawas untuk membuka.'), 403);
@@ -237,7 +237,7 @@ student.get('/sessions/:sessionId/questions', async (c) => {
     'SELECT * FROM cbt_exam_sessions WHERE id=? AND user_id=? AND user_type=?'
   ).bind(c.req.param('sessionId'), user.sub, userType).first<any>();
   if (!session) return c.json(err('Sesi tidak ditemukan'), 404);
-  if (session.status === 'submitted' || session.status === 'force_submitted')
+  if (session.status === 'submitted')
     return c.json(err('Ujian sudah selesai'), 400);
 
   const examCfg = await c.env.DB.prepare(
@@ -309,7 +309,7 @@ student.post('/sessions/:sessionId/answers', async (c) => {
   const session = await c.env.DB.prepare(
     'SELECT id, status, is_time_locked, started_at, exam_id FROM cbt_exam_sessions WHERE id=? AND user_id=? AND user_type=?'
   ).bind(sessionId, user.sub, userType).first<any>();
-  if (!session || session.status === 'submitted' || session.status === 'force_submitted')
+  if (!session || session.status === 'submitted')
     return c.json(err('Sesi tidak aktif'), 400);
   if (session.is_time_locked)
     return c.json(err('Waktu ujian dikunci'), 403);
@@ -322,10 +322,9 @@ student.post('/sessions/:sessionId/answers', async (c) => {
     const startMs = new Date(session.started_at).getTime();
     const durationMs = (exam.duration_minutes + 1) * 60 * 1000; // +1 menit grace period
     if (Date.now() > startMs + durationMs) {
-      // Auto-lock sesi yang sudah habis waktu
       await c.env.DB.prepare(
-        'UPDATE cbt_exam_sessions SET is_time_locked=1 WHERE id=? AND user_id=? AND user_type=?'
-      ).bind(sessionId, user.sub, userType).run();
+        'UPDATE cbt_exam_sessions SET is_time_locked=1, last_heartbeat=? WHERE id=? AND user_id=? AND user_type=?'
+      ).bind(now(), sessionId, user.sub, userType).run();
       return c.json(err('Waktu ujian sudah habis'), 403);
     }
   }
@@ -362,13 +361,15 @@ student.post('/sessions/:sessionId/heartbeat', async (c) => {
     if (jadwal?.sesi_tes && jadwal?.tanggal_tes) {
       const parsed = parseSesiJam(jadwal.sesi_tes);
       if (parsed && cekJadwal(jadwal.tanggal_tes, parsed.jamMulai, parsed.jamSelesai) === 'selesai') {
-        await finalizeSession(c.env.DB, session, [], 'force_submitted');
-        return c.json(ok({ time_locked: true, auto_submitted: true, started_at: session.started_at }, 'Waktu ujian berakhir dan otomatis dikumpulkan'));
+        await c.env.DB.prepare(
+          'UPDATE cbt_exam_sessions SET is_time_locked=1, last_heartbeat=? WHERE id=? AND user_id=? AND user_type=?'
+        ).bind(now(), sessionId, user.sub, userType).run();
+        return c.json(ok({ time_locked: true, auto_submitted: false, started_at: session.started_at }, 'Waktu ujian berakhir dan sesi dikunci'));
       }
     }
   }
 
-  if (session.status === 'submitted' || session.status === 'force_submitted') {
+  if (session.status === 'submitted') {
     return c.json(ok({ time_locked: false, auto_submitted: true, started_at: session.started_at }));
   }
 
@@ -386,8 +387,10 @@ student.post('/sessions/:sessionId/heartbeat', async (c) => {
   }
 
   if (isSessionDurationExpired(session)) {
-    await finalizeSession(c.env.DB, session, [], 'force_submitted');
-    return c.json(ok({ time_locked: true, auto_submitted: true, started_at: session.started_at }, 'Waktu ujian berakhir dan otomatis dikumpulkan'));
+    await c.env.DB.prepare(
+      'UPDATE cbt_exam_sessions SET is_time_locked=1, last_heartbeat=? WHERE id=? AND user_id=? AND user_type=?'
+    ).bind(now(), sessionId, user.sub, userType).run();
+    return c.json(ok({ time_locked: true, auto_submitted: false, started_at: session.started_at }, 'Waktu ujian berakhir dan sesi dikunci'));
   }
 
   if (session.is_time_locked) {
@@ -445,7 +448,6 @@ student.post('/sessions/:sessionId/cheat', async (c) => {
     limit: cheatLimit,
     action_taken: actionTaken,
     locked: actionTaken === 'lock',
-    force_submitted: false,
   }));
 });
 
@@ -463,15 +465,19 @@ student.post('/sessions/:sessionId/submit', async (c) => {
   ).bind(sessionId, user.sub, userType).first<any>();
   if (!session) return c.json(err('Sesi tidak ditemukan'), 404);
 
-  if (session.status !== 'submitted' && session.status !== 'force_submitted') {
+  if (session.status !== 'submitted') {
     const timeExpired = isSessionDurationExpired(session);
-    if (session.is_time_locked && !timeExpired) {
-      // Bug-3 fix: kalau dikunci karena cheat (bukan waktu habis), tolak submit
-      // Proktor harus buka dulu sebelum bisa submit
+    if (session.is_time_locked) {
       return c.json(err('Ujian dikunci karena pelanggaran. Hubungi pengawas untuk melanjutkan.'), 403);
     }
+    if (timeExpired) {
+      await c.env.DB.prepare(
+        'UPDATE cbt_exam_sessions SET is_time_locked=1, last_heartbeat=? WHERE id=? AND user_id=? AND user_type=?'
+      ).bind(now(), sessionId, user.sub, userType).run();
+      return c.json(err('Waktu ujian sudah habis. Hubungi pengawas.'), 403);
+    }
 
-    await finalizeSession(c.env.DB, session, body.answers || [], timeExpired || session.is_time_locked ? 'force_submitted' : 'submitted');
+    await finalizeSession(c.env.DB, session, body.answers || [], 'submitted');
   }
 
   const result = await computeScore(c.env.DB, sessionId, session.exam_id, session.user_id, session.user_type);
@@ -510,17 +516,17 @@ function isSessionDurationExpired(session: any) {
 
 function isLockedByCheat(session: any, exam: any) {
   if (!session?.is_time_locked) return false;
-  if (session.status === 'submitted' || session.status === 'force_submitted') return false;
+  if (session.status === 'submitted') return false;
   const cheatLimit = Number(exam?.cheat_limit ?? session.cheat_limit ?? 3);
   return Number(session.cheat_warnings || 0) >= cheatLimit;
 }
 
-async function finalizeSession(db: D1Database, session: any, answers: any[], status: 'submitted' | 'force_submitted') {
+async function finalizeSession(db: D1Database, session: any, answers: any[], status: 'submitted') {
   await saveAnswers(db, session.id, answers || []);
   await db.prepare(
     `UPDATE cbt_exam_sessions
      SET status=?, finished_at=COALESCE(finished_at, ?), last_heartbeat=?
-     WHERE id=? AND user_id=? AND user_type=? AND status NOT IN ('submitted','force_submitted')`
+     WHERE id=? AND user_id=? AND user_type=? AND status != 'submitted'`
   ).bind(status, now(), now(), session.id, session.user_id, session.user_type).run();
   return computeScore(db, session.id, session.exam_id, session.user_id, session.user_type);
 }

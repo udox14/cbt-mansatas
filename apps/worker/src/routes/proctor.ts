@@ -103,7 +103,7 @@ proctor.get('/sessions', async (c) => {
     const diff = hasStarted ? Date.now() - new Date(s.last_heartbeat).getTime() : Number.POSITIVE_INFINITY;
     let live_status = 'offline';
     if (!hasStarted) live_status = 'belum_mulai';
-    else if (s.status === 'submitted' || s.status === 'force_submitted') live_status = 'selesai';
+    else if (s.status === 'submitted') live_status = 'selesai';
     else if (s.is_time_locked) live_status = 'dikunci';
     else if (diff < 30000) live_status = 'online';
     return { ...s, has_started: hasStarted, live_status };
@@ -131,7 +131,7 @@ proctor.post('/sessions/:id/unlock', async (c) => {
     'SELECT * FROM cbt_exam_sessions WHERE id = ? AND room_id = ?'
   ).bind(c.req.param('id'), user.room_id).first<any>();
   if (!session) return c.json(err('Sesi tidak ditemukan di ruangan Anda'), 404);
-  if (session.status === 'submitted' || session.status === 'force_submitted')
+  if (session.status === 'submitted')
     return c.json(err('Ujian sudah selesai, tidak bisa dibuka'), 400);
 
   let adjustedStartedAt = session.started_at;
@@ -187,10 +187,10 @@ proctor.post('/sessions/:id/force-submit', async (c) => {
      WHERE es.id = ? AND es.room_id = ?`
   ).bind(c.req.param('id'), user.room_id).first<any>();
   if (!session) return c.json(err('Sesi tidak ditemukan di ruangan Anda'), 404);
-  if (session.status === 'submitted' || session.status === 'force_submitted')
+  if (session.status === 'submitted')
     return c.json(err('Ujian sudah selesai'), 400);
   await c.env.DB.prepare(
-    `UPDATE cbt_exam_sessions SET status='force_submitted', finished_at=?, is_time_locked=0, last_heartbeat=? WHERE id=?`
+    `UPDATE cbt_exam_sessions SET status='submitted', finished_at=?, is_time_locked=0, last_heartbeat=? WHERE id=?`
   ).bind(now(), now(), session.id).run();
   // Hitung skor
   try {

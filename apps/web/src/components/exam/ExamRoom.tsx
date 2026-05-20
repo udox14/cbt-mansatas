@@ -17,6 +17,12 @@ interface Question {
 interface Answer { question_id: string; selected_option_id?: string; essay_answer?: string; is_doubtful?: boolean }
 interface ExamRoomProps { sessionId: string; startedAt: string; durationMinutes: number; studentName: string; onFinish: (result: any) => void }
 
+const parseServerTime = (value: string) => {
+  const normalized = value.includes('T') ? value : `${value.replace(' ', 'T')}Z`;
+  const time = new Date(normalized).getTime();
+  return Number.isFinite(time) ? time : Date.now();
+};
+
 const C = {
   bg: '#f4f6f4', white: '#fff', border: '#e0e5e0', borderLight: '#edf0ed', borderMid: '#d4dbd4',
   text: '#1e2e22', textMid: '#4a6655', textMuted: '#8a9e8d', textFaint: '#a8b9aa',
@@ -260,11 +266,14 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
 
   // Countdown timer
   useEffect(() => {
-    const end = new Date(effectiveStartedAt).getTime() + durationMinutes * 60 * 1000;
+    const end = parseServerTime(effectiveStartedAt) + durationMinutes * 60 * 1000;
     const tick = () => {
       const left = Math.max(0, Math.floor((end - Date.now()) / 1000));
       setTimeLeft(left);
-      if (left <= 0 && !submittedRef.current && !isCheatLockedRef.current) handleSubmit(true);
+      if (left <= 0 && !submittedRef.current && !isCheatLockedRef.current) {
+        submittedRef.current = true;
+        setLockedMsg('Waktu ujian Anda telah berakhir. Ujian dikunci oleh sistem.');
+      }
     };
     tick();
     const iv = setInterval(tick, 1000);

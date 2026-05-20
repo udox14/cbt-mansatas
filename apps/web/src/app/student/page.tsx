@@ -25,7 +25,7 @@ const KemenagLogo = () => (
 );
 
 const BadgeStatus = ({ status }: { status: string | null }) => {
-  if (status === 'submitted' || status === 'force_submitted')
+  if (status === 'submitted')
     return <span style={{ background: '#e2ebe3', color: '#2d6644', fontSize: '10px', fontWeight: 700, padding: '4px 10px', borderRadius: '999px', whiteSpace: 'nowrap' }}>Selesai</span>;
   if (status === 'active')
     return <span style={{ background: '#e0f0ff', color: '#1a5fa8', fontSize: '10px', fontWeight: 700, padding: '4px 10px', borderRadius: '999px', whiteSpace: 'nowrap' }}>Berlangsung</span>;
@@ -184,7 +184,7 @@ function StudentContent() {
             {/* ── MOBILE: CARDS ── */}
             <div className="flex flex-col gap-2.5 md:hidden">
               {exams.map(exam => {
-                const done = exam.session_status === 'submitted' || exam.session_status === 'force_submitted';
+                const done = exam.session_status === 'submitted';
                 const active = exam.session_status === 'active';
                 const canStart = !done && (exam.jadwal_status === 'aktif' || exam.jadwal_status === 'no_schedule');
                 const pct = active && exam.total_questions ? Math.round((exam.answered_count || 0) / exam.total_questions * 100) : 0;
@@ -244,7 +244,7 @@ function StudentContent() {
                 </thead>
                 <tbody>
                   {exams.map((exam, i) => {
-                    const done = exam.session_status === 'submitted' || exam.session_status === 'force_submitted';
+                    const done = exam.session_status === 'submitted';
                     const active = exam.session_status === 'active';
                     const canStart = !done && (exam.jadwal_status === 'aktif' || exam.jadwal_status === 'no_schedule');
                     const pct = active && exam.total_questions ? Math.round((exam.answered_count || 0) / exam.total_questions * 100) : 0;
