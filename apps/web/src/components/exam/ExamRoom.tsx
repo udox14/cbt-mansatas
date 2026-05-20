@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { API_BASE_URL, GET, POST } from '@/lib/api';
 import { Modal, Spinner } from '@/components/ui';
-import { Clock, ChevronLeft, ChevronRight, Minus, Plus, Send, AlertTriangle, Maximize } from 'lucide-react';
+import { Clock, ChevronLeft, ChevronRight, Minus, Plus, Send, AlertTriangle, Maximize, Info, RefreshCw } from 'lucide-react';
 import DOMPurify from 'dompurify';
 import { useAntiCheatAlarm } from '@/hooks/useAntiCheatAlarm';
 
@@ -72,6 +72,26 @@ function WatermarkOverlay({ name }: { name: string }) {
 interface CheatToastProps { msg: string; onDismiss: () => void }
 function CheatToast({ msg, onDismiss }: CheatToastProps) {
   const [progress, setProgress] = useState(100);
+  const isFullscreenInfo = msg.toLowerCase().includes('fullscreen tidak didukung');
+  const Icon = isFullscreenInfo ? Info : AlertTriangle;
+  const tone = isFullscreenInfo
+    ? {
+      bg: '#0f2a44',
+      shadow: '0 2px 12px rgba(15,42,68,0.34)',
+      icon: '#bfdbfe',
+      close: '#dbeafe',
+      closeBg: 'rgba(219,234,254,0.14)',
+      progress: '#60a5fa',
+    }
+    : {
+      bg: '#991b1b',
+      shadow: '0 2px 12px rgba(153,27,27,0.35)',
+      icon: '#fca5a5',
+      close: '#fca5a5',
+      closeBg: 'rgba(255,255,255,0.15)',
+      progress: '#fca5a5',
+    };
+
   useEffect(() => {
     const total = 15000;
     const interval = 100;
@@ -87,22 +107,22 @@ function CheatToast({ msg, onDismiss }: CheatToastProps) {
   return (
     <div style={{
       position: 'sticky', top: 0, zIndex: 50,
-      background: '#991b1b',
-      boxShadow: '0 2px 12px rgba(153,27,27,0.35)',
+      background: tone.bg,
+      boxShadow: tone.shadow,
     }}>
       <div style={{ padding: '10px 16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <AlertTriangle size={15} color="#fca5a5" strokeWidth={2.5} style={{ flexShrink: 0 }} />
+        <Icon size={15} color={tone.icon} strokeWidth={2.5} style={{ flexShrink: 0 }} />
         <span style={{ flex: 1, color: '#fff', fontSize: '13px', fontWeight: 700, lineHeight: 1.4 }}>{msg}</span>
         <button
           onClick={onDismiss}
-          style={{ background: 'rgba(255,255,255,0.15)', border: 'none', borderRadius: '6px', color: '#fca5a5', fontSize: '11px', fontWeight: 700, padding: '3px 8px', cursor: 'pointer', flexShrink: 0 }}
+          style={{ background: tone.closeBg, border: 'none', borderRadius: '6px', color: tone.close, fontSize: '11px', fontWeight: 700, padding: '3px 8px', cursor: 'pointer', flexShrink: 0 }}
         >
           Tutup
         </button>
       </div>
       {/* Progress bar countdown */}
       <div style={{ height: '3px', background: 'rgba(255,255,255,0.15)' }}>
-        <div style={{ height: '100%', background: '#fca5a5', width: `${progress}%`, transition: 'width 0.1s linear' }} />
+        <div style={{ height: '100%', background: tone.progress, width: `${progress}%`, transition: 'width 0.1s linear' }} />
       </div>
     </div>
   );
@@ -507,6 +527,11 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
     setShowConfirm(true);
   }, [enterFullscreen]);
 
+  const reloadLockedSession = useCallback(() => {
+    isPageLeavingRef.current = true;
+    window.location.reload();
+  }, []);
+
   const changeFontSize = (d: number) => {
     const n = Math.max(12, Math.min(24, fontSize + d));
     setFontSize(n);
@@ -593,6 +618,27 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
             }}>
               Semua jawaban, navigasi, dan pengiriman ujian sementara diblokir.
             </div>
+            <button
+              onClick={reloadLockedSession}
+              style={{
+                width: '100%',
+                marginTop: '12px',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '7px',
+                background: '#1e3a5f',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '14px',
+                padding: '12px 14px',
+                fontSize: '12.5px',
+                fontWeight: 850,
+                cursor: 'pointer',
+              }}
+            >
+              <RefreshCw size={14} strokeWidth={2.5} /> Muat Ulang Status
+            </button>
+            <p style={{ color: C.textFaint, fontSize: '11px', lineHeight: 1.45, marginTop: '8px' }}>
+              Gunakan tombol ini jika proktor sudah membuka kunci tetapi layar belum berubah.
+            </p>
           </div>
         </div>
       )}
