@@ -15,6 +15,12 @@ const KemenagLogo = () => (
   <img src="/kemenag.png" alt="Kemenag" width={36} height={36} style={{ objectFit: 'contain', flexShrink: 0 }} />
 );
 
+const parseServerTime = (value: string) => {
+  const normalized = value.includes('T') ? value : `${value.replace(' ', 'T')}Z`;
+  const time = new Date(normalized).getTime();
+  return Number.isFinite(time) ? time : Date.now();
+};
+
 // ── Jam real-time ─────────────────────────────────────────────
 function LiveClock() {
   const [time, setTime] = useState('');
@@ -34,7 +40,7 @@ function LiveClock() {
 
 // ── Hitung sisa waktu ─────────────────────────────────────────
 function getRemainingTime(startedAt: string, durationMinutes: number): { text: string; urgent: boolean; expired: boolean } {
-  const endMs = new Date(startedAt).getTime() + durationMinutes * 60 * 1000;
+  const endMs = parseServerTime(startedAt) + durationMinutes * 60 * 1000;
   const leftMs = endMs - Date.now();
   if (leftMs <= 0) return { text: 'Habis', urgent: true, expired: true };
   const m = Math.floor(leftMs / 60000);

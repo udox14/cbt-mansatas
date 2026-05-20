@@ -39,6 +39,12 @@ const C = {
   green: '#2d7a4f', greenLight: '#e2ebe3', greenBorder: '#b5d9c4',
 };
 
+const parseServerTime = (value: string) => {
+  const normalized = value.includes('T') ? value : `${value.replace(' ', 'T')}Z`;
+  const time = new Date(normalized).getTime();
+  return Number.isFinite(time) ? time : Date.now();
+};
+
 // Jalur yang wajib ikut tes — filter langsung via API query param
 const JALUR_TES = 'REGULER';
 
@@ -812,7 +818,7 @@ function MonitorView({ examId }: { examId: string }) {
   useEffect(() => { fetchS(); const iv = setInterval(fetchS, 10000); return () => clearInterval(iv); }, [fetchS]);
   const rooms = Array.from(new Set(sessions.map((s: any) => s.room_name).filter(Boolean))).sort();
   const visible = filterRoom === 'all' ? sessions : sessions.filter((s: any) => s.room_name === filterRoom);
-  const online = visible.filter((s: any) => s.status === 'active' && (Date.now() - new Date(s.last_heartbeat).getTime()) < 30000).length;
+  const online = visible.filter((s: any) => s.status === 'active' && (Date.now() - parseServerTime(s.last_heartbeat)) < 30000).length;
   const done = visible.filter((s: any) => s.status === 'submitted').length;
   return (
     <div className="space-y-3">
@@ -842,7 +848,7 @@ function MonitorView({ examId }: { examId: string }) {
           : (
             <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '12px', overflow: 'hidden' }}>
               {visible.map((s: any, i: number) => {
-                const isOnline = s.status === 'active' && (Date.now() - new Date(s.last_heartbeat).getTime()) < 30000;
+                const isOnline = s.status === 'active' && (Date.now() - parseServerTime(s.last_heartbeat)) < 30000;
                 const isDone = s.status === 'submitted';
                 const isLocked = s.is_time_locked && !isDone;
                 return (
