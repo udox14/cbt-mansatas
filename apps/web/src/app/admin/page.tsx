@@ -368,7 +368,13 @@ function ExamsPage() {
             </div>
             <div><label className="block text-xs font-medium text-gray-500 mb-1">Tata Tertib</label>
               <RichEditor value={editExam.rules_text || ''} onChange={v => setEditExam({ ...editExam, rules_text: v })} minHeight={80} /></div>
-            <Input label="Pesan Selesai" value={editExam.completion_message || ''} onChange={e => setEditExam({ ...editExam, completion_message: e.target.value })} />
+            <Textarea
+              label="Pesan Selesai"
+              value={editExam.completion_message || ''}
+              rows={5}
+              placeholder={'Contoh:\nTerima kasih sudah mengikuti ujian.\n- Tetap duduk di tempat\n- Tunggu instruksi proktor'}
+              onChange={e => setEditExam({ ...editExam, completion_message: e.target.value })}
+            />
             <div className="flex flex-wrap gap-4 text-xs text-gray-600">
               {[{ k: 'randomize_questions', l: 'Acak Soal' }, { k: 'randomize_options', l: 'Acak Opsi' }, { k: 'is_score_visible', l: 'Tampilkan Skor' }, { k: 'enforce_fullscreen', l: 'Wajib Fullscreen' }].map(c => (
                 <label key={c.k} className="flex items-center gap-1.5 cursor-pointer">
@@ -501,7 +507,13 @@ function ExamsPage() {
             </div>
             <div><label className="block text-xs font-medium text-gray-500 mb-1">Tata Tertib</label>
               <RichEditor value={editExam.rules_text || ''} onChange={v => setEditExam({ ...editExam, rules_text: v })} minHeight={80} /></div>
-            <Input label="Pesan Selesai" value={editExam.completion_message || ''} onChange={e => setEditExam({ ...editExam, completion_message: e.target.value })} />
+            <Textarea
+              label="Pesan Selesai"
+              value={editExam.completion_message || ''}
+              rows={5}
+              placeholder={'Contoh:\nTerima kasih sudah mengikuti ujian.\n- Tetap duduk di tempat\n- Tunggu instruksi proktor'}
+              onChange={e => setEditExam({ ...editExam, completion_message: e.target.value })}
+            />
             <div className="flex flex-wrap gap-4 text-xs text-gray-600">
               {[{ k: 'randomize_questions', l: 'Acak Soal' }, { k: 'randomize_options', l: 'Acak Opsi' }, { k: 'is_score_visible', l: 'Tampilkan Skor' }, { k: 'enforce_fullscreen', l: 'Wajib Fullscreen' }].map(c => (
                 <label key={c.k} className="flex items-center gap-1.5 cursor-pointer">
@@ -851,6 +863,7 @@ function MonitorView({ examId }: { examId: string }) {
                 const isOnline = s.status === 'active' && (Date.now() - parseServerTime(s.last_heartbeat)) < 30000;
                 const isDone = s.status === 'submitted';
                 const isLocked = s.is_time_locked && !isDone;
+                const violationTotal = Number(s.cheat_log_count || s.cheat_warnings || 0);
                 return (
                   <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 14px', borderBottom: i < visible.length - 1 ? `1px solid ${C.borderLight}` : 'none' }}>
                     <span style={{ flex: 1, color: C.text, fontSize: '12.5px', fontWeight: 700 }}>{s.full_name}</span>
@@ -858,8 +871,8 @@ function MonitorView({ examId }: { examId: string }) {
                     <span style={{ background: isDone ? '#f1f1f0' : isLocked ? '#fef3c7' : isOnline ? C.greenLight : '#fef2f2', color: isDone ? '#6b7c6e' : isLocked ? '#92400e' : isOnline ? '#2d6644' : '#dc2626', fontSize: '10px', fontWeight: 700, padding: '3px 9px', borderRadius: '999px' }}>
                       {isDone ? 'Selesai' : isLocked ? '🔒 Dikunci' : isOnline ? 'Online' : 'Offline'}
                     </span>
-                    <span style={{ fontSize: '11px', fontWeight: s.cheat_warnings > 0 ? 700 : 400, color: s.cheat_warnings > 0 ? '#dc2626' : C.textFaint }}>
-                      {s.cheat_warnings} ⚠
+                    <span style={{ fontSize: '11px', fontWeight: violationTotal > 0 ? 700 : 400, color: violationTotal > 0 ? '#dc2626' : C.textFaint }}>
+                      {violationTotal} ⚠
                     </span>
                   </div>
                 );

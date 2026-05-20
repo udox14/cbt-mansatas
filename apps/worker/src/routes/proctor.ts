@@ -12,6 +12,17 @@ const VIOLATION_LABELS: Record<string, string> = {
   fullscreen_exit:  'Keluar Fullscreen',
 };
 
+function parseServerTime(value?: string | null) {
+  if (!value) return NaN;
+  const normalized = value.includes('T') ? value : `${value.replace(' ', 'T')}Z`;
+  return new Date(normalized).getTime();
+}
+
+function toIsoServerTime(value?: string | null) {
+  const time = parseServerTime(value);
+  return Number.isFinite(time) ? new Date(time).toISOString() : value;
+}
+
 const proctor = new Hono<{ Bindings: Env }>();
 proctor.use('*', authMiddleware, requireRole('proctor'));
 
@@ -80,7 +91,8 @@ proctor.get('/sessions', async (c) => {
            p.full_name, p.nisn, p.sesi_tes, p.tanggal_tes,
            p.exam_title, p.duration_minutes,
            COALESCE(ac.answered_count, 0) as answered_count,
-           COALESCE(qc.total_questions, 0) as total_questions
+           COALESCE(qc.total_questions, 0) as total_questions,
+           COALESCE(cl.cheat_log_count, 0) as cheat_log_count
     FROM participants p
     LEFT JOIN cbt_exam_sessions es ON es.exam_id = p.exam_id AND es.user_id = p.user_id AND es.user_type = p.user_type
     LEFT JOIN (
@@ -93,6 +105,11 @@ proctor.get('/sessions', async (c) => {
       FROM cbt_questions
       GROUP BY exam_id
     ) qc ON qc.exam_id = p.exam_id
+    LEFT JOIN (
+      SELECT session_id, COUNT(*) as cheat_log_count
+      FROM cbt_cheat_logs
+      GROUP BY session_id
+    ) cl ON cl.session_id = es.id
     WHERE 1 = 1`;
   const params: any[] = [user.room_id];
   if (examId) { sql += ' AND p.exam_id = ?'; params.push(examId); }
@@ -100,13 +117,20 @@ proctor.get('/sessions', async (c) => {
   const { results } = await c.env.DB.prepare(sql).bind(...params).all();
   const enriched = results.map((s: any) => {
     const hasStarted = !!s.id;
-    const diff = hasStarted ? Date.now() - new Date(s.last_heartbeat).getTime() : Number.POSITIVE_INFINITY;
+    const diff = hasStarted ? Date.now() - parseServerTime(s.last_heartbeat) : Number.POSITIVE_INFINITY;
     let live_status = 'offline';
     if (!hasStarted) live_status = 'belum_mulai';
     else if (s.status === 'submitted') live_status = 'selesai';
     else if (s.is_time_locked) live_status = 'dikunci';
     else if (diff < 30000) live_status = 'online';
-    return { ...s, has_started: hasStarted, live_status };
+    return {
+      ...s,
+      started_at: toIsoServerTime(s.started_at),
+      finished_at: toIsoServerTime(s.finished_at),
+      last_heartbeat: toIsoServerTime(s.last_heartbeat),
+      has_started: hasStarted,
+      live_status,
+    };
   });
   return c.json(ok(enriched));
 });
@@ -140,8 +164,8 @@ proctor.post('/sessions/:id/unlock', async (c) => {
       'SELECT happened_at FROM cbt_cheat_logs WHERE session_id = ? ORDER BY happened_at DESC LIMIT 1'
     ).bind(session.id).first<any>();
 
-    const startedMs = new Date(session.started_at).getTime();
-    const lockedAtMs = latestLock?.happened_at ? new Date(latestLock.happened_at).getTime() : NaN;
+    const startedMs = parseServerTime(session.started_at);
+    const lockedAtMs = parseServerTime(latestLock?.happened_at);
     const unlockedAtMs = Date.now();
     if (Number.isFinite(startedMs) && Number.isFinite(lockedAtMs) && lockedAtMs <= unlockedAtMs) {
       adjustedStartedAt = new Date(startedMs + (unlockedAtMs - lockedAtMs)).toISOString();

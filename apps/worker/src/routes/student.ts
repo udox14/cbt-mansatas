@@ -11,6 +11,12 @@ import { checkRateLimit } from '../utils/ratelimit';
 const student = new Hono<{ Bindings: Env }>();
 student.use('*', authMiddleware, requireRole('student'));
 
+function parseServerTime(value?: string | null) {
+  if (!value) return NaN;
+  const normalized = value.includes('T') ? value : `${value.replace(' ', 'T')}Z`;
+  return new Date(normalized).getTime();
+}
+
 // ── GET daftar ujian aktif ────────────────────────────────────
 student.get('/exams', async (c) => {
   const user = c.get('user');
@@ -181,18 +187,19 @@ student.post('/exams/:examId/validate-token', async (c) => {
   const { questionMap, optionMap } = buildRandomMaps(qData, !!exam.randomize_questions, !!exam.randomize_options);
 
   try {
+    const startedAt = now();
     await c.env.DB.prepare(
-      `INSERT INTO cbt_exam_sessions (id, exam_id, user_id, user_type, room_id, device_id, question_map, option_map, ip_address, user_agent)
-       VALUES (?,?,?,?,?,?,?,?,?,?)`
+      `INSERT INTO cbt_exam_sessions (id, exam_id, user_id, user_type, room_id, device_id, question_map, option_map, started_at, last_heartbeat, ip_address, user_agent)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
     ).bind(sessionId, examId, user.sub, userType, user.room_id, device_id,
-      JSON.stringify(questionMap), JSON.stringify(optionMap),
+      JSON.stringify(questionMap), JSON.stringify(optionMap), startedAt, startedAt,
       c.req.header('CF-Connecting-IP') || '', c.req.header('User-Agent') || ''
     ).run();
 
     return c.json(ok({
       session_id: sessionId, resumed: false,
       question_map: questionMap, option_map: optionMap,
-      started_at: now(), duration_minutes: exam.duration_minutes,
+      started_at: startedAt, duration_minutes: exam.duration_minutes,
     }, 'Ujian dimulai'), 201);
 
   } catch (e: any) {
@@ -319,7 +326,7 @@ student.post('/sessions/:sessionId/answers', async (c) => {
     'SELECT duration_minutes FROM cbt_exams WHERE id=?'
   ).bind(session.exam_id).first<any>();
   if (exam) {
-    const startMs = new Date(session.started_at).getTime();
+    const startMs = parseServerTime(session.started_at);
     const durationMs = (exam.duration_minutes + 1) * 60 * 1000; // +1 menit grace period
     if (Date.now() > startMs + durationMs) {
       await c.env.DB.prepare(
@@ -508,7 +515,7 @@ async function saveAnswers(db: D1Database, sessionId: string, answers: any[]) {
 }
 
 function isSessionDurationExpired(session: any) {
-  const startedAt = new Date(session.started_at).getTime();
+  const startedAt = parseServerTime(session.started_at);
   const durationMinutes = Number(session.duration_minutes || 0);
   if (!Number.isFinite(startedAt) || !durationMinutes) return false;
   return Date.now() >= startedAt + durationMinutes * 60 * 1000;

@@ -273,6 +273,7 @@ function ProctorContent() {
                       const rem = (!isDone && s.started_at && s.duration_minutes)
                         ? getRemainingTime(s.started_at, s.duration_minutes)
                         : null;
+                      const violationTotal = Number(s.cheat_log_count || s.cheat_warnings || 0);
                       return (
                         <tr key={s.id || `${s.exam_id}-${s.user_type}-${s.user_id}`} style={{ borderBottom: i < filtered.length - 1 ? `1px solid ${C.borderLight}` : 'none', background: isLocked ? '#fffbeb' : isNotStarted ? '#f7f8f7' : 'transparent' }}>
                           <td style={{ padding: '10px 14px' }}>
@@ -289,7 +290,7 @@ function ProctorContent() {
                             </span>
                           </td>
                           <td style={{ padding: '10px 14px', textAlign: 'center', color: C.textMuted, fontFamily: 'monospace', fontWeight: 600 }}>{s.answered_count}/{s.total_questions}</td>
-                          <td style={{ padding: '10px 14px', textAlign: 'center', fontWeight: s.cheat_warnings > 0 ? 700 : 400, color: s.cheat_warnings > 0 ? '#dc2626' : C.textFaint }}>{s.cheat_warnings}</td>
+                          <td style={{ padding: '10px 14px', textAlign: 'center', fontWeight: violationTotal > 0 ? 700 : 400, color: violationTotal > 0 ? '#dc2626' : C.textFaint }}>{violationTotal}</td>
                           {/* #4: Sisa waktu */}
                           <td style={{ padding: '10px 14px', textAlign: 'center', fontFamily: 'monospace', fontSize: '11.5px', fontWeight: 700, color: isDone ? C.textFaint : rem?.urgent ? '#dc2626' : C.textMid }}>
                             {isDone ? '—' : rem ? rem.text : '—'}
@@ -301,7 +302,7 @@ function ProctorContent() {
                                 style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', color: hasStarted ? '#1a5fa8' : C.textFaint, fontSize: '11px', fontWeight: 700, background: hasStarted ? '#e0f0ff' : '#f1f1f0', border: `1.5px solid ${hasStarted ? '#bfdbfe' : C.borderLight}`, borderRadius: '8px', padding: '4px 8px', cursor: hasStarted ? 'pointer' : 'not-allowed' }}
                                 title="Lihat log pelanggaran">
                                 <ClipboardList size={11} strokeWidth={2.5} />
-                                {s.cheat_warnings > 0 ? s.cheat_warnings : ''}
+                                {violationTotal > 0 ? violationTotal : ''}
                               </button>
                               {/* #7: Konfirmasi unlock */}
                               {isLocked && (
@@ -347,7 +348,7 @@ function ProctorContent() {
       {/* #7: Confirm Buka Kunci */}
       <Confirm open={!!unlockTarget} onClose={() => setUnlockTarget(null)} onConfirm={handleUnlock}
         title="Buka Kunci Sesi?" danger={false} confirmText="Ya, Buka"
-        message={`Buka kunci sesi ${unlockTarget?.full_name}? (${unlockTarget?.cheat_warnings || 0}x pelanggaran) — Pelanggaran direset ke 0.`} />
+        message={`Buka kunci sesi ${unlockTarget?.full_name}? (${unlockTarget?.cheat_log_count || unlockTarget?.cheat_warnings || 0}x total pelanggaran) — Counter kunci aktif direset ke 0.`} />
 
       {/* #10: Confirm Force Submit */}
       <Confirm open={!!forceTarget} onClose={() => setForceTarget(null)} onConfirm={handleForce}

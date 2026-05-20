@@ -796,11 +796,17 @@ admin.get('/exams/:examId/sessions', async (c) => {
        COALESCE(p.nama_lengkap, cu.nama_lengkap) as full_name,
        COALESCE(p.nisn, cu.nisn) as nisn,
        COALESCE(p.nisn, cu.username) as username,
-       r.room_name
+       r.room_name,
+       COALESCE(cl.cheat_log_count, 0) as cheat_log_count
      FROM cbt_exam_sessions es
      JOIN cbt_rooms r ON r.id = es.room_id
      LEFT JOIN pendaftar p ON es.user_id = p.id AND es.user_type = 'pendaftar'
      LEFT JOIN cbt_users cu ON es.user_id = cu.id AND es.user_type = 'cbt_user'
+     LEFT JOIN (
+       SELECT session_id, COUNT(*) as cheat_log_count
+       FROM cbt_cheat_logs
+       GROUP BY session_id
+     ) cl ON cl.session_id = es.id
      WHERE es.exam_id = ?
      ORDER BY r.room_name, full_name`
   ).bind(c.req.param('examId')).all();

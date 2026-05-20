@@ -64,6 +64,81 @@ const JadwalInfo = ({ exam }: { exam: Exam }) => {
   );
 };
 
+type CompletionBlock =
+  | { type: 'paragraph'; text: string }
+  | { type: 'ul' | 'ol'; items: string[] };
+
+const parseCompletionMessage = (message?: string | null): CompletionBlock[] => {
+  const lines = (message || 'Terima kasih.').split(/\r?\n/);
+  const blocks: CompletionBlock[] = [];
+  let listType: 'ul' | 'ol' | null = null;
+  let listItems: string[] = [];
+  let paragraph: string[] = [];
+
+  const flushParagraph = () => {
+    if (!paragraph.length) return;
+    blocks.push({ type: 'paragraph', text: paragraph.join(' ') });
+    paragraph = [];
+  };
+
+  const flushList = () => {
+    if (!listType || !listItems.length) return;
+    blocks.push({ type: listType, items: listItems });
+    listType = null;
+    listItems = [];
+  };
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) {
+      flushParagraph();
+      flushList();
+      continue;
+    }
+
+    const unordered = line.match(/^[-*]\s+(.+)$/);
+    const ordered = line.match(/^\d+[.)]\s+(.+)$/);
+
+    if (unordered || ordered) {
+      flushParagraph();
+      const nextType = unordered ? 'ul' : 'ol';
+      if (listType && listType !== nextType) flushList();
+      listType = nextType;
+      listItems.push((unordered?.[1] || ordered?.[1] || '').trim());
+      continue;
+    }
+
+    flushList();
+    paragraph.push(line);
+  }
+
+  flushParagraph();
+  flushList();
+  return blocks;
+};
+
+const CompletionMessage = ({ message }: { message?: string | null }) => {
+  const blocks = parseCompletionMessage(message);
+
+  return (
+    <div className="mb-5" style={{ color: '#6b7c6e', fontSize: '13px', lineHeight: 1.65, textAlign: 'left' }}>
+      {blocks.map((block, i) => {
+        if (block.type === 'paragraph') {
+          return <p key={i} style={{ marginBottom: i < blocks.length - 1 ? '8px' : 0, textAlign: blocks.length === 1 ? 'center' : 'left' }}>{block.text}</p>;
+        }
+        const ListTag = block.type;
+        return (
+          <ListTag key={i} style={{ margin: i < blocks.length - 1 ? '0 0 10px 0' : 0, paddingLeft: '20px' }}>
+            {block.items.map((item, idx) => (
+              <li key={`${i}-${idx}`} style={{ marginBottom: idx < block.items.length - 1 ? '5px' : 0 }}>{item}</li>
+            ))}
+          </ListTag>
+        );
+      })}
+    </div>
+  );
+};
+
 function StudentContent() {
   const { user, loading: authLoading, logout } = useAuth('student');
   const [exams, setExams] = useState<Exam[]>([]);
@@ -94,13 +169,13 @@ function StudentContent() {
 
   if (postExam) return (
     <div className="min-h-screen flex items-center justify-center p-4" style={{ background: '#f4f6f4' }}>
-      <div className="w-full max-w-sm text-center" style={{ background: '#fff', border: '1.5px solid #d4dbd4', borderRadius: '20px', padding: '36px 24px' }}>
+      <div className="w-full max-w-md text-center" style={{ background: '#fff', border: '1.5px solid #d4dbd4', borderRadius: '20px', padding: '36px 24px' }}>
         <div className="mx-auto mb-5 flex items-center justify-center rounded-full"
           style={{ width: '56px', height: '56px', background: '#e2ebe3' }}>
           <Check size={24} color="#2d7a4f" strokeWidth={2.5} />
         </div>
         <h2 className="font-black mb-2" style={{ color: '#1e2e22', fontSize: '20px' }}>Ujian Selesai!</h2>
-        <p className="mb-5" style={{ color: '#8a9e8d', fontSize: '13px' }}>{postExam.completion_message || 'Terima kasih.'}</p>
+        <CompletionMessage message={postExam.completion_message} />
         {postExam.score_visible && (
           <div className="rounded-xl p-5 mb-5" style={{ background: '#f4f6f4' }}>
             <div className="font-black" style={{ color: '#2d7a4f', fontSize: '36px' }}>{postExam.score ?? 0}</div>
