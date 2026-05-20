@@ -1842,6 +1842,10 @@ function RoomsPage() {
   const [filterRoomSession, setFilterRoomSession] = useState('');
   const [roomDateOptions, setRoomDateOptions] = useState<string[]>([]);
   const [roomSessionOptions, setRoomSessionOptions] = useState<string[]>([]);
+  const [showRoomForm, setShowRoomForm] = useState(false);
+  const [roomForm, setRoomForm] = useState({ room_name: '', capacity: 40 });
+  const [savingRoom, setSavingRoom] = useState(false);
+  const [confirmDelRoom, setConfirmDelRoom] = useState<Room | null>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -1866,8 +1870,50 @@ function RoomsPage() {
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const syncRooms = async () => { setSyncing(true); const r = await POST('/api/admin/rooms/sync', {}); toast(r.success ? 'success' : 'error', r.message || r.error || 'Gagal'); setSyncing(false); fetchData(); };
-  const assignProctor = async () => { if (!assignModal || !selectedProctor) return; await PUT(`/api/admin/proctors/${selectedProctor}/assign`, { room_id: assignModal.id }); toast('success', 'Berhasil'); setAssignModal(null); setSelectedProctor(''); fetchData(); };
-  const unassignProctor = async (pid: string) => { await PUT(`/api/admin/proctors/${pid}/assign`, { room_id: null }); toast('success', 'Proktor dihapus'); fetchData(); };
+  const openRoomForm = () => { setRoomForm({ room_name: '', capacity: 40 }); setShowRoomForm(true); };
+  const saveRoom = async () => {
+    const roomName = roomForm.room_name.trim();
+    if (!roomName) { toast('error', 'Nama ruangan wajib diisi'); return; }
+    setSavingRoom(true);
+    const r = await POST('/api/admin/rooms', { room_name: roomName, capacity: roomForm.capacity });
+    setSavingRoom(false);
+    if (r.success) {
+      toast('success', r.message || 'Ruangan ditambahkan');
+      setShowRoomForm(false);
+      fetchData();
+    } else {
+      toast('error', r.error || 'Gagal menambah ruangan');
+    }
+  };
+  const deleteRoom = async () => {
+    if (!confirmDelRoom) return;
+    const r = await DEL(`/api/admin/rooms/${confirmDelRoom.id}`);
+    if (r.success) {
+      toast('success', r.message || 'Ruangan dihapus');
+      setConfirmDelRoom(null);
+      if (roomDetail?.id === confirmDelRoom.id) setRoomDetail(null);
+      fetchData();
+    } else {
+      toast('error', r.error || 'Gagal menghapus ruangan');
+    }
+  };
+  const assignProctor = async () => {
+    if (!assignModal || !selectedProctor) return;
+    const r = await PUT(`/api/admin/proctors/${selectedProctor}/assign`, { room_id: assignModal.id });
+    if (r.success) {
+      toast('success', 'Berhasil');
+      setAssignModal(null);
+      setSelectedProctor('');
+      fetchData();
+    } else {
+      toast('error', r.error || 'Gagal assign proktor');
+    }
+  };
+  const unassignProctor = async (pid: string) => {
+    const r = await PUT(`/api/admin/proctors/${pid}/assign`, { room_id: null });
+    toast(r.success ? 'success' : 'error', r.success ? 'Proktor dihapus' : r.error || 'Gagal melepas proktor');
+    if (r.success) fetchData();
+  };
   const unassigned = proctors.filter(p => !p.room_id);
   const roomParticipantKey = useCallback((p: any) => `${p.source}:${p.id}`, []);
 
@@ -2002,7 +2048,10 @@ function RoomsPage() {
           <p style={{ color: C.text, fontSize: '15px', fontWeight: 800 }}>Ruangan & Proktor</p>
           <p style={{ color: C.textMuted, fontSize: '11px', marginTop: '1px' }}>Assign proktor ke ruangan ujian</p>
         </div>
-        <Button size="sm" loading={syncing} onClick={syncRooms}><RefreshCw size={13} /> Sinkronkan</Button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <Button variant="secondary" size="sm" onClick={openRoomForm}><Plus size={13} /> Tambah Ruangan</Button>
+          <Button size="sm" loading={syncing} onClick={syncRooms}><RefreshCw size={13} /> Sinkronkan</Button>
+        </div>
       </div>
       <div style={{ flex: 1, padding: '16px 20px' }} className="space-y-3">
         <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '12px', padding: '10px 12px', display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -2023,7 +2072,7 @@ function RoomsPage() {
           )}
         </div>
         {loading ? <div className="py-12 text-center"><Spinner /></div>
-          : rooms.length === 0 ? <EmptyState title="Belum ada ruangan" desc="Klik Sinkronkan dari PMB" />
+          : rooms.length === 0 ? <EmptyState title="Belum ada ruangan" desc="Tambah ruangan manual atau klik Sinkronkan dari PMB" />
             : (
               <>
                 {/* DESKTOP: table */}
@@ -2054,6 +2103,9 @@ function RoomsPage() {
                                 </button>
                                 <button onClick={() => { setAssignModal(r); setSelectedProctor(''); }} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: C.green, fontSize: '11px', fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer' }}>
                                   <UserPlus size={12} /> Proktor
+                                </button>
+                                <button onClick={() => setConfirmDelRoom(r)} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: '#dc2626', fontSize: '11px', fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer' }}>
+                                  <Trash2 size={12} /> Hapus
                                 </button>
                               </div>
                             </td>
@@ -2090,6 +2142,9 @@ function RoomsPage() {
                             <button onClick={() => { setAssignModal(r); setSelectedProctor(''); }} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: C.green, fontSize: '11.5px', fontWeight: 700, background: C.greenLight, border: `1.5px solid ${C.greenBorder}`, borderRadius: '8px', padding: '5px 9px', cursor: 'pointer' }}>
                               <UserPlus size={12} /> Proktor
                             </button>
+                            <button onClick={() => setConfirmDelRoom(r)} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: '#dc2626', fontSize: '11.5px', fontWeight: 700, background: '#fef2f2', border: '1.5px solid #fecaca', borderRadius: '8px', padding: '5px 9px', cursor: 'pointer' }}>
+                              <Trash2 size={12} /> Hapus
+                            </button>
                           </div>
                         </div>
                       </div>
@@ -2099,6 +2154,37 @@ function RoomsPage() {
               </>
             )}
       </div>
+
+      <Modal open={showRoomForm} onClose={() => setShowRoomForm(false)} title="Tambah Ruangan" size="sm">
+        <div className="space-y-3">
+          <Input
+            label="Nama Ruangan"
+            placeholder="Contoh: Ruang 1"
+            value={roomForm.room_name}
+            onChange={e => setRoomForm(prev => ({ ...prev, room_name: e.target.value }))}
+          />
+          <Input
+            label="Kapasitas"
+            type="number"
+            min={1}
+            value={roomForm.capacity}
+            onChange={e => setRoomForm(prev => ({ ...prev, capacity: Number(e.target.value) || 1 }))}
+          />
+          <div className="flex gap-2 justify-end pt-1">
+            <Button variant="secondary" size="sm" onClick={() => setShowRoomForm(false)}>Batal</Button>
+            <Button size="sm" loading={savingRoom} onClick={saveRoom}>Simpan</Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Confirm
+        open={!!confirmDelRoom}
+        onClose={() => setConfirmDelRoom(null)}
+        onConfirm={deleteRoom}
+        title="Hapus Ruangan?"
+        confirmText="Ya, Hapus"
+        message={`Hapus ${confirmDelRoom?.room_name || 'ruangan ini'}? Proktor dan peserta yang masih terhubung ke ruangan ini akan dilepas. Ruangan yang sudah memiliki sesi ujian tidak bisa dihapus.`}
+      />
 
       {/* Modal detail siswa per ruangan */}
       <Modal open={!!roomDetail} onClose={() => setRoomDetail(null)} title={`Siswa — ${roomDetail?.room_name}`} size="md">

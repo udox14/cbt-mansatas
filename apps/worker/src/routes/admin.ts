@@ -76,21 +76,52 @@ admin.post('/rooms/sync', async (c) => {
 
 admin.post('/rooms', async (c) => {
   const { room_name, capacity } = await c.req.json();
+  const roomName = String(room_name || '').trim();
+  const roomCapacity = Math.max(1, Number(capacity || 40) || 40);
+  if (!roomName) return c.json(err('Nama ruangan wajib diisi'), 400);
+  const exists = await c.env.DB.prepare(
+    'SELECT id FROM cbt_rooms WHERE LOWER(room_name) = LOWER(?)'
+  ).bind(roomName).first();
+  if (exists) return c.json(err('Nama ruangan sudah ada'), 409);
   const id = newId();
   await c.env.DB.prepare('INSERT INTO cbt_rooms (id, room_name, capacity) VALUES (?,?,?)')
-    .bind(id, room_name, capacity || 40).run();
+    .bind(id, roomName, roomCapacity).run();
   return c.json(ok({ id }, 'Ruangan ditambahkan'), 201);
 });
 
 admin.put('/rooms/:id', async (c) => {
   const { room_name, capacity } = await c.req.json();
+  const roomName = String(room_name || '').trim();
+  const roomCapacity = Math.max(1, Number(capacity || 40) || 40);
+  if (!roomName) return c.json(err('Nama ruangan wajib diisi'), 400);
+  const exists = await c.env.DB.prepare(
+    'SELECT id FROM cbt_rooms WHERE LOWER(room_name) = LOWER(?) AND id != ?'
+  ).bind(roomName, c.req.param('id')).first();
+  if (exists) return c.json(err('Nama ruangan sudah ada'), 409);
   await c.env.DB.prepare('UPDATE cbt_rooms SET room_name=?, capacity=? WHERE id=?')
-    .bind(room_name, capacity, c.req.param('id')).run();
+    .bind(roomName, roomCapacity, c.req.param('id')).run();
   return c.json(ok(null, 'Ruangan diperbarui'));
 });
 
 admin.delete('/rooms/:id', async (c) => {
-  await c.env.DB.prepare('DELETE FROM cbt_rooms WHERE id=?').bind(c.req.param('id')).run();
+  const room = await c.env.DB.prepare('SELECT id, room_name FROM cbt_rooms WHERE id=?')
+    .bind(c.req.param('id')).first<any>();
+  if (!room) return c.json(err('Ruangan tidak ditemukan'), 404);
+
+  const sessionCount = await c.env.DB.prepare(
+    'SELECT COUNT(*) as cnt FROM cbt_exam_sessions WHERE room_id=?'
+  ).bind(room.id).first<any>();
+  if ((sessionCount?.cnt || 0) > 0) {
+    return c.json(err('Ruangan tidak bisa dihapus karena sudah memiliki sesi ujian'), 400);
+  }
+
+  await c.env.DB.batch([
+    c.env.DB.prepare('UPDATE cbt_users SET room_id=NULL, updated_at=? WHERE room_id=?').bind(now(), room.id),
+    c.env.DB.prepare('UPDATE pendaftar SET ruang_tes=NULL WHERE ruang_tes=?').bind(room.room_name),
+    c.env.DB.prepare('DELETE FROM cbt_exam_tokens WHERE room_id=?').bind(room.id),
+    c.env.DB.prepare("DELETE FROM cbt_exam_assignments WHERE user_type='room' AND user_id=?").bind(room.room_name),
+    c.env.DB.prepare('DELETE FROM cbt_rooms WHERE id=?').bind(room.id),
+  ]);
   return c.json(ok(null, 'Ruangan dihapus'));
 });
 
