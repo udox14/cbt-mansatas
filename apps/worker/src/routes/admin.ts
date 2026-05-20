@@ -561,6 +561,91 @@ admin.delete('/questions/:id', async (c) => {
 // EXAM TOKENS
 // ══════════════════════════════════════════════════════════════
 
+async function getAssignedTokenTargets(db: D1Database, examId: string) {
+  const targets = new Map<string, { room_id: string; tanggal_tes: string; sesi_tes: string }>();
+  const add = (roomId?: string | null, tanggalTes?: string | null, sesiTes?: string | null) => {
+    if (!roomId) return;
+    const target = {
+      room_id: roomId,
+      tanggal_tes: tanggalTes || '',
+      sesi_tes: sesiTes || '',
+    };
+    targets.set(`${target.room_id}|${target.tanggal_tes}|${target.sesi_tes}`, target);
+  };
+
+  const { results: assignments } = await db.prepare(
+    'SELECT user_id, user_type FROM cbt_exam_assignments WHERE exam_id=?'
+  ).bind(examId).all();
+
+  for (const a of assignments as any[]) {
+    if (a.user_type === 'pendaftar') {
+      const p = await db.prepare(
+        `SELECT p.ruang_tes, p.tanggal_tes, p.sesi_tes, r.id as room_id
+         FROM pendaftar p
+         LEFT JOIN cbt_rooms r ON r.room_name = p.ruang_tes
+         WHERE p.id=? AND ${EXCLUDE_JALUR_COND}`
+      ).bind(a.user_id).first<any>();
+      add(p?.room_id, p?.tanggal_tes, p?.sesi_tes);
+      continue;
+    }
+
+    if (a.user_type === 'cbt_user') {
+      const u = await db.prepare(
+        "SELECT room_id FROM cbt_users WHERE id=? AND role='student' AND is_active=1"
+      ).bind(a.user_id).first<any>();
+      add(u?.room_id, '', '');
+      continue;
+    }
+
+    if (a.user_type === 'room') {
+      const room = await db.prepare('SELECT id, room_name FROM cbt_rooms WHERE room_name=?')
+        .bind(a.user_id).first<any>();
+      if (!room) continue;
+      const { results: groups } = await db.prepare(
+        `SELECT DISTINCT tanggal_tes, sesi_tes
+         FROM pendaftar
+         WHERE ruang_tes=? AND tanggal_tes IS NOT NULL AND tanggal_tes != ''
+           AND sesi_tes IS NOT NULL AND sesi_tes != ''
+           AND ${EXCLUDE_JALUR_COND}`
+      ).bind(room.room_name).all();
+      for (const g of groups as any[]) add(room.id, g.tanggal_tes, g.sesi_tes);
+      const manual = await db.prepare(
+        "SELECT COUNT(*) as cnt FROM cbt_users WHERE room_id=? AND role='student' AND is_active=1"
+      ).bind(room.id).first<any>();
+      if ((manual?.cnt || 0) > 0) add(room.id, '', '');
+      continue;
+    }
+
+    if (a.user_type === 'sesi') {
+      const { results: rows } = await db.prepare(
+        `SELECT DISTINCT r.id as room_id, p.tanggal_tes, p.sesi_tes
+         FROM pendaftar p
+         JOIN cbt_rooms r ON r.room_name = p.ruang_tes
+         WHERE p.sesi_tes=? AND p.tanggal_tes IS NOT NULL AND p.tanggal_tes != ''
+           AND ${EXCLUDE_JALUR_COND}`
+      ).bind(a.user_id).all();
+      for (const row of rows as any[]) add(row.room_id, row.tanggal_tes, row.sesi_tes);
+      continue;
+    }
+
+    if (a.user_type === 'tanggal_sesi') {
+      const [tanggalTes, ...rest] = String(a.user_id).split('|');
+      const sesiTes = rest.join('|');
+      const { results: rows } = await db.prepare(
+        `SELECT DISTINCT r.id as room_id, p.tanggal_tes, p.sesi_tes
+         FROM pendaftar p
+         JOIN cbt_rooms r ON r.room_name = p.ruang_tes
+         WHERE p.tanggal_tes=? AND p.sesi_tes=? AND ${EXCLUDE_JALUR_COND}`
+      ).bind(tanggalTes, sesiTes).all();
+      for (const row of rows as any[]) add(row.room_id, row.tanggal_tes, row.sesi_tes);
+    }
+  }
+
+  return Array.from(targets.values()).sort((a, b) =>
+    `${a.tanggal_tes} ${a.sesi_tes} ${a.room_id}`.localeCompare(`${b.tanggal_tes} ${b.sesi_tes} ${b.room_id}`)
+  );
+}
+
 admin.get('/exams/:examId/tokens', async (c) => {
   const { results } = await c.env.DB.prepare(
     `SELECT et.*, r.room_name
@@ -591,33 +676,32 @@ admin.post('/exams/:examId/tokens/generate', async (c) => {
     return c.json(ok({ generated: 1 }, 'Token berhasil digenerate ulang'));
   }
 
-  const { room_ids, groups } = body;
-  const targetRooms = room_ids?.length
-    ? room_ids
-    : (await c.env.DB.prepare('SELECT id FROM cbt_rooms').all()).results.map((r: any) => r.id);
-  const targetGroups = groups?.length
-    ? groups.map(g => ({ tanggal_tes: g.tanggal_tes || '', sesi_tes: g.sesi_tes || '' }))
-    : (await c.env.DB.prepare(
-        `SELECT DISTINCT tanggal_tes, sesi_tes
-         FROM pendaftar
-         WHERE tanggal_tes IS NOT NULL AND tanggal_tes != ''
-           AND sesi_tes IS NOT NULL AND sesi_tes != ''
-           AND ${EXCLUDE_JALUR_COND}
-         ORDER BY tanggal_tes, sesi_tes`
-      ).all()).results.map((g: any) => ({ tanggal_tes: g.tanggal_tes || '', sesi_tes: g.sesi_tes || '' }));
-
-  const effectiveGroups = targetGroups.length ? targetGroups : [{ tanggal_tes: '', sesi_tes: '' }];
-  const stmts = [];
-  for (const rid of targetRooms) {
-    for (const g of effectiveGroups) {
-      stmts.push(
-        c.env.DB.prepare(
-          `INSERT OR REPLACE INTO cbt_exam_tokens
-           (id, exam_id, room_id, tanggal_tes, sesi_tes, token_code, is_active)
-           VALUES (?,?,?,?,?,?,1)`
-        ).bind(newId(), examId, rid, g.tanggal_tes, g.sesi_tes, generateToken())
-      );
+  let targetRows = await getAssignedTokenTargets(c.env.DB, examId);
+  if (body.room_ids?.length) targetRows = targetRows.filter(t => body.room_ids!.includes(t.room_id));
+  if (body.groups?.length) {
+    const allowedGroups = new Set(body.groups.map(g => `${g.tanggal_tes || ''}|${g.sesi_tes || ''}`));
+    targetRows = targetRows.filter(t => allowedGroups.has(`${t.tanggal_tes}|${t.sesi_tes}`));
+  }
+  const isFullGenerate = !body.room_ids?.length && !body.groups?.length;
+  if (!targetRows.length) {
+    if (isFullGenerate) {
+      await c.env.DB.prepare('DELETE FROM cbt_exam_tokens WHERE exam_id=?').bind(examId).run();
     }
+    return c.json(err('Belum ada peserta/ruangan/sesi yang di-assign ke ujian ini'), 400);
+  }
+
+  const stmts = [];
+  if (isFullGenerate) {
+    stmts.push(c.env.DB.prepare('DELETE FROM cbt_exam_tokens WHERE exam_id=?').bind(examId));
+  }
+  for (const target of targetRows) {
+    stmts.push(
+      c.env.DB.prepare(
+        `INSERT OR REPLACE INTO cbt_exam_tokens
+         (id, exam_id, room_id, tanggal_tes, sesi_tes, token_code, is_active)
+         VALUES (?,?,?,?,?,?,1)`
+      ).bind(newId(), examId, target.room_id, target.tanggal_tes, target.sesi_tes, generateToken())
+    );
   }
   for (let i = 0; i < stmts.length; i += 100) { await c.env.DB.batch(stmts.slice(i, i + 100)); }
   return c.json(ok({ generated: stmts.length }, 'Token berhasil digenerate'));
@@ -635,30 +719,22 @@ admin.post('/exams/:examId/tokens/set-code', async (c) => {
     return c.json(err('Token manual harus 4-20 karakter, hanya huruf dan angka'), 400);
   }
 
-  const targetRooms = (await c.env.DB.prepare('SELECT id FROM cbt_rooms').all()).results.map((r: any) => r.id);
-  if (!targetRooms.length) return c.json(err('Belum ada ruangan'), 400);
+  const targetRows = await getAssignedTokenTargets(c.env.DB, examId);
+  if (!targetRows.length) {
+    await c.env.DB.prepare('DELETE FROM cbt_exam_tokens WHERE exam_id=?').bind(examId).run();
+    return c.json(err('Belum ada peserta/ruangan/sesi yang di-assign ke ujian ini'), 400);
+  }
 
-  const targetGroups = (await c.env.DB.prepare(
-    `SELECT DISTINCT tanggal_tes, sesi_tes
-     FROM pendaftar
-     WHERE tanggal_tes IS NOT NULL AND tanggal_tes != ''
-       AND sesi_tes IS NOT NULL AND sesi_tes != ''
-       AND ${EXCLUDE_JALUR_COND}
-     ORDER BY tanggal_tes, sesi_tes`
-  ).all()).results.map((g: any) => ({ tanggal_tes: g.tanggal_tes || '', sesi_tes: g.sesi_tes || '' }));
-
-  const effectiveGroups = targetGroups.length ? targetGroups : [{ tanggal_tes: '', sesi_tes: '' }];
   const stmts = [];
-  for (const rid of targetRooms) {
-    for (const g of effectiveGroups) {
-      stmts.push(
-        c.env.DB.prepare(
-          `INSERT OR REPLACE INTO cbt_exam_tokens
-           (id, exam_id, room_id, tanggal_tes, sesi_tes, token_code, is_active, created_at)
-           VALUES (?,?,?,?,?,?,1,datetime('now'))`
-        ).bind(newId(), examId, rid, g.tanggal_tes, g.sesi_tes, tokenCode)
-      );
-    }
+  stmts.push(c.env.DB.prepare('DELETE FROM cbt_exam_tokens WHERE exam_id=?').bind(examId));
+  for (const target of targetRows) {
+    stmts.push(
+      c.env.DB.prepare(
+        `INSERT OR REPLACE INTO cbt_exam_tokens
+         (id, exam_id, room_id, tanggal_tes, sesi_tes, token_code, is_active, created_at)
+         VALUES (?,?,?,?,?,?,1,datetime('now'))`
+      ).bind(newId(), examId, target.room_id, target.tanggal_tes, target.sesi_tes, tokenCode)
+    );
   }
   for (let i = 0; i < stmts.length; i += 100) { await c.env.DB.batch(stmts.slice(i, i + 100)); }
   return c.json(ok({ updated: stmts.length, token_code: tokenCode }, `Token diset menjadi ${tokenCode}`));

@@ -724,7 +724,27 @@ function TokensView({ examId }: { examId: string }) {
   });
   const formatDate = (value?: string) => {
     if (!value) return 'Tanpa tanggal';
-    return new Date(`${value}T00:00:00+07:00`).toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+    const raw = String(value).trim();
+    const isoMatch = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (isoMatch) {
+      const dt = new Date(`${isoMatch[1]}-${isoMatch[2].padStart(2, '0')}-${isoMatch[3].padStart(2, '0')}T00:00:00+07:00`);
+      if (!Number.isNaN(dt.getTime())) return dt.toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+    }
+    const clean = raw.replace(/^[A-Za-zÀ-ÿ]+,\s*/i, '').trim();
+    const monthMap: Record<string, number> = {
+      januari: 1, jan: 1, februari: 2, feb: 2, maret: 3, mar: 3, april: 4, apr: 4,
+      mei: 5, juni: 6, jun: 6, juli: 7, jul: 7, agustus: 8, agu: 8, ags: 8,
+      september: 9, sep: 9, oktober: 10, okt: 10, november: 11, nov: 11, desember: 12, des: 12,
+    };
+    const parts = clean.match(/^(\d{1,2})\s+([A-Za-zÀ-ÿ]+)\s+(\d{4})$/i);
+    if (parts) {
+      const month = monthMap[parts[2].toLowerCase()];
+      if (month) {
+        const dt = new Date(`${parts[3]}-${String(month).padStart(2, '0')}-${parts[1].padStart(2, '0')}T00:00:00+07:00`);
+        if (!Number.isNaN(dt.getTime())) return dt.toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+      }
+    }
+    return raw;
   };
   return (
     <div className="space-y-3">
@@ -1863,12 +1883,19 @@ function RoomsPage() {
     if (pmb.success) {
       const pmbData = pmb.data || [];
       setRoomDateOptions(Array.from(new Set(pmbData.map((x: any) => x.tanggal_tes).filter(Boolean))).sort() as string[]);
-      setRoomSessionOptions(Array.from(new Set(pmbData.map((x: any) => x.sesi_tes).filter(Boolean))).sort() as string[]);
+      const sessionSource = filterRoomDate ? pmbData.filter((x: any) => x.tanggal_tes === filterRoomDate) : pmbData;
+      const sessionOptions = Array.from(new Set(sessionSource.map((x: any) => x.sesi_tes).filter(Boolean))).sort() as string[];
+      setRoomSessionOptions(sessionOptions);
+      if (filterRoomSession && !sessionOptions.includes(filterRoomSession)) setFilterRoomSession('');
     }
     setLoading(false);
   }, [filterRoomDate, filterRoomSession]);
   useEffect(() => { fetchData(); }, [fetchData]);
 
+  const changeRoomDate = (value: string) => {
+    setFilterRoomDate(value);
+    setFilterRoomSession('');
+  };
   const syncRooms = async () => { setSyncing(true); const r = await POST('/api/admin/rooms/sync', {}); toast(r.success ? 'success' : 'error', r.message || r.error || 'Gagal'); setSyncing(false); fetchData(); };
   const openRoomForm = () => { setRoomForm({ room_name: '', capacity: 40 }); setShowRoomForm(true); };
   const saveRoom = async () => {
@@ -2056,14 +2083,14 @@ function RoomsPage() {
       <div style={{ flex: 1, padding: '16px 20px' }} className="space-y-3">
         <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '12px', padding: '10px 12px', display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
           <Select
+            value={filterRoomDate}
+            onChange={e => changeRoomDate(e.target.value)}
+            options={[{ value: '', label: 'Semua Tanggal' }, ...roomDateOptions.map(t => ({ value: t, label: t }))]}
+          />
+          <Select
             value={filterRoomSession}
             onChange={e => setFilterRoomSession(e.target.value)}
             options={[{ value: '', label: 'Semua Sesi' }, ...roomSessionOptions.map(s => ({ value: s, label: s }))]}
-          />
-          <Select
-            value={filterRoomDate}
-            onChange={e => setFilterRoomDate(e.target.value)}
-            options={[{ value: '', label: 'Semua Tanggal' }, ...roomDateOptions.map(t => ({ value: t, label: t }))]}
           />
           {(filterRoomSession || filterRoomDate) && (
             <Button variant="secondary" size="sm" onClick={() => { setFilterRoomSession(''); setFilterRoomDate(''); }}>
