@@ -20,6 +20,40 @@ body {
 
 .exam-text { font-size: var(--exam-font-size, 1rem); line-height: 1.75; }
 
+.exam-rules-content {
+  line-height: 1.7;
+}
+
+.exam-rules-content p {
+  margin: 0.35rem 0;
+}
+
+.exam-rules-content ol {
+  list-style: decimal;
+  margin: 0.65rem 0;
+  padding-left: 1.45rem;
+}
+
+.exam-rules-content ul {
+  list-style: disc;
+  margin: 0.65rem 0;
+  padding-left: 1.45rem;
+}
+
+.exam-rules-content li {
+  display: list-item;
+  margin: 0.25rem 0;
+  padding-left: 0.2rem;
+}
+
+.exam-rules-content ol ol {
+  list-style: lower-alpha;
+}
+
+.exam-rules-content ol ol ol {
+  list-style: lower-roman;
+}
+
 @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 .fade-in { animation: fadeIn 0.25s ease-out; }
 

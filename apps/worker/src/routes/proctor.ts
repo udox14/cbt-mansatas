@@ -165,7 +165,7 @@ proctor.post('/sessions/:id/unlock', async (c) => {
     ).bind(session.id).first<any>();
 
     const startedMs = parseServerTime(session.started_at);
-    const lockedAtMs = parseServerTime(latestLock?.happened_at);
+    const lockedAtMs = parseServerTime(session.locked_at || latestLock?.happened_at);
     const unlockedAtMs = Date.now();
     if (Number.isFinite(startedMs) && Number.isFinite(lockedAtMs) && lockedAtMs <= unlockedAtMs) {
       adjustedStartedAt = new Date(startedMs + (unlockedAtMs - lockedAtMs)).toISOString();
@@ -174,7 +174,7 @@ proctor.post('/sessions/:id/unlock', async (c) => {
 
   // Reset cheat_warnings juga agar peserta tidak langsung kena lock lagi setelah dibuka
   await c.env.DB.prepare(
-    `UPDATE cbt_exam_sessions SET is_time_locked = 0, cheat_warnings = 0, started_at = ?, last_heartbeat = ? WHERE id = ?`
+    `UPDATE cbt_exam_sessions SET is_time_locked = 0, cheat_warnings = 0, locked_at = NULL, started_at = ?, last_heartbeat = ? WHERE id = ?`
   ).bind(adjustedStartedAt, now(), c.req.param('id')).run();
   return c.json(ok(null, 'Sesi berhasil dibuka'));
 });
@@ -214,7 +214,7 @@ proctor.post('/sessions/:id/force-submit', async (c) => {
   if (session.status === 'submitted')
     return c.json(err('Ujian sudah selesai'), 400);
   await c.env.DB.prepare(
-    `UPDATE cbt_exam_sessions SET status='submitted', finished_at=?, is_time_locked=0, last_heartbeat=? WHERE id=?`
+    `UPDATE cbt_exam_sessions SET status='submitted', finished_at=?, is_time_locked=0, locked_at=NULL, last_heartbeat=? WHERE id=?`
   ).bind(now(), now(), session.id).run();
   // Hitung skor
   try {

@@ -365,13 +365,13 @@ function StudentContent() {
       {/* MODAL: Tata Tertib */}
       <Modal open={showRules} onClose={() => setShowRules(false)} title="Tata Tertib Ujian">
         {selected?.rules_text
-          ? <div className="prose prose-sm max-w-none text-sm" style={{ color: '#4a6655' }} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(selected.rules_text) }} />
-          : <div className="space-y-2 text-sm" style={{ color: '#4a6655' }}>
-            <p>1. Kerjakan ujian dengan jujur dan mandiri.</p>
-            <p>2. Dilarang membuka tab atau aplikasi lain selama ujian.</p>
-            <p>3. Pelanggaran 3 kali akan otomatis mengumpulkan ujian.</p>
-            <p>4. Pastikan koneksi internet stabil.</p>
-          </div>}
+          ? <div className="exam-rules-content text-sm" style={{ color: '#4a6655' }} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(selected.rules_text) }} />
+          : <ol className="exam-rules-content text-sm" style={{ color: '#4a6655' }}>
+            <li>Kerjakan ujian dengan jujur dan mandiri.</li>
+            <li>Dilarang membuka tab atau aplikasi lain selama ujian.</li>
+            <li>Pelanggaran berulang dapat membuat ujian dikunci sampai proktor membuka kembali.</li>
+            <li>Pastikan koneksi internet stabil.</li>
+          </ol>}
         <div className="mt-5">
           <button onClick={toToken} className="w-full flex items-center justify-between active:scale-[0.98] transition-transform"
             style={{ background: '#2d7a4f', padding: '14px 18px', borderRadius: '14px', border: 'none', cursor: 'pointer' }}>

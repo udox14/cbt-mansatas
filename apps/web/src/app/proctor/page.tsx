@@ -56,6 +56,7 @@ function ProctorContent() {
   const [loading, setLoading] = useState(true);
   const [filterExam, setFilterExam] = useState('all');
   const [filterStart, setFilterStart] = useState<'all' | 'started' | 'not_started'>('all');
+  const [filterFinished, setFilterFinished] = useState<'all' | 'hide_finished' | 'finished_only'>('all');
   const [resetTarget, setResetTarget] = useState<any>(null);
   const [unlockTarget, setUnlockTarget] = useState<any>(null);
   const [forceTarget, setForceTarget] = useState<any>(null);
@@ -124,11 +125,13 @@ function ProctorContent() {
   if (authLoading || loading) return <LoadingScreen />;
   if (!user) return null;
 
-  // Filter by exam and start status
+  // Filter by exam, start status, and finished visibility
   const filteredByExam = filterExam === 'all' ? sessions : sessions.filter((s: any) => s.exam_id === filterExam);
   const filtered = filteredByExam.filter((s: any) => {
-    if (filterStart === 'started') return s.has_started;
-    if (filterStart === 'not_started') return !s.has_started;
+    if (filterStart === 'started' && !s.has_started) return false;
+    if (filterStart === 'not_started' && s.has_started) return false;
+    if (filterFinished === 'hide_finished' && s.live_status === 'selesai') return false;
+    if (filterFinished === 'finished_only' && s.live_status !== 'selesai') return false;
     return true;
   });
 
@@ -239,6 +242,12 @@ function ProctorContent() {
                 <option value="all">Semua Status</option>
                 <option value="started">Sudah Mulai</option>
                 <option value="not_started">Belum Mulai</option>
+              </select>
+              <select value={filterFinished} onChange={e => setFilterFinished(e.target.value as any)}
+                style={{ fontSize: '11.5px', fontWeight: 600, padding: '5px 12px', border: `1.5px solid ${C.borderMid}`, borderRadius: '8px', background: C.white, color: C.textMid, cursor: 'pointer' }}>
+                <option value="all">Tampilkan Selesai</option>
+                <option value="hide_finished">Sembunyikan Selesai</option>
+                <option value="finished_only">Hanya Selesai</option>
               </select>
               {examOptions.length > 1 && (
                 <select value={filterExam} onChange={e => setFilterExam(e.target.value)}

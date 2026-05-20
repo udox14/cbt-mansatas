@@ -330,8 +330,8 @@ student.post('/sessions/:sessionId/answers', async (c) => {
     const durationMs = (exam.duration_minutes + 1) * 60 * 1000; // +1 menit grace period
     if (Date.now() > startMs + durationMs) {
       await c.env.DB.prepare(
-        'UPDATE cbt_exam_sessions SET is_time_locked=1, last_heartbeat=? WHERE id=? AND user_id=? AND user_type=?'
-      ).bind(now(), sessionId, user.sub, userType).run();
+        'UPDATE cbt_exam_sessions SET is_time_locked=1, locked_at=COALESCE(locked_at, ?), last_heartbeat=? WHERE id=? AND user_id=? AND user_type=?'
+      ).bind(now(), now(), sessionId, user.sub, userType).run();
       return c.json(err('Waktu ujian sudah habis'), 403);
     }
   }
@@ -369,8 +369,8 @@ student.post('/sessions/:sessionId/heartbeat', async (c) => {
       const parsed = parseSesiJam(jadwal.sesi_tes);
       if (parsed && cekJadwal(jadwal.tanggal_tes, parsed.jamMulai, parsed.jamSelesai) === 'selesai') {
         await c.env.DB.prepare(
-          'UPDATE cbt_exam_sessions SET is_time_locked=1, last_heartbeat=? WHERE id=? AND user_id=? AND user_type=?'
-        ).bind(now(), sessionId, user.sub, userType).run();
+          'UPDATE cbt_exam_sessions SET is_time_locked=1, locked_at=COALESCE(locked_at, ?), last_heartbeat=? WHERE id=? AND user_id=? AND user_type=?'
+        ).bind(now(), now(), sessionId, user.sub, userType).run();
         return c.json(ok({ time_locked: true, auto_submitted: false, started_at: session.started_at }, 'Waktu ujian berakhir dan sesi dikunci'));
       }
     }
@@ -395,8 +395,8 @@ student.post('/sessions/:sessionId/heartbeat', async (c) => {
 
   if (isSessionDurationExpired(session)) {
     await c.env.DB.prepare(
-      'UPDATE cbt_exam_sessions SET is_time_locked=1, last_heartbeat=? WHERE id=? AND user_id=? AND user_type=?'
-    ).bind(now(), sessionId, user.sub, userType).run();
+      'UPDATE cbt_exam_sessions SET is_time_locked=1, locked_at=COALESCE(locked_at, ?), last_heartbeat=? WHERE id=? AND user_id=? AND user_type=?'
+    ).bind(now(), now(), sessionId, user.sub, userType).run();
     return c.json(ok({ time_locked: true, auto_submitted: false, started_at: session.started_at }, 'Waktu ujian berakhir dan sesi dikunci'));
   }
 
@@ -441,8 +441,8 @@ student.post('/sessions/:sessionId/cheat', async (c) => {
 
   if (limitReached) {
     await c.env.DB.prepare(
-      `UPDATE cbt_exam_sessions SET cheat_warnings=?, is_time_locked=1, last_heartbeat=? WHERE id=? AND user_id=? AND user_type=?`
-    ).bind(newW, now(), sessionId, user.sub, userType).run();
+      `UPDATE cbt_exam_sessions SET cheat_warnings=?, is_time_locked=1, locked_at=COALESCE(locked_at, ?), last_heartbeat=? WHERE id=? AND user_id=? AND user_type=?`
+    ).bind(newW, now(), now(), sessionId, user.sub, userType).run();
     actionTaken = 'lock';
   } else {
     await c.env.DB.prepare(
@@ -479,8 +479,8 @@ student.post('/sessions/:sessionId/submit', async (c) => {
     }
     if (timeExpired) {
       await c.env.DB.prepare(
-        'UPDATE cbt_exam_sessions SET is_time_locked=1, last_heartbeat=? WHERE id=? AND user_id=? AND user_type=?'
-      ).bind(now(), sessionId, user.sub, userType).run();
+        'UPDATE cbt_exam_sessions SET is_time_locked=1, locked_at=COALESCE(locked_at, ?), last_heartbeat=? WHERE id=? AND user_id=? AND user_type=?'
+      ).bind(now(), now(), sessionId, user.sub, userType).run();
       return c.json(err('Waktu ujian sudah habis. Hubungi pengawas.'), 403);
     }
 
