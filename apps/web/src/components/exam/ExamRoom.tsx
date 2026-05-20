@@ -125,6 +125,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
   const [toasts, setToasts] = useState<{ id: number; msg: string }[]>([]);
   // Pesan kunci permanen (bukan toast)
   const [lockedMsg, setLockedMsg] = useState('');
+  const [isCheatLocked, setIsCheatLocked] = useState(false);
   const toastIdRef = useRef(0);
   const dirtyRef = useRef(new Set<string>());
   const submittedRef = useRef(false);
@@ -162,6 +163,15 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
   }, []);
   const removeToast = useCallback((id: number) => {
     setToasts(prev => prev.filter(t => t.id !== id));
+  }, []);
+
+  const setCheatLockedState = useCallback((locked: boolean) => {
+    isCheatLockedRef.current = locked;
+    setIsCheatLocked(locked);
+    if (locked) {
+      setShowGrid(false);
+      setShowConfirm(false);
+    }
   }, []);
 
   const enterFullscreen = useCallback(async () => {
@@ -225,7 +235,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
         setCheatCount(warnings);
         if (r.data.cheat_locked || r.data.is_time_locked) {
           // Dikunci karena pelanggaran — bisa dibuka proktor
-          isCheatLockedRef.current = true;
+          setCheatLockedState(true);
           submittedRef.current = false; // jangan auto-submit!
           setLockedMsg(`Sesi dikunci karena pelanggaran (${warnings}x). Hubungi pengawas untuk melanjutkan.`);
         }
@@ -246,7 +256,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
         wakeLockRef.current = null;
       }
     };
-  }, [sessionId, requestWakeLock]);
+  }, [sessionId, requestWakeLock, addToast, setCheatLockedState]);
 
   // Countdown timer
   useEffect(() => {
@@ -274,7 +284,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
       // time_locked=true + !cheat_locked → waktu habis, submit
       if (r.data?.cheat_locked && !isCheatLockedRef.current && !submittedRef.current) {
         // Baru dikunci proktor/sistem karena cheat — jangan submit, tampilkan pesan saja
-        isCheatLockedRef.current = true;
+        setCheatLockedState(true);
         const w = r.data?.warnings ?? cheatCountRef.current;
         setLockedMsg(`Sesi dikunci karena pelanggaran (${w}x). Hubungi pengawas untuk melanjutkan.`);
       }
@@ -287,7 +297,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
 
       // Bug-3 fix: deteksi proktor sudah membuka kunci pelanggaran
       if (isCheatLockedRef.current && !r.data?.cheat_locked && !r.data?.time_locked) {
-        isCheatLockedRef.current = false;
+        setCheatLockedState(false);
         submittedRef.current = false;
         cheatCountRef.current = r.data?.warnings ?? 0;
         setCheatCount(r.data?.warnings ?? 0);
@@ -296,7 +306,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
       }
     }, 8000); // lebih cepat (8s) agar unlock terasa responsif
     return () => { clearInterval(s); clearInterval(h); };
-  }, [sessionId]);
+  }, [sessionId, setCheatLockedState]);
 
   // ── M4: flushAnswers menggunakan answersRef agar tidak stale closure ──
   const flushAnswers = useCallback(async () => {
@@ -339,7 +349,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
       // Alarm sesi dikunci.
       playAlarm('locked');
       setLockedMsg(`${limit}x pelanggaran - sesi dikunci. Hubungi pengawas untuk melanjutkan.`);
-      isCheatLockedRef.current = true;
+      setCheatLockedState(true);
       submittedRef.current = false;
     } else {
       // 🔔 Alarm peringatan (makin keras setiap pelanggaran)
@@ -347,7 +357,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
       const typeLabel = violationType === 'fullscreen_exit' ? 'Keluar fullscreen' : 'Meninggalkan halaman';
       addToast(`⚠️ Peringatan ${n}/${limit}: ${typeLabel}! Sisa ${remaining} kesempatan.`);
     }
-  }, [sessionId, cheatLimit, addToast, playAlarm, flushAnswers]);
+  }, [sessionId, cheatLimit, addToast, playAlarm, flushAnswers, setCheatLockedState]);
 
   // ── Anti-cheat: visibilitychange + fullscreen + keyboard/ctx ──
   // ── + window blur + pagehide (deteksi notification bar Android & iOS) ──
@@ -431,6 +441,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
 
 
   const setAnswer = useCallback((qId: string, update: Partial<Answer>) => {
+    if (isCheatLockedRef.current) return;
     setAnswers(prev => {
       const m = new Map(prev);
       const ex = m.get(qId) || { question_id: qId };
@@ -444,6 +455,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
   }, [sessionId]);
 
   const goTo = useCallback(async (i: number) => {
+    if (isCheatLockedRef.current) return;
     if (!(await enterFullscreen())) return;
     setCurrent(i);
     setShowGrid(false);
@@ -475,11 +487,13 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
   }, [sessionId, onFinish, enterFullscreen]);
 
   const openGrid = useCallback(async () => {
+    if (isCheatLockedRef.current) return;
     if (!(await enterFullscreen())) return;
     setShowGrid(true);
   }, [enterFullscreen]);
 
   const openConfirm = useCallback(async () => {
+    if (isCheatLockedRef.current) return;
     if (!(await enterFullscreen())) return;
     setShowConfirm(true);
   }, [enterFullscreen]);
@@ -505,7 +519,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
   const ss = timeLeft % 60;
   const urgent = timeLeft < 300;
   const isLast = current === questions.length - 1;
-  const needsFullscreen = enforceFullscreen && fullscreenSupported && !isFullscreen && !submittedRef.current && !isCheatLockedRef.current;
+  const needsFullscreen = enforceFullscreen && fullscreenSupported && !isFullscreen && !submittedRef.current && !isCheatLocked;
 
   return (
     <div className="no-select" style={{ minHeight: '100vh', background: C.bg, display: 'flex', flexDirection: 'column', fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}>
@@ -527,6 +541,53 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
       )}
 
       {/* ── HEADER ── */}
+      {isCheatLocked && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 70,
+          background: 'rgba(127,29,29,0.88)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: '20px',
+        }}>
+          <div style={{
+            width: '100%', maxWidth: '380px',
+            background: '#fff',
+            border: '1.5px solid #fecaca',
+            borderRadius: '22px',
+            boxShadow: '0 18px 48px rgba(30,46,34,0.28)',
+            padding: '22px',
+            textAlign: 'center',
+          }}>
+            <div style={{
+              width: '56px', height: '56px', borderRadius: '18px',
+              background: '#fef2f2',
+              border: '1.5px solid #fecaca',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              margin: '0 auto 14px',
+            }}>
+              <AlertTriangle size={24} strokeWidth={2.5} color="#dc2626" />
+            </div>
+            <p style={{ color: C.text, fontSize: '17px', fontWeight: 900, marginBottom: '7px' }}>
+              Ujian dikunci
+            </p>
+            <p style={{ color: C.textMuted, fontSize: '12.5px', lineHeight: 1.55, marginBottom: '14px' }}>
+              Anda sudah mencapai batas pelanggaran. Hubungi pengawas untuk membuka sesi sebelum melanjutkan.
+            </p>
+            <div style={{
+              background: '#fef2f2',
+              border: '1.5px solid #fecaca',
+              borderRadius: '14px',
+              padding: '10px 12px',
+              color: '#991b1b',
+              fontSize: '12px',
+              fontWeight: 800,
+            }}>
+              Semua jawaban, navigasi, dan pengiriman ujian sementara diblokir.
+            </div>
+          </div>
+        </div>
+      )}
+
       {needsFullscreen && (
         <div style={{
           position: 'fixed', inset: 0, zIndex: 60,
@@ -648,7 +709,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
             </div>
 
             {/* ragu-ragu toggle */}
-            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: isCheatLocked ? 'not-allowed' : 'pointer', opacity: isCheatLocked ? 0.55 : 1 }}>
               <div style={{ position: 'relative', width: '32px', height: '18px', borderRadius: '999px', background: ans?.is_doubtful ? '#f59e0b' : '#e0e5e0', transition: 'background 0.2s', flexShrink: 0 }}
                 onClick={() => setAnswer(q.id, { is_doubtful: !ans?.is_doubtful })}>
                 <div style={{ position: 'absolute', top: '2px', left: ans?.is_doubtful ? '16px' : '2px', width: '14px', height: '14px', borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.15)', transition: 'left 0.2s' }} />
@@ -681,10 +742,11 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
               {q.options.map(o => {
                 const sel = ans?.selected_option_id === o.id;
                 return (
-                  <button key={o.id} onClick={() => setAnswer(q.id, { selected_option_id: o.id })}
+                  <button key={o.id} onClick={() => setAnswer(q.id, { selected_option_id: o.id })} disabled={isCheatLocked}
                     style={{
                       width: '100%', textAlign: 'left', display: 'flex', alignItems: 'flex-start', gap: '10px',
-                      padding: '11px 12px', borderRadius: '12px', cursor: 'pointer',
+                      padding: '11px 12px', borderRadius: '12px', cursor: isCheatLocked ? 'not-allowed' : 'pointer',
+                      opacity: isCheatLocked ? 0.62 : 1,
                       border: `1.5px solid ${sel ? C.green : C.borderMid}`,
                       background: sel ? C.greenLight : C.white,
                       transition: 'all 0.12s',
@@ -709,8 +771,9 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
           ) : (
             <div style={{ padding: '0 14px 16px' }}>
               <textarea value={ans?.essay_answer || ''} onChange={e => setAnswer(q.id, { essay_answer: e.target.value })}
+                disabled={isCheatLocked}
                 placeholder="Tulis jawaban..." rows={5}
-                style={{ width: '100%', padding: '10px 12px', fontSize: `${fontSize}px`, border: `1.5px solid ${C.borderMid}`, borderRadius: '12px', outline: 'none', resize: 'none', color: C.text, background: C.bg, fontFamily: 'inherit' }}
+                style={{ width: '100%', padding: '10px 12px', fontSize: `${fontSize}px`, border: `1.5px solid ${C.borderMid}`, borderRadius: '12px', outline: 'none', resize: 'none', color: C.text, background: C.bg, fontFamily: 'inherit', cursor: isCheatLocked ? 'not-allowed' : 'text', opacity: isCheatLocked ? 0.62 : 1 }}
                 onFocus={e => { e.target.style.borderColor = C.green; e.target.style.boxShadow = '0 0 0 3px rgba(45,122,79,0.1)'; }}
                 onBlur={e => { e.target.style.borderColor = C.borderMid; e.target.style.boxShadow = 'none'; }} />
             </div>
@@ -719,11 +782,12 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
       </main>
 
       {/* ── FLOATING GRID BUTTON ── */}
-      <button onClick={openGrid}
+      <button onClick={openGrid} disabled={isCheatLocked}
         style={{
           position: 'fixed', bottom: '70px', right: '16px', zIndex: 38,
           width: '48px', height: '48px', borderRadius: '14px',
-          background: C.green, border: 'none', cursor: 'pointer',
+          background: C.green, border: 'none', cursor: isCheatLocked ? 'not-allowed' : 'pointer',
+          opacity: isCheatLocked ? 0.45 : 1,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           boxShadow: '0 4px 14px rgba(45,122,79,0.35)',
         }}>
@@ -736,19 +800,19 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
       {/* ── BOTTOM NAV ── */}
       <div style={{ position: 'sticky', bottom: 0, zIndex: 40, background: C.white, borderTop: `1.5px solid ${C.border}`, padding: '10px 14px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', maxWidth: '680px', margin: '0 auto' }}>
-          <button onClick={() => goTo(Math.max(0, current - 1))} disabled={current === 0}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '10px 16px', borderRadius: '12px', fontSize: '13px', fontWeight: 700, background: C.bg, color: C.textMid, border: `1.5px solid ${C.borderMid}`, cursor: current === 0 ? 'not-allowed' : 'pointer', opacity: current === 0 ? 0.35 : 1 }}>
+          <button onClick={() => goTo(Math.max(0, current - 1))} disabled={current === 0 || isCheatLocked}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '10px 16px', borderRadius: '12px', fontSize: '13px', fontWeight: 700, background: C.bg, color: C.textMid, border: `1.5px solid ${C.borderMid}`, cursor: current === 0 || isCheatLocked ? 'not-allowed' : 'pointer', opacity: current === 0 || isCheatLocked ? 0.35 : 1 }}>
             <ChevronLeft size={14} strokeWidth={2.5} /> Sebelumnya
           </button>
 
           {isLast ? (
-            <button onClick={openConfirm}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '10px 20px', borderRadius: '12px', fontSize: '13px', fontWeight: 800, background: '#1a5fa8', color: '#fff', border: 'none', cursor: 'pointer' }}>
+            <button onClick={openConfirm} disabled={isCheatLocked}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '10px 20px', borderRadius: '12px', fontSize: '13px', fontWeight: 800, background: '#1a5fa8', color: '#fff', border: 'none', cursor: isCheatLocked ? 'not-allowed' : 'pointer', opacity: isCheatLocked ? 0.45 : 1 }}>
               <Send size={13} strokeWidth={2.5} /> Kirim
             </button>
           ) : (
-            <button onClick={() => goTo(current + 1)}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '10px 16px', borderRadius: '12px', fontSize: '13px', fontWeight: 700, background: C.green, color: '#fff', border: 'none', cursor: 'pointer' }}>
+            <button onClick={() => goTo(current + 1)} disabled={isCheatLocked}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '10px 16px', borderRadius: '12px', fontSize: '13px', fontWeight: 700, background: C.green, color: '#fff', border: 'none', cursor: isCheatLocked ? 'not-allowed' : 'pointer', opacity: isCheatLocked ? 0.45 : 1 }}>
               Selanjutnya <ChevronRight size={14} strokeWidth={2.5} />
             </button>
           )}
@@ -782,7 +846,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
             if (doubt)    { bg = '#f59e0b'; color = '#fff'; }
             else if (answered) { bg = C.green;   color = '#fff'; }
             return (
-              <button key={qq.id} onClick={() => goTo(i)}
+              <button key={qq.id} onClick={() => goTo(i)} disabled={isCheatLocked}
                 style={{
                   aspectRatio: '1', display: 'flex', alignItems: 'center', justifyContent: 'center',
                   fontSize: '11px', fontWeight: 700, borderRadius: '10px', border: 'none',
@@ -790,7 +854,8 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
                   color: isCurrent ? C.green : color,
                   outline: isCurrent ? `2.5px solid ${C.green}` : 'none',
                   outlineOffset: '1px',
-                  cursor: 'pointer',
+                  cursor: isCheatLocked ? 'not-allowed' : 'pointer',
+                  opacity: isCheatLocked ? 0.55 : 1,
                 }}>
                 {i + 1}
               </button>
@@ -800,8 +865,8 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
 
         {/* kirim button */}
         <div style={{ borderTop: `1.5px solid ${C.borderLight}`, paddingTop: '14px' }}>
-          <button onClick={async () => { if (await enterFullscreen()) { setShowGrid(false); setShowConfirm(true); } }}
-            style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#1a5fa8', color: '#fff', border: 'none', padding: '13px 18px', borderRadius: '14px', cursor: 'pointer' }}>
+          <button onClick={async () => { if (isCheatLockedRef.current) return; if (await enterFullscreen()) { setShowGrid(false); setShowConfirm(true); } }} disabled={isCheatLocked}
+            style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#1a5fa8', color: '#fff', border: 'none', padding: '13px 18px', borderRadius: '14px', cursor: isCheatLocked ? 'not-allowed' : 'pointer', opacity: isCheatLocked ? 0.45 : 1 }}>
             <span style={{ fontSize: '14px', fontWeight: 800 }}>Kirim Ujian</span>
             <span style={{ width: '32px', height: '32px', background: 'rgba(255,255,255,0.15)', borderRadius: '9px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <Send size={15} color="#fff" strokeWidth={2.5} />
@@ -837,8 +902,8 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
             style={{ flex: 1, padding: '12px', fontSize: '13px', fontWeight: 700, color: C.textMid, background: C.bg, border: `1.5px solid ${C.borderMid}`, borderRadius: '12px', cursor: 'pointer' }}>
             Kembali
           </button>
-          <button onClick={() => handleSubmit()} disabled={submitting}
-            style={{ flex: 1, padding: '12px', fontSize: '13px', fontWeight: 800, color: '#fff', background: '#1a5fa8', border: 'none', borderRadius: '12px', cursor: 'pointer', opacity: submitting ? 0.6 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+          <button onClick={() => handleSubmit()} disabled={submitting || isCheatLocked}
+            style={{ flex: 1, padding: '12px', fontSize: '13px', fontWeight: 800, color: '#fff', background: '#1a5fa8', border: 'none', borderRadius: '12px', cursor: submitting || isCheatLocked ? 'not-allowed' : 'pointer', opacity: submitting || isCheatLocked ? 0.6 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
             {submitting ? <Spinner size={14} /> : null} Ya, Kirim
           </button>
         </div>
