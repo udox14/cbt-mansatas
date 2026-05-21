@@ -118,6 +118,10 @@ proctor.get('/sessions', async (c) => {
   const enriched = results.map((s: any) => {
     const hasStarted = !!s.id;
     const diff = hasStarted ? Date.now() - parseServerTime(s.last_heartbeat) : Number.POSITIVE_INFINITY;
+    const parsed = parseSesiJam(s.sesi_tes || '');
+    const jadwal_status = s.tanggal_tes && parsed
+      ? cekJadwal(s.tanggal_tes, parsed.jamMulai, parsed.jamSelesai)
+      : 'no_schedule';
     let live_status = 'offline';
     if (!hasStarted) live_status = 'belum_mulai';
     else if (s.status === 'submitted') live_status = 'selesai';
@@ -130,6 +134,7 @@ proctor.get('/sessions', async (c) => {
       last_heartbeat: toIsoServerTime(s.last_heartbeat),
       has_started: hasStarted,
       live_status,
+      jadwal_status,
     };
   });
   return c.json(ok(enriched));

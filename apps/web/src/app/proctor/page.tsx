@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { GET, POST } from '@/lib/api';
 import { LoadingScreen, EmptyState, ToastProvider, useToast, Confirm, Spinner, Modal } from '@/components/ui';
@@ -15,10 +15,55 @@ const KemenagLogo = () => (
   <img src="/kemenag.png" alt="Kemenag" width={36} height={36} style={{ objectFit: 'contain', flexShrink: 0 }} />
 );
 
+const SIMULATION_SESSION_KEY = '__simulasi__';
+
 const parseServerTime = (value: string) => {
   const normalized = value.includes('T') ? value : `${value.replace(' ', 'T')}Z`;
   const time = new Date(normalized).getTime();
   return Number.isFinite(time) ? time : Date.now();
+};
+
+const formatDateShort = (value?: string | null) => {
+  if (!value) return '';
+  const date = new Date(`${value}T00:00:00+07:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString('id-ID', { day: '2-digit', month: 'short' });
+};
+
+const getSessionKey = (row: any) => {
+  const tanggal = String(row?.tanggal_tes || '').trim();
+  const sesi = String(row?.sesi_tes || '').trim();
+  return tanggal || sesi ? `${tanggal}||${sesi}` : SIMULATION_SESSION_KEY;
+};
+
+const getSessionLabel = (row: any) => {
+  const tanggal = String(row?.tanggal_tes || '').trim();
+  const sesi = String(row?.sesi_tes || '').trim();
+  if (!tanggal && !sesi) return 'Tanpa Sesi / Simulasi';
+  const prefix = tanggal ? `${formatDateShort(tanggal)} - ` : '';
+  return `${prefix}${sesi || 'Tanpa Sesi'}`;
+};
+
+const buildSessionOptions = (sessions: any[], tokens: any[]) => {
+  const map = new Map<string, { key: string; label: string; active: boolean; simulation: boolean }>();
+  const add = (row: any) => {
+    const key = getSessionKey(row);
+    const existing = map.get(key);
+    const option = {
+      key,
+      label: getSessionLabel(row),
+      active: row?.jadwal_status === 'aktif',
+      simulation: key === SIMULATION_SESSION_KEY,
+    };
+    map.set(key, existing ? { ...existing, active: existing.active || option.active } : option);
+  };
+  tokens.forEach(add);
+  sessions.forEach(add);
+  return Array.from(map.values()).sort((a, b) => {
+    if (a.active !== b.active) return a.active ? -1 : 1;
+    if (a.simulation !== b.simulation) return a.simulation ? 1 : -1;
+    return a.label.localeCompare(b.label);
+  });
 };
 
 // ── Jam real-time ─────────────────────────────────────────────
@@ -112,6 +157,7 @@ function ProctorContent() {
   const [sessions, setSessions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterExam, setFilterExam] = useState('all');
+  const [filterSession, setFilterSession] = useState('');
   const [filterStart, setFilterStart] = useState<'all' | 'started' | 'not_started'>('all');
   const [filterFinished, setFilterFinished] = useState<'all' | 'hide_finished' | 'finished_only'>('all');
   const [searchTerm, setSearchTerm] = useState('');
@@ -123,6 +169,7 @@ function ProctorContent() {
   const [loadingLog, setLoadingLog] = useState(false);
   const [tick, setTick] = useState(0); // for remaining-time re-render
   const prevLockedCount = useRef(0);
+  const sessionFilterTouchedRef = useRef(false);
   const [newLockAlert, setNewLockAlert] = useState(false);
 
   const fetchData = useCallback(async () => {
@@ -153,6 +200,39 @@ function ProctorContent() {
     const iv = setInterval(() => setTick(t => t + 1), 1000);
     return () => clearInterval(iv);
   }, []);
+
+  const sessionsForExam = useMemo(
+    () => filterExam === 'all' ? sessions : sessions.filter((s: any) => s.exam_id === filterExam),
+    [sessions, filterExam]
+  );
+
+  const tokensForExam = useMemo(
+    () => filterExam === 'all' ? tokens : tokens.filter((t: any) => t.exam_id === filterExam),
+    [tokens, filterExam]
+  );
+
+  const sessionOptions = useMemo(
+    () => buildSessionOptions(sessionsForExam, tokensForExam),
+    [sessionsForExam, tokensForExam]
+  );
+
+  const effectiveFilterSession = filterSession
+    || sessionOptions.find(option => option.active)?.key
+    || sessionOptions[0]?.key
+    || '';
+
+  useEffect(() => {
+    if (!sessionOptions.length) {
+      if (filterSession) setFilterSession('');
+      return;
+    }
+
+    const selectedExists = sessionOptions.some(option => option.key === filterSession);
+    if (sessionFilterTouchedRef.current && selectedExists) return;
+
+    const nextSession = sessionOptions.find(option => option.active)?.key || sessionOptions[0].key;
+    if (filterSession !== nextSession) setFilterSession(nextSession);
+  }, [sessionOptions, filterSession]);
 
   const handleReset = async () => {
     if (!resetTarget) return;
@@ -185,9 +265,15 @@ function ProctorContent() {
   if (authLoading || loading) return <LoadingScreen />;
   if (!user) return null;
 
-  // Filter by exam, start status, and finished visibility
-  const filteredByExam = filterExam === 'all' ? sessions : sessions.filter((s: any) => s.exam_id === filterExam);
-  const filtered = filteredByExam.filter((s: any) => {
+  const visibleTokens = effectiveFilterSession
+    ? tokensForExam.filter((t: any) => getSessionKey(t) === effectiveFilterSession)
+    : [];
+
+  // Filter pipeline: ujian aktif -> sesi tes -> status mulai -> selesai -> search.
+  const filteredBySession = effectiveFilterSession
+    ? sessionsForExam.filter((s: any) => getSessionKey(s) === effectiveFilterSession)
+    : [];
+  const filtered = filteredBySession.filter((s: any) => {
     if (filterStart === 'started' && !s.has_started) return false;
     if (filterStart === 'not_started' && s.has_started) return false;
     if (filterFinished === 'hide_finished' && s.live_status === 'selesai') return false;
@@ -263,11 +349,11 @@ function ProctorContent() {
             <p style={{ color: C.textMid, fontSize: '11px', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Token Aktif</p>
             <span style={{ background: '#e0f0ff', color: '#1a5fa8', fontSize: '10px', fontWeight: 700, padding: '3px 10px', borderRadius: '999px' }}>Auto-refresh 10s</span>
           </div>
-          {tokens.length === 0
+          {visibleTokens.length === 0
             ? <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '14px', padding: '20px', textAlign: 'center', color: C.textFaint, fontSize: '13px' }}>Belum ada ujian aktif</div>
             : (
               <div className="space-y-2">
-                {tokens.map((t: any) => (
+                {visibleTokens.map((t: any) => (
                   <div key={t.id} style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '14px', padding: '14px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
                     <div>
                       <p style={{ color: C.text, fontSize: '13px', fontWeight: 700 }}>{t.exam_title}</p>
@@ -333,8 +419,27 @@ function ProctorContent() {
                 <option value="hide_finished">Sembunyikan Selesai</option>
                 <option value="finished_only">Hanya Selesai</option>
               </select>
+              {sessionOptions.length > 0 && (
+                <select
+                  value={effectiveFilterSession}
+                  onChange={e => {
+                    sessionFilterTouchedRef.current = true;
+                    setFilterSession(e.target.value);
+                  }}
+                  style={{ fontSize: '11.5px', fontWeight: 600, padding: '5px 12px', border: `1.5px solid ${C.borderMid}`, borderRadius: '8px', background: C.white, color: C.textMid, cursor: 'pointer' }}
+                >
+                  {sessionOptions.map(option => (
+                    <option key={option.key} value={option.key}>
+                      {option.active ? `Sesi sedang berjalan - ${option.label}` : option.label}
+                    </option>
+                  ))}
+                </select>
+              )}
               {examOptions.length > 1 && (
-                <select value={filterExam} onChange={e => setFilterExam(e.target.value)}
+                <select value={filterExam} onChange={e => {
+                  sessionFilterTouchedRef.current = false;
+                  setFilterExam(e.target.value);
+                }}
                   style={{ fontSize: '11.5px', fontWeight: 600, padding: '5px 12px', border: `1.5px solid ${C.borderMid}`, borderRadius: '8px', background: C.white, color: C.textMid, cursor: 'pointer' }}>
                   <option value="all">Semua Ujian</option>
                   {examOptions.map(([id, title]) => <option key={id} value={id}>{title as string}</option>)}
