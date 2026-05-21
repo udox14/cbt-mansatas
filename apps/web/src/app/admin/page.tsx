@@ -12,7 +12,7 @@ import { exportExamResults } from '@/lib/export';
 import {
   ClipboardList, Users, School, Shield, LogOut, Menu,
   Plus, FileDown, RefreshCw, Pencil, Trash2, Upload,
-  Image, Volume2, X, UserPlus, ChevronLeft, ArrowRight, Settings,
+  Image, Volume2, X, UserPlus, ChevronLeft, ArrowRight, Settings, Power,
 } from 'lucide-react';
 
 // ── TYPES ────────────────────────────────────────────────────
@@ -705,6 +705,7 @@ function TokensView({ examId }: { examId: string }) {
   const [loading, setLoading] = useState(true);
   const [gen, setGen] = useState(false);
   const [regenId, setRegenId] = useState<string | null>(null);
+  const [toggleId, setToggleId] = useState<string | null>(null);
   const [manualToken, setManualToken] = useState('');
   const [settingManual, setSettingManual] = useState(false);
   const [filterRoom, setFilterRoom] = useState('all');
@@ -727,6 +728,14 @@ function TokensView({ examId }: { examId: string }) {
     setSettingManual(false);
     toast(r.success ? 'success' : 'error', r.message || r.error || 'Gagal');
     if (r.success) { setManualToken(token_code); fetchT(); }
+  };
+  const toggleTokenActive = async (token: any) => {
+    setToggleId(token.id);
+    const nextActive = Number(token.is_active) === 1 ? 0 : 1;
+    const r = await POST(`/api/admin/exams/${examId}/tokens/${token.id}/active`, { is_active: nextActive });
+    setToggleId(null);
+    toast(r.success ? 'success' : 'error', r.message || r.error || 'Gagal mengubah status token');
+    if (r.success) fetchT();
   };
   const rooms = Array.from(new Set(tokens.map((t: any) => t.room_name))).sort();
   const groups = Array.from(new Map(tokens.map((t: any) => [`${t.tanggal_tes || ''}|${t.sesi_tes || ''}`, {
@@ -800,19 +809,31 @@ function TokensView({ examId }: { examId: string }) {
           : (
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
               {visible.map((t: any) => (
-                <div key={t.id} style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '12px', padding: '14px 16px' }}>
+                <div key={t.id} style={{ background: C.white, border: `1.5px solid ${Number(t.is_active) === 1 ? C.borderMid : '#fecaca'}`, borderRadius: '12px', padding: '14px 16px', opacity: Number(t.is_active) === 1 ? 1 : 0.72 }}>
                   <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '10px', marginBottom: '8px' }}>
                     <div>
-                      <p style={{ color: C.textMuted, fontSize: '11px', fontWeight: 700 }}>{t.room_name}</p>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                        <p style={{ color: C.textMuted, fontSize: '11px', fontWeight: 700 }}>{t.room_name}</p>
+                        <span style={{ background: Number(t.is_active) === 1 ? C.greenLight : '#fef2f2', color: Number(t.is_active) === 1 ? C.green : '#dc2626', border: `1px solid ${Number(t.is_active) === 1 ? C.greenBorder : '#fecaca'}`, borderRadius: '999px', padding: '1px 7px', fontSize: '9.5px', fontWeight: 800 }}>
+                          {Number(t.is_active) === 1 ? 'Aktif' : 'Nonaktif'}
+                        </span>
+                      </div>
                       <p style={{ color: C.textFaint, fontSize: '10.5px', marginTop: '2px' }}>{formatDate(t.tanggal_tes)} · {t.sesi_tes || 'Tanpa sesi'}</p>
                     </div>
-                    <button onClick={() => regenerateOne(t.id)} disabled={regenId === t.id}
-                      title="Regenerate token ini"
-                      style={{ width: '28px', height: '28px', borderRadius: '8px', border: `1.5px solid ${C.greenBorder}`, background: C.greenLight, color: C.green, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: regenId === t.id ? 'wait' : 'pointer', flexShrink: 0 }}>
-                      <RefreshCw size={13} />
-                    </button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                      <button onClick={() => toggleTokenActive(t)} disabled={toggleId === t.id}
+                        title={Number(t.is_active) === 1 ? 'Nonaktifkan token ruangan/sesi ini' : 'Aktifkan token ruangan/sesi ini'}
+                        style={{ width: '28px', height: '28px', borderRadius: '8px', border: `1.5px solid ${Number(t.is_active) === 1 ? '#fecaca' : C.greenBorder}`, background: Number(t.is_active) === 1 ? '#fef2f2' : C.greenLight, color: Number(t.is_active) === 1 ? '#dc2626' : C.green, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: toggleId === t.id ? 'wait' : 'pointer' }}>
+                        <Power size={13} />
+                      </button>
+                      <button onClick={() => regenerateOne(t.id)} disabled={regenId === t.id}
+                        title="Regenerate token ini"
+                        style={{ width: '28px', height: '28px', borderRadius: '8px', border: `1.5px solid ${C.greenBorder}`, background: C.greenLight, color: C.green, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: regenId === t.id ? 'wait' : 'pointer' }}>
+                        <RefreshCw size={13} />
+                      </button>
+                    </div>
                   </div>
-                  <p style={{ color: C.green, fontSize: '22px', fontWeight: 900, letterSpacing: '0.18em', fontVariantNumeric: 'tabular-nums', fontFamily: 'monospace' }}>{t.token_code}</p>
+                  <p style={{ color: Number(t.is_active) === 1 ? C.green : C.textMuted, fontSize: '22px', fontWeight: 900, letterSpacing: '0.18em', fontVariantNumeric: 'tabular-nums', fontFamily: 'monospace' }}>{t.token_code}</p>
                 </div>
               ))}
             </div>

@@ -657,6 +657,24 @@ admin.get('/exams/:examId/tokens', async (c) => {
   return c.json(ok(results));
 });
 
+admin.post('/exams/:examId/tokens/:tokenId/active', async (c) => {
+  const examId = c.req.param('examId');
+  const tokenId = c.req.param('tokenId');
+  const body = await c.req.json<{ is_active?: boolean | number }>();
+  const isActive = body.is_active === true || body.is_active === 1 ? 1 : 0;
+
+  const token = await c.env.DB.prepare(
+    'SELECT id FROM cbt_exam_tokens WHERE id=? AND exam_id=?'
+  ).bind(tokenId, examId).first();
+  if (!token) return c.json(err('Token tidak ditemukan'), 404);
+
+  await c.env.DB.prepare(
+    'UPDATE cbt_exam_tokens SET is_active=? WHERE id=? AND exam_id=?'
+  ).bind(isActive, tokenId, examId).run();
+
+  return c.json(ok({ id: tokenId, is_active: isActive }, isActive ? 'Token diaktifkan' : 'Token dinonaktifkan'));
+});
+
 admin.post('/exams/:examId/tokens/generate', async (c) => {
   const examId = c.req.param('examId');
   const body = await c.req.json<{
