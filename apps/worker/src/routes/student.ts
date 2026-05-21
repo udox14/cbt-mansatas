@@ -155,11 +155,25 @@ student.post('/exams/:examId/validate-token', async (c) => {
   }
 
   // ── H5: Validasi token + cek expires_at ──
-  const tokenRow = await c.env.DB.prepare(
+  let tokenRow = await c.env.DB.prepare(
     `SELECT * FROM cbt_exam_tokens
      WHERE exam_id=? AND room_id=? AND tanggal_tes=? AND sesi_tes=? AND token_code=? AND is_active=1
        AND (expires_at IS NULL OR expires_at > datetime('now'))`
   ).bind(examId, user.room_id, tanggalTes, sesiTes, token_code).first();
+
+  // Akun dummy/manual tidak punya tanggal_tes/sesi_tes. Untuk simulasi,
+  // izinkan mereka memakai token aktif ruangan yang sama walau token itu dibuat
+  // untuk jadwal PMB tertentu.
+  if (!tokenRow && userType === 'cbt_user') {
+    tokenRow = await c.env.DB.prepare(
+      `SELECT * FROM cbt_exam_tokens
+       WHERE exam_id=? AND room_id=? AND token_code=? AND is_active=1
+         AND (expires_at IS NULL OR expires_at > datetime('now'))
+       ORDER BY tanggal_tes DESC, sesi_tes DESC
+       LIMIT 1`
+    ).bind(examId, user.room_id, token_code).first();
+  }
+
   if (!tokenRow) return c.json(err('Token tidak valid atau sudah kedaluwarsa'), 401);
 
   // ── Cek ujian aktif ──
