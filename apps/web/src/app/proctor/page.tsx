@@ -48,6 +48,63 @@ function getRemainingTime(startedAt: string, durationMinutes: number): { text: s
   return { text: `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`, urgent: m < 5, expired: false };
 }
 
+function describeDevice(userAgent?: string | null, deviceId?: string | null) {
+  if (!userAgent) {
+    return deviceId ? { label: 'Perangkat dikenal', detail: deviceId } : { label: 'Belum login', detail: '' };
+  }
+  const ua = userAgent;
+  const lower = ua.toLowerCase();
+  const os = /iphone|ipad|ipod/.test(lower)
+    ? 'iOS'
+    : /android/.test(lower)
+      ? 'Android'
+      : /windows/.test(lower)
+        ? 'Windows'
+        : /mac os x|macintosh/.test(lower)
+          ? 'macOS'
+          : /linux/.test(lower)
+            ? 'Linux'
+            : 'OS tidak dikenal';
+
+  const browser = /edg\//i.test(ua)
+    ? 'Edge'
+    : /opr\//i.test(ua)
+      ? 'Opera'
+      : /firefox\//i.test(ua)
+        ? 'Firefox'
+        : /crios\//i.test(ua)
+          ? 'Chrome iOS'
+          : /chrome\//i.test(ua)
+            ? 'Chrome'
+            : /safari\//i.test(ua)
+              ? 'Safari'
+              : 'Browser tidak dikenal';
+
+  const brand = /iphone/i.test(ua)
+    ? 'iPhone'
+    : /ipad/i.test(ua)
+      ? 'iPad'
+      : /samsung|sm-/i.test(ua)
+        ? 'Samsung'
+        : /redmi|xiaomi|mi\s|poco/i.test(ua)
+          ? 'Xiaomi'
+          : /oppo/i.test(ua)
+            ? 'OPPO'
+            : /vivo/i.test(ua)
+              ? 'vivo'
+              : /huawei/i.test(ua)
+                ? 'Huawei'
+                : /android/i.test(ua)
+                  ? 'Android'
+                  : /windows/i.test(ua)
+                    ? 'PC'
+                    : /macintosh|mac os x/i.test(ua)
+                      ? 'Mac'
+                      : 'Perangkat';
+
+  return { label: `${brand} / ${browser}`, detail: os };
+}
+
 function ProctorContent() {
   const { user, loading: authLoading, logout } = useAuth('proctor');
   const { toast } = useToast();
@@ -146,6 +203,7 @@ function ProctorContent() {
         s.sesi_tes,
         s.tanggal_tes,
         s.device_id,
+        s.user_agent,
       ].filter(Boolean).join(' ').toLowerCase();
       if (!haystack.includes(q)) return false;
     }
@@ -309,6 +367,7 @@ function ProctorContent() {
                         ? getRemainingTime(s.started_at, s.duration_minutes)
                         : null;
                       const violationTotal = Number(s.cheat_log_count || s.cheat_warnings || 0);
+                      const device = describeDevice(s.user_agent, s.device_id);
                       return (
                         <tr key={s.id || `${s.exam_id}-${s.user_type}-${s.user_id}`} style={{ borderBottom: i < filtered.length - 1 ? `1px solid ${C.borderLight}` : 'none', background: isLocked ? '#fffbeb' : isNotStarted ? '#f7f8f7' : 'transparent' }}>
                           <td style={{ padding: '10px 14px' }}>
@@ -316,8 +375,11 @@ function ProctorContent() {
                             <p style={{ color: C.textFaint, fontSize: '10px', marginTop: '1px', fontFamily: 'monospace' }}>{s.nisn}</p>
                           </td>
                           <td style={{ padding: '10px 14px', textAlign: 'center', maxWidth: '210px' }}>
-                            {s.device_id
-                              ? <span title={s.device_id} style={{ display: 'inline-block', maxWidth: '190px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#1a5fa8', background: '#e0f0ff', border: '1.5px solid #bfdbfe', borderRadius: '8px', padding: '3px 8px', fontFamily: 'monospace', fontSize: '10.5px', fontWeight: 800 }}>{s.device_id}</span>
+                            {s.device_id || s.user_agent
+                              ? <span title={[device.label, device.detail, s.device_id, s.user_agent].filter(Boolean).join(' | ')} style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', maxWidth: '190px', color: '#1a5fa8', background: '#e0f0ff', border: '1.5px solid #bfdbfe', borderRadius: '8px', padding: '4px 8px', fontSize: '10.5px', fontWeight: 800 }}>
+                                <span style={{ maxWidth: '170px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{device.label}</span>
+                                {device.detail && <span style={{ color: '#6b7c6e', fontSize: '9.5px', fontWeight: 700, marginTop: '1px' }}>{device.detail}</span>}
+                              </span>
                               : <span style={{ color: C.textFaint, fontSize: '11px', fontWeight: 700 }}>Belum login</span>}
                           </td>
                           <td style={{ padding: '10px 14px', textAlign: 'center' }}>

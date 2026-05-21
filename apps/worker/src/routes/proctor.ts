@@ -86,7 +86,7 @@ proctor.get('/sessions', async (c) => {
     SELECT es.id, p.exam_id, p.user_id, p.user_type,
            COALESCE(es.status, 'not_started') as status,
            COALESCE(es.cheat_warnings, 0) as cheat_warnings,
-           es.started_at, es.finished_at, es.last_heartbeat, es.device_id,
+           es.started_at, es.finished_at, es.last_heartbeat, es.device_id, es.user_agent,
            COALESCE(es.is_time_locked, 0) as is_time_locked,
            p.full_name, p.nisn, p.sesi_tes, p.tanggal_tes,
            p.exam_title, p.duration_minutes,
