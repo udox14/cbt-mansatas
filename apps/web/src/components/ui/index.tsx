@@ -1,5 +1,5 @@
 'use client';
-import { ReactNode, useState, createContext, useContext, useCallback, useRef } from 'react';
+import { ReactNode, useState, createContext, useContext, useCallback, useRef, useEffect } from 'react';
 
 const C = {
   white: '#fff', bg: '#f4f6f4', border: '#e0e5e0', borderMid: '#d4dbd4',
@@ -12,10 +12,38 @@ export function Modal({ open, onClose, title, children, size = 'md' }: {
   open: boolean; onClose: () => void; title?: string; children: ReactNode; size?: 'sm' | 'md' | 'lg';
 }) {
   const backdropPointerDownRef = useRef(false);
+  const [keyboardInset, setKeyboardInset] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!open || typeof window === 'undefined' || !window.visualViewport) return;
+    const vv = window.visualViewport;
+    const updateViewport = () => {
+      const hiddenBottom = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      setKeyboardInset(hiddenBottom);
+      setViewportHeight(vv.height);
+    };
+    updateViewport();
+    vv.addEventListener('resize', updateViewport);
+    vv.addEventListener('scroll', updateViewport);
+    return () => {
+      vv.removeEventListener('resize', updateViewport);
+      vv.removeEventListener('scroll', updateViewport);
+    };
+  }, [open]);
+
   if (!open) return null;
   const maxW = { sm: '420px', md: '560px', lg: '680px' }[size];
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}
+    <div style={{
+      position: 'fixed',
+      inset: 0,
+      zIndex: 50,
+      display: 'flex',
+      alignItems: 'flex-end',
+      justifyContent: 'center',
+      paddingBottom: keyboardInset,
+    }}
       className="sm:items-center">
       <div
         style={{ position: 'fixed', inset: 0, background: 'rgba(30,46,34,0.4)' }}
@@ -27,7 +55,7 @@ export function Modal({ open, onClose, title, children, size = 'md' }: {
       />
       <div style={{
         position: 'relative', background: C.white, width: '100%', maxWidth: maxW,
-        maxHeight: '90vh', overflowY: 'auto',
+        maxHeight: viewportHeight ? Math.max(260, viewportHeight - 24) : '90vh', overflowY: 'auto',
         borderRadius: '20px 20px 0 0', boxShadow: '0 -4px 32px rgba(0,0,0,0.08)',
       }} className="sm:rounded-xl fade-in" onPointerDown={() => { backdropPointerDownRef.current = false; }}>
         {title && (

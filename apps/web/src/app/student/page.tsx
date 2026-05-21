@@ -394,7 +394,11 @@ function StudentContent() {
             onKeyDown={e => { if (e.key === 'Enter') validate(); }}
             className="w-full text-center font-mono font-bold tracking-[0.3em]"
             style={{ paddingLeft: '36px', paddingRight: '12px', paddingTop: '12px', paddingBottom: '12px', fontSize: '20px', border: '1.5px solid #d4dbd4', borderRadius: '12px', outline: 'none', color: '#1e2e22' }}
-            onFocus={e => { e.target.style.borderColor = '#2d7a4f'; e.target.style.boxShadow = '0 0 0 3px rgba(45,122,79,0.1)'; }}
+            onFocus={e => {
+              e.target.style.borderColor = '#2d7a4f';
+              e.target.style.boxShadow = '0 0 0 3px rgba(45,122,79,0.1)';
+              setTimeout(() => e.target.scrollIntoView({ block: 'center', behavior: 'smooth' }), 250);
+            }}
             onBlur={e => { e.target.style.borderColor = '#d4dbd4'; e.target.style.boxShadow = 'none'; }} />
         </div>
         {tokenError && <p className="text-center mt-2" style={{ color: '#dc2626', fontSize: '12px', fontWeight: 600 }}>{tokenError}</p>}
