@@ -13,6 +13,7 @@ import { authMiddleware } from '../middleware/auth';
 import { checkRateLimit, resetRateLimit } from '../utils/ratelimit';
 
 const auth = new Hono<{ Bindings: Env }>();
+const STAFF_SESSION_HOURS = 24 * 90; // 3 bulan untuk admin/proktor
 
 auth.post('/login', async (c) => {
   let body: { username?: string; password?: string };
@@ -70,7 +71,7 @@ auth.post('/login', async (c) => {
       sub: admin.id, username: admin.username, role: 'admin',
       room_id: null, full_name: admin.nama_lengkap || 'Admin',
       source: 'admins',
-    }, c.env.JWT_SECRET);
+    }, c.env.JWT_SECRET, STAFF_SESSION_HOURS);
 
     return c.json(ok({
       token,
@@ -96,11 +97,14 @@ auth.post('/login', async (c) => {
     await resetRateLimit(c.env.RATE_LIMIT, `login:ip:${ip}`);
     await resetRateLimit(c.env.RATE_LIMIT, `login:user:${uname}`);
 
+    const sessionHours = ['admin', 'proctor'].includes(cbtUser.role)
+      ? STAFF_SESSION_HOURS
+      : undefined;
     const token = await signJWT({
       sub: cbtUser.id, username: cbtUser.username, role: cbtUser.role,
       room_id: cbtUser.room_id, full_name: cbtUser.nama_lengkap,
       source: 'cbt_user',
-    }, c.env.JWT_SECRET);
+    }, c.env.JWT_SECRET, sessionHours);
 
     return c.json(ok({
       token,

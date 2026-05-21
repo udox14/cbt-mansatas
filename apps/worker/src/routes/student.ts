@@ -498,7 +498,13 @@ student.post('/sessions/:sessionId/submit', async (c) => {
       return c.json(err('Waktu ujian sudah habis. Hubungi pengawas.'), 403);
     }
 
-    await finalizeSession(c.env.DB, session, body.answers || [], 'submitted');
+    await saveAnswers(c.env.DB, session.id, body.answers || []);
+    const missingCount = await countMissingRequiredAnswers(c.env.DB, session.id, session.exam_id);
+    if (missingCount > 0) {
+      return c.json(err(`${missingCount} soal belum diisi. Lengkapi semua soal sebelum mengirim ujian.`), 400);
+    }
+
+    await finalizeSession(c.env.DB, session, [], 'submitted');
   }
 
   const result = await computeScore(c.env.DB, sessionId, session.exam_id, session.user_id, session.user_type);
@@ -526,6 +532,21 @@ async function saveAnswers(db: D1Database, sessionId: string, answers: any[]) {
     ).bind(newId(), sessionId, a.question_id, a.selected_option_id || null, a.essay_answer || null, a.is_doubtful ? 1 : 0, now())
   );
   for (let i = 0; i < stmts.length; i += 100) await db.batch(stmts.slice(i, i + 100));
+}
+
+async function countMissingRequiredAnswers(db: D1Database, sessionId: string, examId: string) {
+  const row = await db.prepare(
+    `SELECT COUNT(*) as cnt
+     FROM cbt_questions q
+     LEFT JOIN cbt_student_answers a
+       ON a.question_id = q.id AND a.session_id = ?
+     WHERE q.exam_id = ?
+       AND (
+         (q.question_type = 'multiple_choice' AND a.selected_option_id IS NULL)
+         OR (q.question_type = 'essay' AND TRIM(COALESCE(a.essay_answer, '')) = '')
+       )`
+  ).bind(sessionId, examId).first<any>();
+  return Number(row?.cnt || 0);
 }
 
 function isSessionDurationExpired(session: any) {

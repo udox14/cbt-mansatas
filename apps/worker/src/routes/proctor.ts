@@ -61,7 +61,7 @@ proctor.get('/sessions', async (c) => {
       WHERE et.room_id = ? AND et.is_active = 1 AND e.active_status = 'active'
     ),
     participants AS (
-      SELECT t.exam_id, t.room_id, t.tanggal_tes as token_tanggal_tes, t.sesi_tes as token_sesi_tes,
+      SELECT DISTINCT t.exam_id, t.room_id,
              t.exam_title, t.duration_minutes, p.id as user_id, 'pendaftar' as user_type,
              p.nama_lengkap as full_name, p.nisn as nisn, COALESCE(p.sesi_tes, '') as sesi_tes,
              COALESCE(p.tanggal_tes, '') as tanggal_tes
@@ -73,7 +73,7 @@ proctor.get('/sessions', async (c) => {
 
       UNION ALL
 
-      SELECT t.exam_id, t.room_id, t.tanggal_tes as token_tanggal_tes, t.sesi_tes as token_sesi_tes,
+      SELECT DISTINCT t.exam_id, t.room_id,
              t.exam_title, t.duration_minutes, cu.id as user_id, 'cbt_user' as user_type,
              cu.nama_lengkap as full_name, cu.nisn as nisn, '' as sesi_tes, '' as tanggal_tes
       FROM active_tokens t

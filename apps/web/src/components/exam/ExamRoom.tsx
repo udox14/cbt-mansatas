@@ -137,6 +137,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
   const [submitting, setSubmitting] = useState(false);
   const [showGrid, setShowGrid] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [missingQuestionIds, setMissingQuestionIds] = useState<Set<string>>(new Set());
   const [fontSize, setFontSize] = useState(16);
   const [timeLeft, setTimeLeft] = useState(0);
   const [effectiveStartedAt, setEffectiveStartedAt] = useState(startedAt);
@@ -479,6 +480,14 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
       answersRef.current = m; // sync ref agar flushAnswers selalu up-to-date
       localStorage.setItem(`cbt_answers_${sessionId}`, JSON.stringify(Array.from(m.values())));
       dirtyRef.current.add(qId);
+      if (next.selected_option_id || next.essay_answer?.trim()) {
+        setMissingQuestionIds(marked => {
+          if (!marked.has(qId)) return marked;
+          const updated = new Set(marked);
+          updated.delete(qId);
+          return updated;
+        });
+      }
       return m;
     });
   }, [sessionId]);
@@ -492,10 +501,48 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
     window.scrollTo(0, 0);
   }, [sessionId, enterFullscreen]);
 
+  const findMissingQuestions = useCallback(() => {
+    return questions.filter(qq => {
+      const a = answersRef.current.get(qq.id);
+      return !(a?.selected_option_id || a?.essay_answer?.trim());
+    });
+  }, [questions]);
+
+  const showMissingQuestions = useCallback((missing: Question[]) => {
+    setMissingQuestionIds(new Set(missing.map(qq => qq.id)));
+    const firstMissingIndex = questions.findIndex(qq => qq.id === missing[0]?.id);
+    if (firstMissingIndex >= 0) {
+      setCurrent(firstMissingIndex);
+      localStorage.setItem(`cbt_pos_${sessionId}`, String(firstMissingIndex));
+    }
+    setShowConfirm(false);
+    setShowGrid(true);
+    addToast(`${missing.length} soal belum diisi. Silakan lengkapi soal yang ditandai merah.`);
+  }, [addToast, questions, sessionId]);
+
+  const openSubmitConfirm = useCallback(async () => {
+    if (isCheatLockedRef.current) return;
+    if (!(await enterFullscreen())) return;
+    const missing = findMissingQuestions();
+    if (missing.length > 0) {
+      showMissingQuestions(missing);
+      return;
+    }
+    setShowGrid(false);
+    setShowConfirm(true);
+  }, [enterFullscreen, findMissingQuestions, showMissingQuestions]);
+
   const handleSubmit = useCallback(async (force = false) => {
     if (isCheatLockedRef.current) return;
     if (submittedRef.current && !force) return;
     if (!force && !(await enterFullscreen())) return;
+    if (!force) {
+      const missing = findMissingQuestions();
+      if (missing.length > 0) {
+        showMissingQuestions(missing);
+        return;
+      }
+    }
     submittedRef.current = true;
     setSubmitting(true);
     setShowConfirm(false);
@@ -513,7 +560,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
     localStorage.removeItem(`cbt_answers_${sessionId}`);
     localStorage.removeItem(`cbt_pos_${sessionId}`);
     onFinish(r.data || {});
-  }, [sessionId, onFinish, enterFullscreen]);
+  }, [sessionId, onFinish, enterFullscreen, findMissingQuestions, showMissingQuestions]);
 
   const openGrid = useCallback(async () => {
     if (isCheatLockedRef.current) return;
@@ -522,10 +569,8 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
   }, [enterFullscreen]);
 
   const openConfirm = useCallback(async () => {
-    if (isCheatLockedRef.current) return;
-    if (!(await enterFullscreen())) return;
-    setShowConfirm(true);
-  }, [enterFullscreen]);
+    await openSubmitConfirm();
+  }, [openSubmitConfirm]);
 
   const reloadLockedSession = useCallback(() => {
     isPageLeavingRef.current = true;
@@ -547,7 +592,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
   const q = questions[current];
   if (!q) return null;
   const ans = answers.get(q.id);
-  const answeredCount = Array.from(answers.values()).filter(a => a.selected_option_id || a.essay_answer).length;
+  const answeredCount = Array.from(answers.values()).filter(a => a.selected_option_id || a.essay_answer?.trim()).length;
   const doubtCount = Array.from(answers.values()).filter(a => a.is_doubtful).length;
   const mm = Math.floor(timeLeft / 60);
   const ss = timeLeft % 60;
@@ -749,7 +794,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
       </header>
 
       {/* ── QUESTION ── */}
-      <main style={{ flex: 1, padding: '12px', maxWidth: '680px', width: '100%', margin: '0 auto', paddingBottom: '80px' }}>
+      <main style={{ flex: 1, padding: '12px', maxWidth: '680px', width: '100%', margin: '0 auto', paddingBottom: 'calc(128px + env(safe-area-inset-bottom, 0px))' }}>
         <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '18px', overflow: 'hidden' }}>
 
           {/* soal header */}
@@ -839,7 +884,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
       {/* ── FLOATING GRID BUTTON ── */}
       <button onClick={openGrid} disabled={isCheatLocked}
         style={{
-          position: 'fixed', bottom: '70px', right: '16px', zIndex: 38,
+          position: 'fixed', bottom: 'calc(82px + env(safe-area-inset-bottom, 0px))', right: '16px', zIndex: 38,
           width: '48px', height: '48px', borderRadius: '14px',
           background: C.green, border: 'none', cursor: isCheatLocked ? 'not-allowed' : 'pointer',
           opacity: isCheatLocked ? 0.45 : 1,
@@ -853,7 +898,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
       </button>
 
       {/* ── BOTTOM NAV ── */}
-      <div style={{ position: 'sticky', bottom: 0, zIndex: 40, background: C.white, borderTop: `1.5px solid ${C.border}`, padding: '10px 14px' }}>
+      <div style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 55, background: C.white, borderTop: `1.5px solid ${C.border}`, padding: '10px 14px calc(10px + env(safe-area-inset-bottom, 0px))', boxShadow: '0 -10px 26px rgba(30,46,34,0.08)' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', maxWidth: '680px', margin: '0 auto' }}>
           <button onClick={() => goTo(Math.max(0, current - 1))} disabled={current === 0 || isCheatLocked}
             style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '10px 16px', borderRadius: '12px', fontSize: '13px', fontWeight: 700, background: C.bg, color: C.textMid, border: `1.5px solid ${C.borderMid}`, cursor: current === 0 || isCheatLocked ? 'not-allowed' : 'pointer', opacity: current === 0 || isCheatLocked ? 0.35 : 1 }}>
@@ -881,6 +926,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
           {[
             { color: C.green,   label: 'Dijawab' },
             { color: '#f59e0b', label: 'Ragu'    },
+            { color: '#dc2626', label: 'Wajib diisi' },
             { color: '#e8eae8', label: 'Belum', textColor: C.textMuted },
           ].map(l => (
             <span key={l.label} style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '10.5px', fontWeight: 600, color: C.textMuted }}>
@@ -894,20 +940,22 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: '6px', marginBottom: '16px' }}>
           {questions.map((qq, i) => {
             const a = answers.get(qq.id);
-            const answered = !!(a?.selected_option_id || a?.essay_answer);
+            const answered = !!(a?.selected_option_id || a?.essay_answer?.trim());
             const doubt = !!a?.is_doubtful;
             const isCurrent = i === current;
+            const isMissing = missingQuestionIds.has(qq.id) && !answered;
             let bg = '#e8eae8'; let color = C.textMuted;
-            if (doubt)    { bg = '#f59e0b'; color = '#fff'; }
+            if (isMissing) { bg = '#dc2626'; color = '#fff'; }
+            else if (doubt) { bg = '#f59e0b'; color = '#fff'; }
             else if (answered) { bg = C.green;   color = '#fff'; }
             return (
               <button key={qq.id} onClick={() => goTo(i)} disabled={isCheatLocked}
                 style={{
                   aspectRatio: '1', display: 'flex', alignItems: 'center', justifyContent: 'center',
                   fontSize: '11px', fontWeight: 700, borderRadius: '10px', border: 'none',
-                  background: isCurrent ? C.greenLight : bg,
-                  color: isCurrent ? C.green : color,
-                  outline: isCurrent ? `2.5px solid ${C.green}` : 'none',
+                  background: isMissing ? bg : isCurrent ? C.greenLight : bg,
+                  color: isMissing ? color : isCurrent ? C.green : color,
+                  outline: isMissing ? '2.5px solid #fecaca' : isCurrent ? `2.5px solid ${C.green}` : 'none',
                   outlineOffset: '1px',
                   cursor: isCheatLocked ? 'not-allowed' : 'pointer',
                   opacity: isCheatLocked ? 0.55 : 1,
@@ -920,7 +968,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
 
         {/* kirim button */}
         <div style={{ borderTop: `1.5px solid ${C.borderLight}`, paddingTop: '14px' }}>
-          <button onClick={async () => { if (isCheatLockedRef.current) return; if (await enterFullscreen()) { setShowGrid(false); setShowConfirm(true); } }} disabled={isCheatLocked}
+          <button onClick={openSubmitConfirm} disabled={isCheatLocked}
             style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#1a5fa8', color: '#fff', border: 'none', padding: '13px 18px', borderRadius: '14px', cursor: isCheatLocked ? 'not-allowed' : 'pointer', opacity: isCheatLocked ? 0.45 : 1 }}>
             <span style={{ fontSize: '14px', fontWeight: 800 }}>Kirim Ujian</span>
             <span style={{ width: '32px', height: '32px', background: 'rgba(255,255,255,0.15)', borderRadius: '9px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

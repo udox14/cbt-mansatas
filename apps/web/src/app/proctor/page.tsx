@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { GET, POST } from '@/lib/api';
 import { LoadingScreen, EmptyState, ToastProvider, useToast, Confirm, Spinner, Modal } from '@/components/ui';
-import { LogOut, Wifi, WifiOff, CheckCircle2, RefreshCw, ClipboardList, Lock, Send, Clock } from 'lucide-react';
+import { LogOut, Wifi, WifiOff, CheckCircle2, RefreshCw, ClipboardList, Lock, Send, Clock, Search } from 'lucide-react';
 
 const C = {
   bg: '#f4f6f4', white: '#fff', border: '#e0e5e0', borderLight: '#edf0ed', borderMid: '#d4dbd4',
@@ -57,6 +57,7 @@ function ProctorContent() {
   const [filterExam, setFilterExam] = useState('all');
   const [filterStart, setFilterStart] = useState<'all' | 'started' | 'not_started'>('all');
   const [filterFinished, setFilterFinished] = useState<'all' | 'hide_finished' | 'finished_only'>('all');
+  const [searchTerm, setSearchTerm] = useState('');
   const [resetTarget, setResetTarget] = useState<any>(null);
   const [unlockTarget, setUnlockTarget] = useState<any>(null);
   const [forceTarget, setForceTarget] = useState<any>(null);
@@ -132,6 +133,20 @@ function ProctorContent() {
     if (filterStart === 'not_started' && s.has_started) return false;
     if (filterFinished === 'hide_finished' && s.live_status === 'selesai') return false;
     if (filterFinished === 'finished_only' && s.live_status !== 'selesai') return false;
+    const q = searchTerm.trim().toLowerCase();
+    if (q) {
+      const haystack = [
+        s.full_name,
+        s.nisn,
+        s.username,
+        s.exam_title,
+        s.live_status,
+        s.sesi_tes,
+        s.tanggal_tes,
+        s.device_id,
+      ].filter(Boolean).join(' ').toLowerCase();
+      if (!haystack.includes(q)) return false;
+    }
     return true;
   });
 
@@ -158,7 +173,7 @@ function ProctorContent() {
 
       {/* HEADER */}
       <header style={{ position: 'relative', zIndex: 2, background: C.white, borderBottom: `1.5px solid ${C.border}` }}>
-        <div style={{ maxWidth: '820px', margin: '0 auto', padding: '12px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+        <div style={{ maxWidth: '1180px', margin: '0 auto', padding: '12px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <KemenagLogo />
             <div>
@@ -180,7 +195,7 @@ function ProctorContent() {
         </div>
       </header>
 
-      <main style={{ position: 'relative', zIndex: 1, maxWidth: '820px', margin: '0 auto', padding: '20px' }} className="space-y-5">
+      <main style={{ position: 'relative', zIndex: 1, maxWidth: '1180px', margin: '0 auto', padding: '22px 24px' }} className="space-y-5">
 
         {/* TOKEN */}
         <section>
@@ -237,6 +252,15 @@ function ProctorContent() {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px', gap: '10px', flexWrap: 'wrap' }}>
             <p style={{ color: C.textMid, fontSize: '11px', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Monitoring Peserta ({filtered.length})</p>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px', flexWrap: 'wrap' }}>
+              <div style={{ position: 'relative', minWidth: '280px', flex: '1 1 320px', maxWidth: '420px' }}>
+                <Search size={13} color={C.textFaint} strokeWidth={2.5} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
+                <input
+                  value={searchTerm}
+                  onChange={e => setSearchTerm(e.target.value)}
+                  placeholder="Cari nama, NISN, atau device..."
+                  style={{ width: '100%', fontSize: '11.5px', fontWeight: 600, padding: '6px 12px 6px 30px', border: `1.5px solid ${C.borderMid}`, borderRadius: '8px', background: C.white, color: C.textMid, outline: 'none' }}
+                />
+              </div>
               <select value={filterStart} onChange={e => setFilterStart(e.target.value as any)}
                 style={{ fontSize: '11.5px', fontWeight: 600, padding: '5px 12px', border: `1.5px solid ${C.borderMid}`, borderRadius: '8px', background: C.white, color: C.textMid, cursor: 'pointer' }}>
                 <option value="all">Semua Status</option>
@@ -263,10 +287,10 @@ function ProctorContent() {
             ? <EmptyState title="Belum ada peserta" />
             : (
               <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '14px', overflow: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', minWidth: '640px' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', minWidth: '980px' }}>
                   <thead>
                     <tr style={{ background: C.bg, borderBottom: `1.5px solid ${C.borderMid}` }}>
-                      {['Peserta', 'Status', 'Progres', '⚠ Langgar', 'Sisa Waktu', 'Aksi'].map((h, i) => (
+                      {['Peserta', 'Device', 'Status', 'Progres', 'Langgar', 'Sisa Waktu', 'Aksi'].map((h, i) => (
                         <th key={h} style={{ padding: '9px 14px', textAlign: i === 0 ? 'left' : 'center', color: C.textMid, fontSize: '10.5px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>{h}</th>
                       ))}
                     </tr>
@@ -288,6 +312,11 @@ function ProctorContent() {
                           <td style={{ padding: '10px 14px' }}>
                             <p style={{ color: isNotStarted ? C.textMuted : C.text, fontWeight: 700 }}>{s.full_name}</p>
                             <p style={{ color: C.textFaint, fontSize: '10px', marginTop: '1px', fontFamily: 'monospace' }}>{s.nisn}</p>
+                          </td>
+                          <td style={{ padding: '10px 14px', textAlign: 'center', maxWidth: '210px' }}>
+                            {s.device_id
+                              ? <span title={s.device_id} style={{ display: 'inline-block', maxWidth: '190px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#1a5fa8', background: '#e0f0ff', border: '1.5px solid #bfdbfe', borderRadius: '8px', padding: '3px 8px', fontFamily: 'monospace', fontSize: '10.5px', fontWeight: 800 }}>{s.device_id}</span>
+                              : <span style={{ color: C.textFaint, fontSize: '11px', fontWeight: 700 }}>Belum login</span>}
                           </td>
                           <td style={{ padding: '10px 14px', textAlign: 'center' }}>
                             <span style={{
