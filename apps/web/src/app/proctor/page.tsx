@@ -70,9 +70,11 @@ function ProctorContent() {
 
   const fetchData = useCallback(async () => {
     const [t, s] = await Promise.all([GET('/api/proctor/token'), GET('/api/proctor/sessions')]);
-    if (t.success) setTokens(t.data || []);
+    const activeTokens = t.success ? (t.data || []) : null;
+    if (t.success) setTokens(activeTokens || []);
     if (s.success) {
-      const data: any[] = s.data || [];
+      const activeExamIds = activeTokens ? new Set(activeTokens.map((token: any) => token.exam_id)) : null;
+      const data: any[] = (s.data || []).filter((row: any) => !activeExamIds || activeExamIds.has(row.exam_id));
       setSessions(data);
       // #12: alert saat ada peserta baru dikunci
       const lockedNow = data.filter((x: any) => x.live_status === 'dikunci').length;

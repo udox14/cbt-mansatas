@@ -86,12 +86,12 @@ student.get('/exams', async (c) => {
   });
 
   const enriched = filtered.map(exam => {
-    let jadwal_status: 'aktif' | 'belum' | 'selesai' | 'no_schedule' = 'no_schedule';
+    let jadwal_status: 'aktif' | 'belum' | 'selesai' | 'dikunci' | 'no_schedule' = 'no_schedule';
     let jadwal_info: string | null = null;
 
     if (exam.is_time_locked) {
-      jadwal_status = 'selesai';
-      jadwal_info = 'Waktu ujian dikunci oleh pengawas';
+      jadwal_status = 'dikunci';
+      jadwal_info = 'Ujian dikunci. Hubungi proktor untuk membuka kembali.';
     } else if (jadwalData?.sesi_tes && jadwalData?.tanggal_tes) {
       const parsed = parseSesiJam(jadwalData.sesi_tes);
       if (parsed) {

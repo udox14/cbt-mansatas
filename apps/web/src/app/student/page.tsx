@@ -13,7 +13,7 @@ interface Exam {
   duration_minutes: number; rules_text: string | null;
   session_id: string | null; session_status: string | null;
   enforce_fullscreen?: boolean;
-  jadwal_status?: 'aktif' | 'belum' | 'selesai' | 'no_schedule';
+  jadwal_status?: 'aktif' | 'belum' | 'selesai' | 'dikunci' | 'no_schedule';
   jadwal_info?: string | null;
   is_time_locked?: number;
   answered_count?: number;
@@ -51,9 +51,9 @@ const ActionBtn = ({ label, variant, onClick, disabled }: { label: string; varia
 const JadwalInfo = ({ exam }: { exam: Exam }) => {
   if (!exam.jadwal_info) return null;
   const js = exam.jadwal_status;
-  const color = js === 'aktif' ? '#2d7a4f' : js === 'belum' ? '#b45309' : '#dc2626';
-  const bg = js === 'aktif' ? '#e2ebe3' : js === 'belum' ? '#fffbeb' : '#fef2f2';
-  const statusLabel = js === 'aktif' ? 'Sedang berlangsung' : js === 'belum' ? 'Belum dimulai' : 'Waktu habis';
+  const color = js === 'aktif' ? '#2d7a4f' : js === 'belum' ? '#b45309' : js === 'dikunci' ? '#b45309' : '#dc2626';
+  const bg = js === 'aktif' ? '#e2ebe3' : js === 'belum' ? '#fffbeb' : js === 'dikunci' ? '#fffbeb' : '#fef2f2';
+  const statusLabel = js === 'aktif' ? 'Sedang berlangsung' : js === 'belum' ? 'Belum dimulai' : js === 'dikunci' ? 'Dikunci' : 'Waktu habis';
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
       <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: bg, color, fontSize: '10.5px', fontWeight: 700, padding: '3px 9px', borderRadius: '999px' }}>
