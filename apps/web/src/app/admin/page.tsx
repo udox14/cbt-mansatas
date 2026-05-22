@@ -8,7 +8,7 @@ import {
 } from '@/components/ui';
 import RichEditor from '@/components/admin/RichEditor';
 import BulkImport from '@/components/admin/BulkImport';
-import { exportExamResults } from '@/lib/export';
+import { exportExamResults, exportExamAnalytics } from '@/lib/export';
 import {
   ClipboardList, Users, School, Shield, LogOut, Menu,
   Plus, FileDown, RefreshCw, Pencil, Trash2, Upload,
@@ -1008,16 +1008,22 @@ function ResultsView({ examId }: { examId: string }) {
 function AnalyticsView({ examId }: { examId: string }) {
   const [sessions, setSessions] = useState<any[]>([]);
   const [results, setResults] = useState<any[]>([]);
+  const [questionAnalytics, setQuestionAnalytics] = useState<any>({ questions: [], options: [], rows: [] });
   const [loading, setLoading] = useState(true);
   const [filterRoom, setFilterRoom] = useState('all');
   const [filterSession, setFilterSession] = useState('all');
 
   useEffect(() => {
     setLoading(true);
-    Promise.all([GET(`/api/admin/exams/${examId}/sessions`), GET(`/api/admin/exams/${examId}/results`)])
-      .then(([s, r]) => {
+    Promise.all([
+      GET(`/api/admin/exams/${examId}/sessions`),
+      GET(`/api/admin/exams/${examId}/results`),
+      GET(`/api/admin/exams/${examId}/question-analytics`),
+    ])
+      .then(([s, r, q]) => {
         if (s.success) setSessions(s.data || []);
         if (r.success) setResults(r.data || []);
+        if (q.success) setQuestionAnalytics(q.data || { questions: [], options: [], rows: [] });
       })
       .finally(() => setLoading(false));
   }, [examId]);
@@ -1084,6 +1090,62 @@ function AnalyticsView({ examId }: { examId: string }) {
     .sort((a: any, b: any) => b.total - a.total)
     .slice(0, 5);
 
+  const qaRows = (questionAnalytics.rows || []).filter((row: any) => {
+    if (filterSession !== 'all' && sessionFilterKey(row) !== filterSession) return false;
+    if (filterRoom !== 'all' && row.room_name !== filterRoom) return false;
+    return true;
+  });
+  const sessionCount = new Set(qaRows.map((row: any) => row.session_id)).size;
+  const optionCounts = qaRows.reduce((map: Map<string, number>, row: any) => {
+    if (row.selected_option_id) map.set(row.selected_option_id, (map.get(row.selected_option_id) || 0) + 1);
+    return map;
+  }, new Map());
+  const questionRows = (questionAnalytics.questions || []).map((q: any) => {
+    const rows = qaRows.filter((row: any) => row.question_id === q.id);
+    const answered = rows.filter((row: any) => Number(row.answered) === 1).length;
+    const correct = rows.filter((row: any) => Number(row.is_correct) === 1).length;
+    const blank = Math.max(0, sessionCount - answered);
+    const wrong = Math.max(0, answered - correct);
+    const correctRate = sessionCount ? Math.round((correct / sessionCount) * 100) : 0;
+    const difficulty = correctRate >= 76 ? 'Mudah' : correctRate >= 41 ? 'Sedang' : 'Sulit';
+    const flag = sessionCount === 0
+      ? 'Belum ada data'
+      : correctRate <= 20
+        ? 'Perlu review'
+        : blank / Math.max(1, sessionCount) >= 0.3
+          ? 'Banyak kosong'
+          : '';
+    const options = (questionAnalytics.options || [])
+      .filter((option: any) => option.question_id === q.id)
+      .map((option: any) => ({ ...option, count: optionCounts.get(option.id) || 0 }));
+    return {
+      ...q,
+      answered_count: answered,
+      correct_count: correct,
+      wrong_count: wrong,
+      blank_count: blank,
+      correct_rate: correctRate,
+      difficulty,
+      flag,
+      options,
+    };
+  });
+  const hardQuestions = questionRows
+    .filter((q: any) => q.question_type === 'multiple_choice' && sessionCount > 0)
+    .sort((a: any, b: any) => a.correct_rate - b.correct_rate)
+    .slice(0, 5);
+  const suspiciousQuestions = questionRows.filter((q: any) => q.flag).slice(0, 6);
+  const avgDuration = (() => {
+    const durations = filteredSessions
+      .map((s: any) => {
+        if (!s.started_at || !s.finished_at) return 0;
+        const diff = parseServerTime(s.finished_at) - parseServerTime(s.started_at);
+        return diff > 0 ? Math.round(diff / 60000) : 0;
+      })
+      .filter(Boolean);
+    return durations.length ? Math.round(durations.reduce((a: number, b: number) => a + b, 0) / durations.length) : 0;
+  })();
+
   const statStyle = (accent: string = C.greenLight) => ({ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '14px', padding: '14px', boxShadow: `inset 0 4px 0 ${accent}` });
   const statText = { color: C.text, fontSize: '24px', fontWeight: 900, lineHeight: 1 };
   const statLabel = { color: C.textMuted, fontSize: '11px', marginTop: '6px', fontWeight: 700 };
@@ -1110,6 +1172,11 @@ function AnalyticsView({ examId }: { examId: string }) {
               {rooms.map(r => <option key={r} value={r}>{r}</option>)}
             </select>
           )}
+          {questionRows.length > 0 && (
+            <Button variant="secondary" size="sm" onClick={() => exportExamAnalytics(questionRows, `ujian-${examId}`)}>
+              <FileDown size={13} /> Export Analitik
+            </Button>
+          )}
         </div>
       </div>
 
@@ -1124,6 +1191,7 @@ function AnalyticsView({ examId }: { examId: string }) {
                 ['Dikunci', locked, '#fffbeb'],
                 ['Pelanggaran', totalViolations, '#fef2f2'],
                 ['Rata-rata', avgScore, C.greenLight],
+                ['Durasi Avg', `${avgDuration}m`, '#e0f0ff'],
               ].map(([label, value, color]) => (
                 <div key={String(label)} style={statStyle(String(color))}>
                   <p style={statText}>{value}</p>
@@ -1179,6 +1247,76 @@ function AnalyticsView({ examId }: { examId: string }) {
                   </div>
                 ))}
               </div>
+            </div>
+
+            <div className="grid gap-3 lg:grid-cols-2">
+              <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '14px', padding: '14px' }}>
+                <p style={{ color: C.text, fontSize: '13px', fontWeight: 800, marginBottom: '10px' }}>Soal Paling Sulit</p>
+                {hardQuestions.length === 0
+                  ? <p style={{ color: C.textFaint, fontSize: '12px' }}>Belum ada data soal pilihan ganda.</p>
+                  : hardQuestions.map((q: any) => (
+                    <div key={q.id} style={{ padding: '8px 0', borderBottom: `1px solid ${C.borderLight}` }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px' }}>
+                        <p style={{ color: C.text, fontSize: '12px', fontWeight: 800 }}>No. {q.question_order}</p>
+                        <span style={{ color: q.correct_rate <= 20 ? '#dc2626' : '#b45309', fontSize: '11px', fontWeight: 900 }}>{q.correct_rate}% benar</span>
+                      </div>
+                      <p style={{ color: C.textMuted, fontSize: '11px', marginTop: '3px', lineHeight: 1.4 }}>{String(q.question_text || '').replace(/<[^>]+>/g, '').slice(0, 150)}</p>
+                    </div>
+                  ))}
+              </div>
+
+              <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '14px', padding: '14px' }}>
+                <p style={{ color: C.text, fontSize: '13px', fontWeight: 800, marginBottom: '10px' }}>Deteksi Soal Mencurigakan</p>
+                {suspiciousQuestions.length === 0
+                  ? <p style={{ color: C.textFaint, fontSize: '12px' }}>Tidak ada soal yang perlu perhatian khusus pada filter ini.</p>
+                  : suspiciousQuestions.map((q: any) => (
+                    <div key={q.id} style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', padding: '8px 0', borderBottom: `1px solid ${C.borderLight}` }}>
+                      <div>
+                        <p style={{ color: C.text, fontSize: '12px', fontWeight: 800 }}>No. {q.question_order} - {q.difficulty}</p>
+                        <p style={{ color: C.textFaint, fontSize: '10.5px' }}>{q.blank_count} kosong, {q.wrong_count} salah, {q.correct_count} benar</p>
+                      </div>
+                      <span style={{ background: '#fef2f2', color: '#dc2626', borderRadius: '999px', padding: '2px 8px', fontSize: '10px', fontWeight: 800, height: 'fit-content' }}>{q.flag}</span>
+                    </div>
+                  ))}
+              </div>
+            </div>
+
+            <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '14px', overflow: 'auto' }}>
+              <div style={{ padding: '14px 14px 0' }}>
+                <p style={{ color: C.text, fontSize: '13px', fontWeight: 800 }}>Analitik Per Soal & Opsi</p>
+                <p style={{ color: C.textFaint, fontSize: '11px', marginTop: '2px' }}>Sebaran jawaban membantu melihat pengecoh yang terlalu kuat atau soal yang perlu review.</p>
+              </div>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', minWidth: '980px', marginTop: '10px' }}>
+                <TableHead cols={[{ label: 'No' }, { label: 'Ringkasan Soal' }, { label: 'Benar', center: true }, { label: 'Salah', center: true }, { label: 'Kosong', center: true }, { label: '% Benar', center: true }, { label: 'Opsi Dipilih' }, { label: 'Catatan' }]} />
+                <tbody>
+                  {questionRows.length === 0
+                    ? <tr><td colSpan={8} style={{ padding: '18px', textAlign: 'center', color: C.textFaint }}>Belum ada data soal</td></tr>
+                    : questionRows.map((q: any, i: number) => (
+                      <tr key={q.id} style={{ borderBottom: i < questionRows.length - 1 ? `1px solid ${C.borderLight}` : 'none' }}>
+                        <td style={{ padding: '10px 14px', color: C.text, fontWeight: 900 }}>{q.question_order}</td>
+                        <td style={{ padding: '10px 14px', color: C.textMuted, maxWidth: '300px' }}>{String(q.question_text || '').replace(/<[^>]+>/g, '').slice(0, 120)}</td>
+                        <td style={{ padding: '10px 14px', textAlign: 'center', color: C.green, fontWeight: 800 }}>{q.correct_count}</td>
+                        <td style={{ padding: '10px 14px', textAlign: 'center', color: '#dc2626', fontWeight: 800 }}>{q.wrong_count}</td>
+                        <td style={{ padding: '10px 14px', textAlign: 'center', color: C.textMuted, fontWeight: 800 }}>{q.blank_count}</td>
+                        <td style={{ padding: '10px 14px', textAlign: 'center', fontWeight: 900, color: q.correct_rate <= 20 ? '#dc2626' : q.correct_rate <= 40 ? '#b45309' : C.green }}>{q.correct_rate}%</td>
+                        <td style={{ padding: '10px 14px', color: C.textMuted, minWidth: '240px' }}>
+                          {q.question_type === 'essay'
+                            ? <span>Essay</span>
+                            : q.options.map((o: any) => (
+                              <span key={o.id} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', marginRight: '8px', marginBottom: '4px', color: o.is_correct ? C.green : C.textMuted, fontWeight: o.is_correct ? 900 : 700 }}>
+                                {o.option_label}: {o.count}{o.is_correct ? ' ✓' : ''}
+                              </span>
+                            ))}
+                        </td>
+                        <td style={{ padding: '10px 14px' }}>
+                          {q.flag
+                            ? <span style={{ background: '#fef2f2', color: '#dc2626', borderRadius: '999px', padding: '2px 8px', fontSize: '10px', fontWeight: 800 }}>{q.flag}</span>
+                            : <span style={{ color: C.textFaint }}>-</span>}
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
             </div>
 
             <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '14px', overflow: 'auto' }}>

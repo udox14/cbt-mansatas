@@ -833,6 +833,50 @@ admin.get('/exams/:examId/sessions', async (c) => {
   return c.json(ok(results));
 });
 
+admin.get('/exams/:examId/question-analytics', async (c) => {
+  const examId = c.req.param('examId');
+  const { results: questions } = await c.env.DB.prepare(
+    `SELECT q.id, q.question_order, q.question_text, q.question_type
+     FROM cbt_questions q
+     WHERE q.exam_id=?
+     ORDER BY q.question_order`
+  ).bind(examId).all();
+
+  const { results: options } = await c.env.DB.prepare(
+    `SELECT qo.id, qo.question_id, qo.option_label, qo.option_text, qo.is_correct, qo.option_order
+     FROM cbt_question_options qo
+     JOIN cbt_questions q ON q.id = qo.question_id
+     WHERE q.exam_id=?
+     ORDER BY q.question_order, qo.option_order`
+  ).bind(examId).all();
+
+  const { results: rows } = await c.env.DB.prepare(
+    `SELECT q.id as question_id, a.selected_option_id,
+            CASE
+              WHEN q.question_type = 'essay' AND TRIM(COALESCE(a.essay_answer, '')) != '' THEN 1
+              WHEN q.question_type = 'multiple_choice' AND a.selected_option_id IS NOT NULL THEN 1
+              ELSE 0
+            END as answered,
+            COALESCE(co.is_correct, 0) as is_correct,
+            es.id as session_id,
+            es.started_at,
+            COALESCE(es.finished_at, es.last_heartbeat) as ended_at,
+            r.room_name,
+            COALESCE(p.tanggal_tes, '') as tanggal_tes,
+            COALESCE(p.sesi_tes, '') as sesi_tes
+     FROM cbt_questions q
+     JOIN cbt_exam_sessions es ON es.exam_id = q.exam_id
+     JOIN cbt_rooms r ON r.id = es.room_id
+     LEFT JOIN pendaftar p ON es.user_id = p.id AND es.user_type = 'pendaftar'
+     LEFT JOIN cbt_student_answers a ON a.session_id = es.id AND a.question_id = q.id
+     LEFT JOIN cbt_question_options co ON co.id = a.selected_option_id
+     WHERE q.exam_id=?
+       AND es.status = 'submitted'`
+  ).bind(examId).all();
+
+  return c.json(ok({ questions, options, rows }));
+});
+
 // Update jalur peserta pendaftar
 admin.put('/pendaftar/:id/jalur', async (c) => {
   const { jalur } = await c.req.json<{ jalur: string }>();

@@ -63,6 +63,26 @@ export async function exportExamResults(
   await exportToXlsx(data, columns, `Hasil-${safeName}`, 'Hasil Ujian');
 }
 
+export async function exportExamAnalytics(rows: any[], examTitle: string) {
+  const columns: ExportColumn[] = [
+    { key: '_no', label: 'No', width: 5 },
+    { key: 'question_order', label: 'No Soal', width: 8 },
+    { key: 'question_text', label: 'Soal', width: 50 },
+    { key: 'question_type', label: 'Tipe', width: 14 },
+    { key: 'answered_count', label: 'Terjawab', width: 10 },
+    { key: 'correct_count', label: 'Benar', width: 8 },
+    { key: 'wrong_count', label: 'Salah', width: 8 },
+    { key: 'blank_count', label: 'Kosong', width: 8 },
+    { key: 'correct_rate', label: 'Benar (%)', width: 12 },
+    { key: 'difficulty', label: 'Kesulitan', width: 14 },
+    { key: 'flag', label: 'Catatan', width: 24 },
+  ];
+
+  const data = rows.map((r, i) => ({ ...r, _no: i + 1 }));
+  const safeName = examTitle.replace(/[^a-zA-Z0-9_\-\s]/g, '').slice(0, 30);
+  await exportToXlsx(data, columns, `Analitik-${safeName}`, 'Analitik Soal');
+}
+
 export async function exportUserList(users: any[]) {
   const columns: ExportColumn[] = [
     { key: '_no', label: 'No', width: 5 },
