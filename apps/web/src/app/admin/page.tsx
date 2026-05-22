@@ -1012,6 +1012,7 @@ function AnalyticsView({ examId }: { examId: string }) {
   const [loading, setLoading] = useState(true);
   const [filterRoom, setFilterRoom] = useState('all');
   const [filterSession, setFilterSession] = useState('all');
+  const [analyticsTab, setAnalyticsTab] = useState<'ringkasan' | 'nilai' | 'pelanggaran' | 'soal' | 'sesi'>('ringkasan');
 
   useEffect(() => {
     setLoading(true);
@@ -1149,6 +1150,13 @@ function AnalyticsView({ examId }: { examId: string }) {
   const statStyle = (accent: string = C.greenLight) => ({ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '14px', padding: '14px', boxShadow: `inset 0 4px 0 ${accent}` });
   const statText = { color: C.text, fontSize: '24px', fontWeight: 900, lineHeight: 1 };
   const statLabel = { color: C.textMuted, fontSize: '11px', marginTop: '6px', fontWeight: 700 };
+  const analyticsTabs: { key: typeof analyticsTab; label: string }[] = [
+    { key: 'ringkasan', label: 'Ringkasan' },
+    { key: 'nilai', label: 'Nilai' },
+    { key: 'pelanggaran', label: 'Pelanggaran' },
+    { key: 'soal', label: 'Soal' },
+    { key: 'sesi', label: 'Sesi/Ruangan' },
+  ];
 
   return (
     <div className="space-y-3">
@@ -1180,6 +1188,26 @@ function AnalyticsView({ examId }: { examId: string }) {
         </div>
       </div>
 
+      <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '12px', padding: '0 10px', display: 'flex', gap: '4px', overflowX: 'auto' }}>
+        {analyticsTabs.map(tab => (
+          <button key={tab.key} onClick={() => setAnalyticsTab(tab.key)}
+            style={{
+              padding: '10px 12px 9px',
+              fontSize: '11.5px',
+              fontWeight: analyticsTab === tab.key ? 900 : 700,
+              color: analyticsTab === tab.key ? C.green : C.textMuted,
+              background: 'none',
+              border: 'none',
+              borderBottom: `2.5px solid ${analyticsTab === tab.key ? C.green : 'transparent'}`,
+              marginBottom: '-1.5px',
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+            }}>
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
       {loading ? <div className="py-12 text-center"><Spinner /></div>
         : (
           <>
@@ -1200,6 +1228,7 @@ function AnalyticsView({ examId }: { examId: string }) {
               ))}
             </div>
 
+            {analyticsTab === 'nilai' && (
             <div className="grid gap-3 lg:grid-cols-2">
               <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '14px', padding: '14px' }}>
                 <p style={{ color: C.text, fontSize: '13px', fontWeight: 800, marginBottom: '10px' }}>Distribusi Nilai</p>
@@ -1217,22 +1246,27 @@ function AnalyticsView({ examId }: { examId: string }) {
                 <p style={{ color: C.textMuted, fontSize: '11px', marginTop: '12px' }}>Tertinggi {maxScore} - Terendah {minScore} - Rata-rata {avgScore}</p>
               </div>
 
-              <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '14px', padding: '14px' }}>
-                <p style={{ color: C.text, fontSize: '13px', fontWeight: 800, marginBottom: '10px' }}>Pelanggaran Terbanyak</p>
-                {topViolations.length === 0
-                  ? <p style={{ color: C.textFaint, fontSize: '12px' }}>Belum ada pelanggaran pada filter ini.</p>
-                  : topViolations.map((s: any) => (
-                    <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', padding: '8px 0', borderBottom: `1px solid ${C.borderLight}` }}>
-                      <div>
-                        <p style={{ color: C.text, fontSize: '12px', fontWeight: 800 }}>{s.full_name}</p>
-                        <p style={{ color: C.textFaint, fontSize: '10.5px' }}>{sessionFilterLabel(s)} - {s.room_name}</p>
-                      </div>
-                      <span style={{ color: '#dc2626', fontSize: '13px', fontWeight: 900 }}>{s.total}</span>
-                    </div>
-                  ))}
-              </div>
             </div>
+            )}
 
+            {analyticsTab === 'pelanggaran' && (
+            <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '14px', padding: '14px' }}>
+              <p style={{ color: C.text, fontSize: '13px', fontWeight: 800, marginBottom: '10px' }}>Pelanggaran Terbanyak</p>
+              {topViolations.length === 0
+                ? <p style={{ color: C.textFaint, fontSize: '12px' }}>Belum ada pelanggaran pada filter ini.</p>
+                : topViolations.map((s: any) => (
+                  <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', padding: '8px 0', borderBottom: `1px solid ${C.borderLight}` }}>
+                    <div>
+                      <p style={{ color: C.text, fontSize: '12px', fontWeight: 800 }}>{s.full_name}</p>
+                      <p style={{ color: C.textFaint, fontSize: '10.5px' }}>{sessionFilterLabel(s)} - {s.room_name}</p>
+                    </div>
+                    <span style={{ color: '#dc2626', fontSize: '13px', fontWeight: 900 }}>{s.total}</span>
+                  </div>
+                ))}
+            </div>
+            )}
+
+            {analyticsTab === 'ringkasan' && (
             <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '14px', padding: '14px' }}>
               <p style={{ color: C.text, fontSize: '13px', fontWeight: 800, marginBottom: '10px' }}>Kualitas Jawaban</p>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(120px,1fr))', gap: '10px' }}>
@@ -1248,7 +1282,10 @@ function AnalyticsView({ examId }: { examId: string }) {
                 ))}
               </div>
             </div>
+            )}
 
+            {analyticsTab === 'soal' && (
+            <>
             <div className="grid gap-3 lg:grid-cols-2">
               <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '14px', padding: '14px' }}>
                 <p style={{ color: C.text, fontSize: '13px', fontWeight: 800, marginBottom: '10px' }}>Soal Paling Sulit</p>
@@ -1318,7 +1355,10 @@ function AnalyticsView({ examId }: { examId: string }) {
                 </tbody>
               </table>
             </div>
+            </>
+            )}
 
+            {analyticsTab === 'sesi' && (
             <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '14px', overflow: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', minWidth: '760px' }}>
                 <TableHead cols={[{ label: 'Sesi' }, { label: 'Ruangan' }, { label: 'Peserta', center: true }, { label: 'Selesai', center: true }, { label: 'Belum', center: true }, { label: 'Dikunci', center: true }, { label: 'Langgar', center: true }, { label: 'Rata-rata', center: true }]} />
@@ -1340,6 +1380,7 @@ function AnalyticsView({ examId }: { examId: string }) {
                 </tbody>
               </table>
             </div>
+            )}
           </>
         )}
     </div>
