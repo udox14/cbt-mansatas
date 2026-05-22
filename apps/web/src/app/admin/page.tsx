@@ -939,18 +939,85 @@ function MonitorView({ examId }: { examId: string }) {
 }
 // ── RESULTS VIEW ──────────────────────────────────────────────
 function ResultsView({ examId }: { examId: string }) {
+  const { toast } = useToast();
   const [results, setResults] = useState<any[]>([]);
+  const [exportRows, setExportRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
   const [filterRoom, setFilterRoom] = useState('all');
   const [filterSession, setFilterSession] = useState('all');
-  useEffect(() => { GET(`/api/admin/exams/${examId}/results`).then(r => { if (r.success) setResults(r.data || []); setLoading(false); }); }, [examId]);
-  const rooms = Array.from(new Set(results.map((r: any) => r.room_name).filter(Boolean))).sort();
-  const sessionOptions = buildSessionFilters(results);
+  const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'score', dir: 'desc' });
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    Promise.all([
+      GET(`/api/admin/exams/${examId}/results`),
+      GET(`/api/admin/exams/${examId}/results-export`),
+    ]).then(([resultResponse, exportResponse]) => {
+      if (!alive) return;
+      if (resultResponse.success) setResults(resultResponse.data || []);
+      if (exportResponse.success) setExportRows(exportResponse.data || []);
+      setLoading(false);
+    }).catch(() => {
+      if (!alive) return;
+      toast('error', 'Gagal memuat hasil ujian');
+      setLoading(false);
+    });
+    return () => { alive = false; };
+  }, [examId]);
+  const filterSource = exportRows.length ? exportRows : results;
+  const rooms = Array.from(new Set(filterSource.map((r: any) => r.room_name).filter(Boolean))).sort();
+  const sessionOptions = buildSessionFilters(filterSource);
   const visible = results.filter((r: any) => {
     if (filterSession !== 'all' && sessionFilterKey(r) !== filterSession) return false;
     if (filterRoom !== 'all' && r.room_name !== filterRoom) return false;
     return true;
   });
+  const exportVisible = exportRows.filter((r: any) => {
+    if (filterSession !== 'all' && sessionFilterKey(r) !== filterSession) return false;
+    if (filterRoom !== 'all' && r.room_name !== filterRoom) return false;
+    return true;
+  });
+  const resultSortColumns = [
+    { key: 'full_name', label: 'Nama' },
+    { key: 'nisn', label: 'NISN' },
+    { key: 'session', label: 'Sesi' },
+    { key: 'room_name', label: 'Ruangan' },
+    { key: 'total_correct', label: 'Benar', center: true },
+    { key: 'total_wrong', label: 'Salah', center: true },
+    { key: 'score', label: 'Nilai', center: true },
+  ];
+  const getSortValue = (row: any, key: string) => {
+    if (key === 'session') return sessionFilterLabel(row);
+    if (['total_correct', 'total_wrong', 'score'].includes(key)) return Number(row[key] || 0);
+    return String(row[key] || '').toLowerCase();
+  };
+  const sortRows = (rows: any[]) => [...rows].sort((a: any, b: any) => {
+    const av = getSortValue(a, sort.key);
+    const bv = getSortValue(b, sort.key);
+    const compared = typeof av === 'number' && typeof bv === 'number'
+      ? av - bv
+      : String(av).localeCompare(String(bv));
+    return sort.dir === 'asc' ? compared : -compared;
+  });
+  const sortedVisible = sortRows(visible);
+  const sortedExportVisible = sortRows(exportVisible);
+  const toggleSort = (key: string) => setSort(prev => prev.key === key
+    ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
+    : { key, dir: ['total_correct', 'total_wrong', 'score'].includes(key) ? 'desc' : 'asc' });
+  const handleExport = async () => {
+    const rows = sortedExportVisible.length ? sortedExportVisible : sortedVisible;
+    if (!rows.length) {
+      toast('warning', 'Tidak ada peserta untuk diexport pada filter ini');
+      return;
+    }
+    setExporting(true);
+    try {
+      await exportExamResults(rows, `ujian-${examId}${filterSession !== 'all' ? `-${filterSession.replace(/[^a-zA-Z0-9]+/g, '-')}` : ''}${filterRoom !== 'all' ? `-${filterRoom}` : ''}`);
+    } finally {
+      setExporting(false);
+    }
+  };
   const avgScore = visible.length ? Math.round(visible.reduce((s: number, r: any) => s + (r.score ?? 0), 0) / visible.length) : 0;
   return (
     <div className="space-y-3">
@@ -974,7 +1041,7 @@ function ResultsView({ examId }: { examId: string }) {
               {rooms.map(r => <option key={r} value={r}>{r}</option>)}
             </select>
           )}
-          {visible.length > 0 && <Button variant="secondary" size="sm" onClick={() => exportExamResults(visible, `ujian-${examId}${filterSession !== 'all' ? `-${filterSession.replace(/[^a-zA-Z0-9]+/g, '-')}` : ''}${filterRoom !== 'all' ? `-${filterRoom}` : ''}`)}><FileDown size={13} /> Export</Button>}
+          {!loading && <Button variant="secondary" size="sm" loading={exporting} onClick={handleExport}><FileDown size={13} /> Export</Button>}
         </div>
       </div>
       {loading ? <div className="py-12 text-center"><Spinner /></div>
@@ -982,10 +1049,34 @@ function ResultsView({ examId }: { examId: string }) {
           : (
             <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '12px', overflow: 'hidden' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                <TableHead cols={[{ label: '#' }, { label: 'Nama' }, { label: 'NISN' }, { label: 'Sesi' }, { label: 'Ruangan' }, { label: 'Benar', center: true }, { label: 'Salah', center: true }, { label: 'Nilai', center: true }]} />
+                <thead>
+                  <tr style={{ background: C.bg, borderBottom: `1.5px solid ${C.borderMid}` }}>
+                    <th style={{ padding: '9px 14px', textAlign: 'left', color: C.textMid, fontSize: '10.5px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>#</th>
+                    {resultSortColumns.map(col => (
+                      <th key={col.key} style={{ padding: '0', textAlign: col.center ? 'center' : 'left', whiteSpace: 'nowrap' }}>
+                        <button onClick={() => toggleSort(col.key)}
+                          style={{
+                            width: '100%',
+                            padding: '9px 14px',
+                            textAlign: col.center ? 'center' : 'left',
+                            color: sort.key === col.key ? C.green : C.textMid,
+                            fontSize: '10.5px',
+                            fontWeight: sort.key === col.key ? 900 : 700,
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.06em',
+                            background: 'none',
+                            border: 'none',
+                            cursor: 'pointer',
+                          }}>
+                          {col.label} {sort.key === col.key ? (sort.dir === 'asc' ? '▲' : '▼') : ''}
+                        </button>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
                 <tbody>
-                  {visible.map((r: any, i: number) => (
-                    <tr key={i} style={{ borderBottom: i < visible.length - 1 ? `1px solid ${C.borderLight}` : 'none' }}>
+                  {sortedVisible.map((r: any, i: number) => (
+                    <tr key={i} style={{ borderBottom: i < sortedVisible.length - 1 ? `1px solid ${C.borderLight}` : 'none' }}>
                       <td style={{ padding: '10px 14px', color: C.textMuted, fontWeight: 600 }}>{i + 1}</td>
                       <td style={{ padding: '10px 14px', color: C.text, fontWeight: 700 }}>{r.full_name}</td>
                       <td style={{ padding: '10px 14px', color: C.textMuted, fontFamily: 'monospace' }}>{r.nisn || '—'}</td>
@@ -1063,6 +1154,9 @@ function AnalyticsView({ examId }: { examId: string }) {
     { label: '91-100', count: scores.filter(score => score > 90).length },
   ];
   const maxBucket = Math.max(1, ...scoreBuckets.map(b => b.count));
+  const topScorers = [...filteredResults]
+    .sort((a: any, b: any) => Number(b.score || 0) - Number(a.score || 0) || String(a.full_name || '').localeCompare(String(b.full_name || '')))
+    .slice(0, 10);
 
   const resultGroups = filteredResults.reduce((map: Map<string, number[]>, r: any) => {
     const key = `${sessionFilterKey(r)}|${r.room_name || 'Tanpa ruangan'}`;
@@ -1246,6 +1340,21 @@ function AnalyticsView({ examId }: { examId: string }) {
                 <p style={{ color: C.textMuted, fontSize: '11px', marginTop: '12px' }}>Tertinggi {maxScore} - Terendah {minScore} - Rata-rata {avgScore}</p>
               </div>
 
+              <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '14px', padding: '14px' }}>
+                <p style={{ color: C.text, fontSize: '13px', fontWeight: 800, marginBottom: '10px' }}>Top Siswa Nilai Tertinggi</p>
+                {topScorers.length === 0
+                  ? <p style={{ color: C.textFaint, fontSize: '12px' }}>Belum ada nilai pada filter ini.</p>
+                  : topScorers.map((r: any, i: number) => (
+                    <div key={r.session_id || `${r.user_id}-${i}`} style={{ display: 'grid', gridTemplateColumns: '34px 1fr auto', alignItems: 'center', gap: '10px', padding: '8px 0', borderBottom: i < topScorers.length - 1 ? `1px solid ${C.borderLight}` : 'none' }}>
+                      <span style={{ width: '26px', height: '26px', borderRadius: '999px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: i < 3 ? C.green : '#edf0ed', color: i < 3 ? C.white : C.textMuted, fontSize: '11px', fontWeight: 900 }}>{i + 1}</span>
+                      <div style={{ minWidth: 0 }}>
+                        <p style={{ color: C.text, fontSize: '12px', fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.full_name}</p>
+                        <p style={{ color: C.textFaint, fontSize: '10.5px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.nisn || 'Tanpa NISN'} - {sessionFilterLabel(r)} - {r.room_name || 'Tanpa ruangan'}</p>
+                      </div>
+                      <span style={{ color: C.green, fontSize: '18px', fontWeight: 900 }}>{Number(r.score || 0)}</span>
+                    </div>
+                  ))}
+              </div>
             </div>
             )}
 

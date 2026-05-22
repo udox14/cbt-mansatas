@@ -646,6 +646,121 @@ async function getAssignedTokenTargets(db: D1Database, examId: string) {
   );
 }
 
+async function getAssignedResultParticipants(db: D1Database, examId: string) {
+  const participants = new Map<string, any>();
+  const add = (row?: any) => {
+    if (!row?.user_id || !row?.user_type) return;
+    participants.set(`${row.user_type}:${row.user_id}`, {
+      user_id: row.user_id,
+      user_type: row.user_type,
+      full_name: row.full_name || '',
+      nisn: row.nisn || '',
+      username: row.username || row.nisn || '',
+      asal_sekolah: row.asal_sekolah || '',
+      room_id: row.room_id || '',
+      room_name: row.room_name || '',
+      tanggal_tes: row.tanggal_tes || '',
+      sesi_tes: row.sesi_tes || '',
+    });
+  };
+  const addAll = (rows: any[] = []) => rows.forEach(add);
+
+  const pendaftarSelect = `
+    SELECT p.id as user_id, 'pendaftar' as user_type,
+           p.nama_lengkap as full_name, p.nisn, p.nisn as username,
+           p.asal_sekolah, p.tanggal_tes, p.sesi_tes,
+           r.id as room_id, COALESCE(p.ruang_tes, '') as room_name
+    FROM pendaftar p
+    LEFT JOIN cbt_rooms r ON r.room_name = p.ruang_tes
+  `;
+
+  const manualStudentSelect = `
+    SELECT cu.id as user_id, 'cbt_user' as user_type,
+           cu.nama_lengkap as full_name, cu.nisn, cu.username,
+           '' as asal_sekolah, '' as tanggal_tes, '' as sesi_tes,
+           r.id as room_id, COALESCE(r.room_name, '') as room_name
+    FROM cbt_users cu
+    LEFT JOIN cbt_rooms r ON r.id = cu.room_id
+  `;
+
+  const { results: assignments } = await db.prepare(
+    'SELECT user_id, user_type FROM cbt_exam_assignments WHERE exam_id=?'
+  ).bind(examId).all();
+
+  for (const assignment of assignments as any[]) {
+    if (assignment.user_type === 'pendaftar') {
+      const row = await db.prepare(
+        `${pendaftarSelect}
+         WHERE p.id=? AND ${EXCLUDE_JALUR_COND}`
+      ).bind(assignment.user_id).first<any>();
+      add(row);
+      continue;
+    }
+
+    if (assignment.user_type === 'cbt_user') {
+      const row = await db.prepare(
+        `${manualStudentSelect}
+         WHERE cu.id=? AND cu.role='student' AND cu.is_active=1`
+      ).bind(assignment.user_id).first<any>();
+      add(row);
+      continue;
+    }
+
+    if (assignment.user_type === 'room') {
+      const { results: pendaftarRows } = await db.prepare(
+        `${pendaftarSelect}
+         WHERE p.ruang_tes=? AND ${EXCLUDE_JALUR_COND}
+         ORDER BY p.nama_lengkap`
+      ).bind(assignment.user_id).all();
+      addAll(pendaftarRows as any[]);
+
+      const room = await db.prepare('SELECT id, room_name FROM cbt_rooms WHERE room_name=?')
+        .bind(assignment.user_id).first<any>();
+      if (!room) continue;
+
+      const { results: manualRows } = await db.prepare(
+        `${manualStudentSelect}
+         WHERE cu.room_id=? AND cu.role='student' AND cu.is_active=1
+           AND NOT EXISTS (
+             SELECT 1 FROM pendaftar p2
+             WHERE p2.nisn = cu.nisn AND p2.ruang_tes = r.room_name
+               AND UPPER(p2.jalur) NOT LIKE '%PRESTASI%'
+           )
+         ORDER BY cu.nama_lengkap`
+      ).bind(room.id).all();
+      addAll(manualRows as any[]);
+      continue;
+    }
+
+    if (assignment.user_type === 'sesi') {
+      const { results: rows } = await db.prepare(
+        `${pendaftarSelect}
+         WHERE p.sesi_tes=? AND ${EXCLUDE_JALUR_COND}
+         ORDER BY p.tanggal_tes, p.ruang_tes, p.nama_lengkap`
+      ).bind(assignment.user_id).all();
+      addAll(rows as any[]);
+      continue;
+    }
+
+    if (assignment.user_type === 'tanggal_sesi') {
+      const [tanggalTes, ...rest] = String(assignment.user_id).split('|');
+      const sesiTes = rest.join('|');
+      const { results: rows } = await db.prepare(
+        `${pendaftarSelect}
+         WHERE p.tanggal_tes=? AND p.sesi_tes=? AND ${EXCLUDE_JALUR_COND}
+         ORDER BY p.ruang_tes, p.nama_lengkap`
+      ).bind(tanggalTes, sesiTes).all();
+      addAll(rows as any[]);
+    }
+  }
+
+  return Array.from(participants.values()).sort((a, b) =>
+    `${a.tanggal_tes} ${a.sesi_tes} ${a.room_name} ${a.full_name}`.localeCompare(
+      `${b.tanggal_tes} ${b.sesi_tes} ${b.room_name} ${b.full_name}`
+    )
+  );
+}
+
 admin.get('/exams/:examId/tokens', async (c) => {
   const { results } = await c.env.DB.prepare(
     `SELECT et.*, r.room_name
@@ -794,6 +909,7 @@ admin.get('/exams/:examId/results', async (c) => {
        COALESCE(p.nama_lengkap, cu.nama_lengkap) as full_name,
        COALESCE(p.nisn, cu.nisn) as nisn,
        COALESCE(p.nisn, cu.username) as username,
+       COALESCE(p.asal_sekolah, '') as asal_sekolah,
        COALESCE(p.sesi_tes, '') as sesi_tes,
        COALESCE(p.tanggal_tes, '') as tanggal_tes,
        r.room_name
@@ -806,6 +922,47 @@ admin.get('/exams/:examId/results', async (c) => {
      ORDER BY r.room_name, full_name`
   ).bind(c.req.param('examId')).all();
   return c.json(ok(results));
+});
+
+admin.get('/exams/:examId/results-export', async (c) => {
+  const examId = c.req.param('examId');
+  const participants = await getAssignedResultParticipants(c.env.DB, examId);
+
+  const { results: progressRows } = await c.env.DB.prepare(
+    `SELECT es.id as session_id, es.user_id, es.user_type, es.status, es.is_time_locked,
+            er.total_questions, er.total_correct, er.total_wrong, er.total_unanswered, er.score, er.computed_at
+     FROM cbt_exam_sessions es
+     LEFT JOIN cbt_exam_results er ON er.session_id = es.id
+     WHERE es.exam_id=?`
+  ).bind(examId).all();
+
+  const progressByUser = new Map<string, any>();
+  for (const row of progressRows as any[]) {
+    progressByUser.set(`${row.user_type}:${row.user_id}`, row);
+  }
+
+  const rows = participants.map((participant) => {
+    const progress = progressByUser.get(`${participant.user_type}:${participant.user_id}`);
+    const isSubmitted = progress?.status === 'submitted' || progress?.computed_at;
+    const isLocked = Number(progress?.is_time_locked || 0) === 1;
+    return {
+      ...participant,
+      status_pengerjaan: !progress
+        ? 'Belum ikut tes'
+        : isSubmitted
+          ? 'Selesai'
+          : isLocked
+            ? 'Dikunci'
+            : 'Sedang mengerjakan',
+      total_questions: isSubmitted ? progress.total_questions : '',
+      total_correct: isSubmitted ? progress.total_correct : '',
+      total_wrong: isSubmitted ? progress.total_wrong : '',
+      total_unanswered: isSubmitted ? progress.total_unanswered : '',
+      score: isSubmitted ? progress.score : '',
+    };
+  });
+
+  return c.json(ok(rows));
 });
 
 admin.get('/exams/:examId/sessions', async (c) => {
