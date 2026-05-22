@@ -38,7 +38,7 @@ export function Modal({ open, onClose, title, children, size = 'md' }: {
     <div style={{
       position: 'fixed',
       inset: 0,
-      zIndex: 50,
+      zIndex: 80,
       display: 'flex',
       alignItems: 'flex-end',
       justifyContent: 'center',
