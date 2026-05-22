@@ -814,6 +814,8 @@ admin.get('/exams/:examId/sessions', async (c) => {
        COALESCE(p.nama_lengkap, cu.nama_lengkap) as full_name,
        COALESCE(p.nisn, cu.nisn) as nisn,
        COALESCE(p.nisn, cu.username) as username,
+       COALESCE(p.sesi_tes, '') as sesi_tes,
+       COALESCE(p.tanggal_tes, '') as tanggal_tes,
        r.room_name,
        COALESCE(cl.cheat_log_count, 0) as cheat_log_count
      FROM cbt_exam_sessions es

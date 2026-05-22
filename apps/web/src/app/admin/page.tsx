@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { GET, POST, PUT, DEL } from '@/lib/api';
 import {
@@ -23,7 +23,7 @@ interface Exam { id: string; title: string; description: string | null; duration
 interface Question { id: string; question_text: string; question_type: string; question_order: number; image_url: string | null; audio_url: string | null; options: QOption[] }
 interface QOption { id?: string; option_label: string; option_text: string; image_url: string | null; is_correct: number }
 type Page = 'exams' | 'peserta' | 'rooms' | 'pelaksana' | 'settings';
-type ExamTab = 'soal' | 'token' | 'monitor' | 'hasil' | 'peserta';
+type ExamTab = 'soal' | 'token' | 'monitor' | 'hasil' | 'peserta' | 'analitik';
 
 const normalizeJenisKelamin = (value?: string | null) => {
   const normalized = (value || '').trim().toUpperCase().replace(/[\s_-]+/g, ' ');
@@ -44,6 +44,24 @@ const parseServerTime = (value: string) => {
   const time = new Date(normalized).getTime();
   return Number.isFinite(time) ? time : Date.now();
 };
+
+const sessionFilterKey = (row: any) => `${row?.tanggal_tes || ''}|${row?.sesi_tes || ''}`;
+
+const sessionFilterLabel = (row: any) => {
+  const tanggal = row?.tanggal_tes || '';
+  const sesi = row?.sesi_tes || '';
+  if (!tanggal && !sesi) return 'Tanpa Sesi / Simulasi';
+  return [tanggal || 'Tanpa tanggal', sesi || 'Tanpa sesi'].join(' - ');
+};
+
+const buildSessionFilters = (rows: any[]) => Array.from(new Map(rows.map((row: any) => {
+  const key = sessionFilterKey(row);
+  return [key, { key, label: sessionFilterLabel(row) }];
+})).values()).sort((a: any, b: any) => {
+  if (a.key === '|') return 1;
+  if (b.key === '|') return -1;
+  return a.label.localeCompare(b.label);
+});
 
 // Jalur yang wajib ikut tes — filter langsung via API query param
 const JALUR_TES = 'REGULER';
@@ -66,6 +84,7 @@ const EXAM_TABS: { key: ExamTab; label: string }[] = [
   { key: 'soal', label: 'Soal' }, { key: 'token', label: 'Token' },
   { key: 'peserta', label: 'Peserta' },
   { key: 'monitor', label: 'Monitor' }, { key: 'hasil', label: 'Hasil' },
+  { key: 'analitik', label: 'Analitik' },
 ];
 
 // ── TABLE + CARD responsive helpers ──────────────────────────
@@ -329,6 +348,7 @@ function ExamsPage() {
         {activeTab === 'peserta' && <AssignmentsView examId={selectedExam.id} />}
         {activeTab === 'monitor' && <MonitorView examId={selectedExam.id} />}
         {activeTab === 'hasil' && <ResultsView examId={selectedExam.id} />}
+        {activeTab === 'analitik' && <AnalyticsView examId={selectedExam.id} />}
       </div>
 
       <Modal open={!!editExam} onClose={() => setEditExam(null)} title={editExam?.id ? 'Edit Ujian' : 'Buat Ujian'} size="lg">
@@ -847,10 +867,16 @@ function MonitorView({ examId }: { examId: string }) {
   const [sessions, setSessions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterRoom, setFilterRoom] = useState('all');
+  const [filterSession, setFilterSession] = useState('all');
   const fetchS = useCallback(async () => { const r = await GET(`/api/admin/exams/${examId}/sessions`); if (r.success) setSessions(r.data || []); setLoading(false); }, [examId]);
   useEffect(() => { fetchS(); const iv = setInterval(fetchS, 10000); return () => clearInterval(iv); }, [fetchS]);
   const rooms = Array.from(new Set(sessions.map((s: any) => s.room_name).filter(Boolean))).sort();
-  const visible = filterRoom === 'all' ? sessions : sessions.filter((s: any) => s.room_name === filterRoom);
+  const sessionOptions = buildSessionFilters(sessions);
+  const visible = sessions.filter((s: any) => {
+    if (filterSession !== 'all' && sessionFilterKey(s) !== filterSession) return false;
+    if (filterRoom !== 'all' && s.room_name !== filterRoom) return false;
+    return true;
+  });
   const online = visible.filter((s: any) => s.status === 'active' && (Date.now() - parseServerTime(s.last_heartbeat)) < 30000).length;
   const done = visible.filter((s: any) => s.status === 'submitted').length;
   return (
@@ -866,6 +892,13 @@ function MonitorView({ examId }: { examId: string }) {
           )}
         </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          {sessionOptions.length > 1 && (
+            <select value={filterSession} onChange={e => setFilterSession(e.target.value)}
+              style={{ fontSize: '11.5px', fontWeight: 600, padding: '5px 10px', border: `1.5px solid ${C.borderMid}`, borderRadius: '8px', background: C.white, color: C.textMid, cursor: 'pointer', maxWidth: '220px' }}>
+              <option value="all">Semua Sesi</option>
+              {sessionOptions.map((s: any) => <option key={s.key} value={s.key}>{s.label}</option>)}
+            </select>
+          )}
           {rooms.length > 1 && (
             <select value={filterRoom} onChange={e => setFilterRoom(e.target.value)}
               style={{ fontSize: '11.5px', fontWeight: 600, padding: '5px 10px', border: `1.5px solid ${C.borderMid}`, borderRadius: '8px', background: C.white, color: C.textMid, cursor: 'pointer' }}>
@@ -888,6 +921,7 @@ function MonitorView({ examId }: { examId: string }) {
                 return (
                   <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 14px', borderBottom: i < visible.length - 1 ? `1px solid ${C.borderLight}` : 'none' }}>
                     <span style={{ flex: 1, color: C.text, fontSize: '12.5px', fontWeight: 700 }}>{s.full_name}</span>
+                    <span style={{ color: C.textFaint, fontSize: '10.5px', maxWidth: '220px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sessionFilterLabel(s)}</span>
                     <span style={{ color: '#6b7c6e', fontSize: '11.5px' }}>{s.room_name}</span>
                     <span style={{ background: isDone ? '#f1f1f0' : isLocked ? '#fef3c7' : isOnline ? C.greenLight : '#fef2f2', color: isDone ? '#6b7c6e' : isLocked ? '#92400e' : isOnline ? '#2d6644' : '#dc2626', fontSize: '10px', fontWeight: 700, padding: '3px 9px', borderRadius: '999px' }}>
                       {isDone ? 'Selesai' : isLocked ? '🔒 Dikunci' : isOnline ? 'Online' : 'Offline'}
@@ -908,9 +942,15 @@ function ResultsView({ examId }: { examId: string }) {
   const [results, setResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterRoom, setFilterRoom] = useState('all');
+  const [filterSession, setFilterSession] = useState('all');
   useEffect(() => { GET(`/api/admin/exams/${examId}/results`).then(r => { if (r.success) setResults(r.data || []); setLoading(false); }); }, [examId]);
   const rooms = Array.from(new Set(results.map((r: any) => r.room_name).filter(Boolean))).sort();
-  const visible = filterRoom === 'all' ? results : results.filter((r: any) => r.room_name === filterRoom);
+  const sessionOptions = buildSessionFilters(results);
+  const visible = results.filter((r: any) => {
+    if (filterSession !== 'all' && sessionFilterKey(r) !== filterSession) return false;
+    if (filterRoom !== 'all' && r.room_name !== filterRoom) return false;
+    return true;
+  });
   const avgScore = visible.length ? Math.round(visible.reduce((s: number, r: any) => s + (r.score ?? 0), 0) / visible.length) : 0;
   return (
     <div className="space-y-3">
@@ -920,6 +960,13 @@ function ResultsView({ examId }: { examId: string }) {
           {visible.length > 0 && <span style={{ background: C.greenLight, color: C.green, fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '999px' }}>Rata-rata {avgScore}</span>}
         </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          {sessionOptions.length > 1 && (
+            <select value={filterSession} onChange={e => setFilterSession(e.target.value)}
+              style={{ fontSize: '11.5px', fontWeight: 600, padding: '5px 10px', border: `1.5px solid ${C.borderMid}`, borderRadius: '8px', background: C.white, color: C.textMid, cursor: 'pointer', maxWidth: '220px' }}>
+              <option value="all">Semua Sesi</option>
+              {sessionOptions.map((s: any) => <option key={s.key} value={s.key}>{s.label}</option>)}
+            </select>
+          )}
           {rooms.length > 1 && (
             <select value={filterRoom} onChange={e => setFilterRoom(e.target.value)}
               style={{ fontSize: '11.5px', fontWeight: 600, padding: '5px 10px', border: `1.5px solid ${C.borderMid}`, borderRadius: '8px', background: C.white, color: C.textMid, cursor: 'pointer' }}>
@@ -927,7 +974,7 @@ function ResultsView({ examId }: { examId: string }) {
               {rooms.map(r => <option key={r} value={r}>{r}</option>)}
             </select>
           )}
-          {visible.length > 0 && <Button variant="secondary" size="sm" onClick={() => exportExamResults(visible, `ujian-${examId}${filterRoom !== 'all' ? `-${filterRoom}` : ''}`)}><FileDown size={13} /> Export</Button>}
+          {visible.length > 0 && <Button variant="secondary" size="sm" onClick={() => exportExamResults(visible, `ujian-${examId}${filterSession !== 'all' ? `-${filterSession.replace(/[^a-zA-Z0-9]+/g, '-')}` : ''}${filterRoom !== 'all' ? `-${filterRoom}` : ''}`)}><FileDown size={13} /> Export</Button>}
         </div>
       </div>
       {loading ? <div className="py-12 text-center"><Spinner /></div>
@@ -935,13 +982,14 @@ function ResultsView({ examId }: { examId: string }) {
           : (
             <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '12px', overflow: 'hidden' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                <TableHead cols={[{ label: '#' }, { label: 'Nama' }, { label: 'NISN' }, { label: 'Ruangan' }, { label: 'Benar', center: true }, { label: 'Salah', center: true }, { label: 'Nilai', center: true }]} />
+                <TableHead cols={[{ label: '#' }, { label: 'Nama' }, { label: 'NISN' }, { label: 'Sesi' }, { label: 'Ruangan' }, { label: 'Benar', center: true }, { label: 'Salah', center: true }, { label: 'Nilai', center: true }]} />
                 <tbody>
                   {visible.map((r: any, i: number) => (
                     <tr key={i} style={{ borderBottom: i < visible.length - 1 ? `1px solid ${C.borderLight}` : 'none' }}>
                       <td style={{ padding: '10px 14px', color: C.textMuted, fontWeight: 600 }}>{i + 1}</td>
                       <td style={{ padding: '10px 14px', color: C.text, fontWeight: 700 }}>{r.full_name}</td>
                       <td style={{ padding: '10px 14px', color: C.textMuted, fontFamily: 'monospace' }}>{r.nisn || '—'}</td>
+                      <td style={{ padding: '10px 14px', color: C.textMuted, fontSize: '11px' }}>{sessionFilterLabel(r)}</td>
                       <td style={{ padding: '10px 14px', color: C.textMuted }}>{r.room_name}</td>
                       <td style={{ padding: '10px 14px', textAlign: 'center', color: C.green, fontWeight: 700 }}>{r.total_correct}</td>
                       <td style={{ padding: '10px 14px', textAlign: 'center', color: '#dc2626', fontWeight: 700 }}>{r.total_wrong}</td>
@@ -956,6 +1004,210 @@ function ResultsView({ examId }: { examId: string }) {
   );
 }
 // ── ASSIGNMENTS VIEW ─────────────────────────────────────────
+// ── ANALYTICS VIEW ────────────────────────────────────────────
+function AnalyticsView({ examId }: { examId: string }) {
+  const [sessions, setSessions] = useState<any[]>([]);
+  const [results, setResults] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [filterRoom, setFilterRoom] = useState('all');
+  const [filterSession, setFilterSession] = useState('all');
+
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([GET(`/api/admin/exams/${examId}/sessions`), GET(`/api/admin/exams/${examId}/results`)])
+      .then(([s, r]) => {
+        if (s.success) setSessions(s.data || []);
+        if (r.success) setResults(r.data || []);
+      })
+      .finally(() => setLoading(false));
+  }, [examId]);
+
+  const rooms = useMemo(() => Array.from(new Set([...sessions, ...results].map((x: any) => x.room_name).filter(Boolean))).sort(), [sessions, results]);
+  const sessionOptions = useMemo(() => buildSessionFilters([...sessions, ...results]), [sessions, results]);
+  const filteredSessions = sessions.filter((s: any) => {
+    if (filterSession !== 'all' && sessionFilterKey(s) !== filterSession) return false;
+    if (filterRoom !== 'all' && s.room_name !== filterRoom) return false;
+    return true;
+  });
+  const filteredResults = results.filter((r: any) => {
+    if (filterSession !== 'all' && sessionFilterKey(r) !== filterSession) return false;
+    if (filterRoom !== 'all' && r.room_name !== filterRoom) return false;
+    return true;
+  });
+
+  const submittedIds = new Set(filteredResults.map((r: any) => r.session_id));
+  const started = filteredSessions.length;
+  const finished = filteredSessions.filter((s: any) => s.status === 'submitted' || submittedIds.has(s.id)).length;
+  const locked = filteredSessions.filter((s: any) => Number(s.is_time_locked) === 1 && s.status !== 'submitted').length;
+  const totalViolations = filteredSessions.reduce((sum: number, s: any) => sum + Number(s.cheat_log_count || s.cheat_warnings || 0), 0);
+  const avgScore = filteredResults.length ? Math.round(filteredResults.reduce((sum: number, r: any) => sum + Number(r.score || 0), 0) / filteredResults.length) : 0;
+  const scores = filteredResults.map((r: any) => Number(r.score || 0));
+  const maxScore = scores.length ? Math.max(...scores) : 0;
+  const minScore = scores.length ? Math.min(...scores) : 0;
+  const totalCorrect = filteredResults.reduce((sum: number, r: any) => sum + Number(r.total_correct || 0), 0);
+  const totalWrong = filteredResults.reduce((sum: number, r: any) => sum + Number(r.total_wrong || 0), 0);
+  const totalUnanswered = filteredResults.reduce((sum: number, r: any) => sum + Number(r.total_unanswered || 0), 0);
+
+  const scoreBuckets = [
+    { label: '0-40', count: scores.filter(score => score <= 40).length },
+    { label: '41-60', count: scores.filter(score => score > 40 && score <= 60).length },
+    { label: '61-75', count: scores.filter(score => score > 60 && score <= 75).length },
+    { label: '76-90', count: scores.filter(score => score > 75 && score <= 90).length },
+    { label: '91-100', count: scores.filter(score => score > 90).length },
+  ];
+  const maxBucket = Math.max(1, ...scoreBuckets.map(b => b.count));
+
+  const resultGroups = filteredResults.reduce((map: Map<string, number[]>, r: any) => {
+    const key = `${sessionFilterKey(r)}|${r.room_name || 'Tanpa ruangan'}`;
+    const list = map.get(key) || [];
+    list.push(Number(r.score || 0));
+    map.set(key, list);
+    return map;
+  }, new Map());
+  const roomSessionRows = Array.from(filteredSessions.reduce((map: Map<string, any>, s: any) => {
+    const key = `${sessionFilterKey(s)}|${s.room_name || 'Tanpa ruangan'}`;
+    const row = map.get(key) || { key, label: sessionFilterLabel(s), room: s.room_name || 'Tanpa ruangan', peserta: 0, selesai: 0, dikunci: 0, pelanggaran: 0 };
+    row.peserta += 1;
+    if (s.status === 'submitted' || submittedIds.has(s.id)) row.selesai += 1;
+    if (Number(s.is_time_locked) === 1 && s.status !== 'submitted') row.dikunci += 1;
+    row.pelanggaran += Number(s.cheat_log_count || s.cheat_warnings || 0);
+    map.set(key, row);
+    return map;
+  }, new Map()).values()).map((row: any) => {
+    const scoresForRow = resultGroups.get(row.key) || [];
+    return { ...row, rata: scoresForRow.length ? Math.round(scoresForRow.reduce((a: number, b: number) => a + b, 0) / scoresForRow.length) : 0 };
+  }).sort((a: any, b: any) => `${a.label} ${a.room}`.localeCompare(`${b.label} ${b.room}`));
+
+  const topViolations = filteredSessions
+    .map((s: any) => ({ ...s, total: Number(s.cheat_log_count || s.cheat_warnings || 0) }))
+    .filter((s: any) => s.total > 0)
+    .sort((a: any, b: any) => b.total - a.total)
+    .slice(0, 5);
+
+  const statStyle = (accent: string = C.greenLight) => ({ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '14px', padding: '14px', boxShadow: `inset 0 4px 0 ${accent}` });
+  const statText = { color: C.text, fontSize: '24px', fontWeight: 900, lineHeight: 1 };
+  const statLabel = { color: C.textMuted, fontSize: '11px', marginTop: '6px', fontWeight: 700 };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <span style={{ color: C.textMid, fontSize: '11px', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Analitik Ujian</span>
+          <p style={{ color: C.textFaint, fontSize: '11px', marginTop: '2px' }}>Ringkasan progres, nilai, pelanggaran, dan performa sesi/ruangan.</p>
+        </div>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          {sessionOptions.length > 1 && (
+            <select value={filterSession} onChange={e => setFilterSession(e.target.value)}
+              style={{ fontSize: '11.5px', fontWeight: 600, padding: '5px 10px', border: `1.5px solid ${C.borderMid}`, borderRadius: '8px', background: C.white, color: C.textMid, cursor: 'pointer', maxWidth: '240px' }}>
+              <option value="all">Semua Sesi</option>
+              {sessionOptions.map((s: any) => <option key={s.key} value={s.key}>{s.label}</option>)}
+            </select>
+          )}
+          {rooms.length > 1 && (
+            <select value={filterRoom} onChange={e => setFilterRoom(e.target.value)}
+              style={{ fontSize: '11.5px', fontWeight: 600, padding: '5px 10px', border: `1.5px solid ${C.borderMid}`, borderRadius: '8px', background: C.white, color: C.textMid, cursor: 'pointer' }}>
+              <option value="all">Semua Ruangan</option>
+              {rooms.map(r => <option key={r} value={r}>{r}</option>)}
+            </select>
+          )}
+        </div>
+      </div>
+
+      {loading ? <div className="py-12 text-center"><Spinner /></div>
+        : (
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(135px,1fr))', gap: '10px' }}>
+              {[
+                ['Peserta', started, C.greenLight],
+                ['Selesai', finished, '#eef2ff'],
+                ['Belum Selesai', Math.max(0, started - finished), '#f1f1f0'],
+                ['Dikunci', locked, '#fffbeb'],
+                ['Pelanggaran', totalViolations, '#fef2f2'],
+                ['Rata-rata', avgScore, C.greenLight],
+              ].map(([label, value, color]) => (
+                <div key={String(label)} style={statStyle(String(color))}>
+                  <p style={statText}>{value}</p>
+                  <p style={statLabel}>{label}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="grid gap-3 lg:grid-cols-2">
+              <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '14px', padding: '14px' }}>
+                <p style={{ color: C.text, fontSize: '13px', fontWeight: 800, marginBottom: '10px' }}>Distribusi Nilai</p>
+                <div className="space-y-2">
+                  {scoreBuckets.map(bucket => (
+                    <div key={bucket.label} style={{ display: 'grid', gridTemplateColumns: '52px 1fr 34px', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ color: C.textMuted, fontSize: '11px', fontWeight: 700 }}>{bucket.label}</span>
+                      <div style={{ height: '9px', borderRadius: '999px', background: '#edf0ed', overflow: 'hidden' }}>
+                        <div style={{ width: `${Math.round((bucket.count / maxBucket) * 100)}%`, height: '100%', background: C.green, borderRadius: '999px' }} />
+                      </div>
+                      <span style={{ color: C.text, fontSize: '11px', fontWeight: 800, textAlign: 'right' }}>{bucket.count}</span>
+                    </div>
+                  ))}
+                </div>
+                <p style={{ color: C.textMuted, fontSize: '11px', marginTop: '12px' }}>Tertinggi {maxScore} - Terendah {minScore} - Rata-rata {avgScore}</p>
+              </div>
+
+              <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '14px', padding: '14px' }}>
+                <p style={{ color: C.text, fontSize: '13px', fontWeight: 800, marginBottom: '10px' }}>Pelanggaran Terbanyak</p>
+                {topViolations.length === 0
+                  ? <p style={{ color: C.textFaint, fontSize: '12px' }}>Belum ada pelanggaran pada filter ini.</p>
+                  : topViolations.map((s: any) => (
+                    <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', padding: '8px 0', borderBottom: `1px solid ${C.borderLight}` }}>
+                      <div>
+                        <p style={{ color: C.text, fontSize: '12px', fontWeight: 800 }}>{s.full_name}</p>
+                        <p style={{ color: C.textFaint, fontSize: '10.5px' }}>{sessionFilterLabel(s)} - {s.room_name}</p>
+                      </div>
+                      <span style={{ color: '#dc2626', fontSize: '13px', fontWeight: 900 }}>{s.total}</span>
+                    </div>
+                  ))}
+              </div>
+            </div>
+
+            <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '14px', padding: '14px' }}>
+              <p style={{ color: C.text, fontSize: '13px', fontWeight: 800, marginBottom: '10px' }}>Kualitas Jawaban</p>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(120px,1fr))', gap: '10px' }}>
+                {[
+                  ['Benar', totalCorrect, C.green],
+                  ['Salah', totalWrong, '#dc2626'],
+                  ['Kosong', totalUnanswered, C.textMuted],
+                ].map(([label, value, color]) => (
+                  <div key={String(label)} style={{ background: C.bg, borderRadius: '12px', padding: '12px', textAlign: 'center' }}>
+                    <p style={{ color: String(color), fontSize: '22px', fontWeight: 900, lineHeight: 1 }}>{value}</p>
+                    <p style={{ color: C.textMuted, fontSize: '11px', marginTop: '4px' }}>{label}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '14px', overflow: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', minWidth: '760px' }}>
+                <TableHead cols={[{ label: 'Sesi' }, { label: 'Ruangan' }, { label: 'Peserta', center: true }, { label: 'Selesai', center: true }, { label: 'Belum', center: true }, { label: 'Dikunci', center: true }, { label: 'Langgar', center: true }, { label: 'Rata-rata', center: true }]} />
+                <tbody>
+                  {roomSessionRows.length === 0
+                    ? <tr><td colSpan={8} style={{ padding: '18px', textAlign: 'center', color: C.textFaint }}>Belum ada data analitik</td></tr>
+                    : roomSessionRows.map((row: any, i: number) => (
+                      <tr key={row.key} style={{ borderBottom: i < roomSessionRows.length - 1 ? `1px solid ${C.borderLight}` : 'none' }}>
+                        <td style={{ padding: '10px 14px', color: C.textMuted }}>{row.label}</td>
+                        <td style={{ padding: '10px 14px', color: C.text, fontWeight: 700 }}>{row.room}</td>
+                        <td style={{ padding: '10px 14px', textAlign: 'center' }}>{row.peserta}</td>
+                        <td style={{ padding: '10px 14px', textAlign: 'center', color: C.green, fontWeight: 800 }}>{row.selesai}</td>
+                        <td style={{ padding: '10px 14px', textAlign: 'center' }}>{row.peserta - row.selesai}</td>
+                        <td style={{ padding: '10px 14px', textAlign: 'center', color: row.dikunci ? '#b45309' : C.textMuted, fontWeight: 800 }}>{row.dikunci}</td>
+                        <td style={{ padding: '10px 14px', textAlign: 'center', color: row.pelanggaran ? '#dc2626' : C.textMuted, fontWeight: 800 }}>{row.pelanggaran}</td>
+                        <td style={{ padding: '10px 14px', textAlign: 'center', color: C.text, fontWeight: 900 }}>{row.rata}</td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+    </div>
+  );
+}
+
 type AssignTab = 'peserta' | 'ruangan' | 'sesi' | 'kelompok';
 function AssignmentsView({ examId }: { examId: string }) {
   const { toast } = useToast();

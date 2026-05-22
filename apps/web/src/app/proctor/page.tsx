@@ -158,7 +158,7 @@ function ProctorContent() {
   const [loading, setLoading] = useState(true);
   const [filterExam, setFilterExam] = useState('all');
   const [filterSession, setFilterSession] = useState('');
-  const [filterStart, setFilterStart] = useState<'all' | 'started' | 'not_started'>('all');
+  const [filterStart, setFilterStart] = useState<'all' | 'started' | 'not_started' | 'locked'>('all');
   const [filterFinished, setFilterFinished] = useState<'all' | 'hide_finished' | 'finished_only'>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [resetTarget, setResetTarget] = useState<any>(null);
@@ -276,6 +276,7 @@ function ProctorContent() {
   const filtered = filteredBySession.filter((s: any) => {
     if (filterStart === 'started' && !s.has_started) return false;
     if (filterStart === 'not_started' && s.has_started) return false;
+    if (filterStart === 'locked' && s.live_status !== 'dikunci') return false;
     if (filterFinished === 'hide_finished' && s.live_status === 'selesai') return false;
     if (filterFinished === 'finished_only' && s.live_status !== 'selesai') return false;
     const q = searchTerm.trim().toLowerCase();
@@ -412,6 +413,7 @@ function ProctorContent() {
                 <option value="all">Semua Status</option>
                 <option value="started">Sudah Mulai</option>
                 <option value="not_started">Belum Mulai</option>
+                <option value="locked">Dikunci Saja</option>
               </select>
               <select value={filterFinished} onChange={e => setFilterFinished(e.target.value as any)}
                 style={{ fontSize: '11.5px', fontWeight: 600, padding: '5px 12px', border: `1.5px solid ${C.borderMid}`, borderRadius: '8px', background: C.white, color: C.textMid, cursor: 'pointer' }}>
