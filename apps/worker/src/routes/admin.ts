@@ -496,14 +496,15 @@ admin.get('/exams/:examId/questions', async (c) => {
 admin.post('/exams/:examId/questions', async (c) => {
   const examId = c.req.param('examId');
   const { question_text, question_type, question_order, image_url, audio_url, points, options } = await c.req.json();
+  const type = question_type || 'multiple_choice';
   const qId = newId();
   await c.env.DB.prepare(
     `INSERT INTO cbt_questions (id, exam_id, question_text, question_type, question_order, image_url, audio_url, points) VALUES (?,?,?,?,?,?,?,?)`
-  ).bind(qId, examId, question_text, question_type || 'multiple_choice', question_order || 0, image_url || null, audio_url || null, points || 1).run();
-  if (options?.length) {
+  ).bind(qId, examId, question_text || '', type, Number(question_order || 0), image_url || null, audio_url || null, Number(points || 1)).run();
+  if (type === 'multiple_choice' && Array.isArray(options) && options.length) {
     const stmts = options.map((o: any, i: number) =>
       c.env.DB.prepare('INSERT INTO cbt_question_options (id, question_id, option_label, option_text, image_url, is_correct, option_order) VALUES (?,?,?,?,?,?,?)')
-        .bind(newId(), qId, o.option_label, o.option_text, o.image_url || null, o.is_correct ? 1 : 0, i)
+        .bind(newId(), qId, o.option_label || 'ABCDE'[i] || String(i + 1), o.option_text || '', o.image_url || null, o.is_correct ? 1 : 0, i)
     );
     await c.env.DB.batch(stmts);
   }
@@ -538,16 +539,21 @@ admin.post('/exams/:examId/questions/bulk', async (c) => {
 
 admin.put('/questions/:id', async (c) => {
   const b = await c.req.json();
+  const questionId = c.req.param('id');
+  const type = b.question_type || 'multiple_choice';
+  const questionOrder = Number.isFinite(Number(b.question_order)) ? Number(b.question_order) : 0;
+  const points = Number.isFinite(Number(b.points)) && Number(b.points) > 0 ? Number(b.points) : 1;
   await c.env.DB.prepare(
     `UPDATE cbt_questions SET question_text=?, question_type=?, question_order=?, image_url=?, audio_url=?, points=? WHERE id=?`
-  ).bind(b.question_text, b.question_type, b.question_order, b.image_url || null, b.audio_url || null, b.points || 1, c.req.param('id')).run();
-  if (b.options) {
-    await c.env.DB.prepare('DELETE FROM cbt_question_options WHERE question_id=?').bind(c.req.param('id')).run();
-    const stmts = b.options.map((o: any, i: number) =>
+  ).bind(b.question_text || '', type, questionOrder, b.image_url || null, b.audio_url || null, points, questionId).run();
+  if (Array.isArray(b.options)) {
+    await c.env.DB.prepare('DELETE FROM cbt_question_options WHERE question_id=?').bind(questionId).run();
+    const optionRows = type === 'multiple_choice' ? b.options : [];
+    const stmts = optionRows.map((o: any, i: number) =>
       c.env.DB.prepare('INSERT INTO cbt_question_options (id, question_id, option_label, option_text, image_url, is_correct, option_order) VALUES (?,?,?,?,?,?,?)')
-        .bind(newId(), c.req.param('id'), o.option_label, o.option_text, o.image_url || null, o.is_correct ? 1 : 0, i)
+        .bind(newId(), questionId, o.option_label || 'ABCDE'[i] || String(i + 1), o.option_text || '', o.image_url || null, o.is_correct ? 1 : 0, i)
     );
-    await c.env.DB.batch(stmts);
+    if (stmts.length) await c.env.DB.batch(stmts);
   }
   return c.json(ok(null, 'Soal diperbarui'));
 });
@@ -657,6 +663,7 @@ async function getAssignedResultParticipants(db: D1Database, examId: string) {
       nisn: row.nisn || '',
       username: row.username || row.nisn || '',
       asal_sekolah: row.asal_sekolah || '',
+      pilihan_pesantren: row.pilihan_pesantren || '',
       room_id: row.room_id || '',
       room_name: row.room_name || '',
       tanggal_tes: row.tanggal_tes || '',
@@ -668,7 +675,7 @@ async function getAssignedResultParticipants(db: D1Database, examId: string) {
   const pendaftarSelect = `
     SELECT p.id as user_id, 'pendaftar' as user_type,
            p.nama_lengkap as full_name, p.nisn, p.nisn as username,
-           p.asal_sekolah, p.tanggal_tes, p.sesi_tes,
+           p.asal_sekolah, p.pilihan_pesantren, p.tanggal_tes, p.sesi_tes,
            r.id as room_id, COALESCE(p.ruang_tes, '') as room_name
     FROM pendaftar p
     LEFT JOIN cbt_rooms r ON r.room_name = p.ruang_tes
@@ -677,7 +684,7 @@ async function getAssignedResultParticipants(db: D1Database, examId: string) {
   const manualStudentSelect = `
     SELECT cu.id as user_id, 'cbt_user' as user_type,
            cu.nama_lengkap as full_name, cu.nisn, cu.username,
-           '' as asal_sekolah, '' as tanggal_tes, '' as sesi_tes,
+           '' as asal_sekolah, '' as pilihan_pesantren, '' as tanggal_tes, '' as sesi_tes,
            r.id as room_id, COALESCE(r.room_name, '') as room_name
     FROM cbt_users cu
     LEFT JOIN cbt_rooms r ON r.id = cu.room_id
@@ -910,6 +917,7 @@ admin.get('/exams/:examId/results', async (c) => {
        COALESCE(p.nisn, cu.nisn) as nisn,
        COALESCE(p.nisn, cu.username) as username,
        COALESCE(p.asal_sekolah, '') as asal_sekolah,
+       COALESCE(p.pilihan_pesantren, '') as pilihan_pesantren,
        COALESCE(p.sesi_tes, '') as sesi_tes,
        COALESCE(p.tanggal_tes, '') as tanggal_tes,
        r.room_name

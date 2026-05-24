@@ -48,6 +48,7 @@ export async function exportExamResults(
     { key: 'nisn', label: 'NISN', width: 15 },
     { key: 'full_name', label: 'Nama Lengkap', width: 30 },
     { key: 'asal_sekolah', label: 'Asal Sekolah', width: 28 },
+    { key: 'pilihan_pesantren', label: 'Pesantren', width: 22 },
     { key: 'username', label: 'Username', width: 15 },
     { key: 'room_name', label: 'Ruangan', width: 15 },
     { key: 'tanggal_tes', label: 'Tanggal Tes', width: 18 },

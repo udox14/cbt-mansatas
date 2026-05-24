@@ -5,7 +5,7 @@
 import { Hono } from 'hono';
 import type { Env } from '../types';
 import { authMiddleware, requireRole } from '../middleware/auth';
-import { ok, err, now, parseSesiJam, cekJadwal } from '../utils/helpers';
+import { ok, err, now, newId, parseSesiJam, cekJadwal } from '../utils/helpers';
 
 const VIOLATION_LABELS: Record<string, string> = {
   tab_switch:       'Pindah Tab / Minimize Window',
@@ -226,6 +226,9 @@ proctor.post('/sessions/:id/force-submit', async (c) => {
     const { results: answers } = await c.env.DB.prepare(
       'SELECT * FROM cbt_student_answers WHERE session_id=?'
     ).bind(session.id).all();
+    const { results: questions } = await c.env.DB.prepare(
+      'SELECT id FROM cbt_questions WHERE exam_id=?'
+    ).bind(session.exam_id).all();
     const { results: qOpts } = await c.env.DB.prepare(
       `SELECT qo.id, qo.question_id, qo.is_correct FROM cbt_question_options qo
        JOIN cbt_questions q ON q.id = qo.question_id WHERE q.exam_id=?`
@@ -235,12 +238,17 @@ proctor.post('/sessions/:id/force-submit', async (c) => {
     for (const a of answers as any[]) {
       if (a.selected_option_id) { if (correctSet.has(a.selected_option_id)) correct++; else wrong++; }
     }
-    const total = (qOpts as any[]).map((o: any) => o.question_id).filter((v, i, a) => a.indexOf(v) === i).length;
-    const score = total > 0 ? Math.round((correct / total) * 100) : 0;
+    const total = (questions as any[]).length;
+    const unanswered = Math.max(0, total - correct - wrong);
+    const score = total > 0 ? Math.round((correct / total) * 10000) / 100 : 0;
     await c.env.DB.prepare(
-      `INSERT OR REPLACE INTO cbt_exam_results (id, session_id, exam_id, user_id, user_type, total_correct, total_wrong, total_unanswered, score, calculated_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?)`
-    ).bind(c.env.DB ? undefined : null, session.id, session.exam_id, session.user_id, session.user_type, correct, wrong, total - correct - wrong, score, now()).run();
+      `INSERT INTO cbt_exam_results (id, session_id, exam_id, user_id, user_type, total_questions, total_correct, total_wrong, total_unanswered, score)
+       VALUES (?,?,?,?,?,?,?,?,?,?)
+       ON CONFLICT(session_id) DO UPDATE SET
+         total_questions=excluded.total_questions, total_correct=excluded.total_correct,
+         total_wrong=excluded.total_wrong, total_unanswered=excluded.total_unanswered,
+         score=excluded.score, computed_at=datetime('now')`
+    ).bind(newId(), session.id, session.exam_id, session.user_id, session.user_type, total, correct, wrong, unanswered, score).run();
   } catch {}
   return c.json(ok(null, 'Ujian berhasil di-force submit'));
 });
