@@ -944,10 +944,11 @@ function ResultsView({ examId }: { examId: string }) {
   const [exportRows, setExportRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
+  const [recovering, setRecovering] = useState(false);
   const [filterRoom, setFilterRoom] = useState('all');
   const [filterSession, setFilterSession] = useState('all');
   const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'score', dir: 'desc' });
-  useEffect(() => {
+  const fetchResults = useCallback(() => {
     let alive = true;
     setLoading(true);
     Promise.all([
@@ -964,7 +965,10 @@ function ResultsView({ examId }: { examId: string }) {
       setLoading(false);
     });
     return () => { alive = false; };
-  }, [examId]);
+  }, [examId, toast]);
+  useEffect(() => {
+    return fetchResults();
+  }, [fetchResults]);
   const filterSource = exportRows.length ? exportRows : results;
   const rooms = Array.from(new Set(filterSource.map((r: any) => r.room_name).filter(Boolean))).sort();
   const sessionOptions = buildSessionFilters(filterSource);
@@ -1018,6 +1022,13 @@ function ResultsView({ examId }: { examId: string }) {
       setExporting(false);
     }
   };
+  const recoverMissingResults = async () => {
+    setRecovering(true);
+    const r = await POST<{ repaired: number }>(`/api/admin/exams/${examId}/results/recompute-missing`, {});
+    setRecovering(false);
+    toast(r.success ? 'success' : 'error', r.message || r.error || 'Gagal memulihkan hasil');
+    if (r.success) fetchResults();
+  };
   const avgScore = visible.length ? Math.round(visible.reduce((s: number, r: any) => s + (r.score ?? 0), 0) / visible.length) : 0;
   return (
     <div className="space-y-3">
@@ -1041,6 +1052,7 @@ function ResultsView({ examId }: { examId: string }) {
               {rooms.map(r => <option key={r} value={r}>{r}</option>)}
             </select>
           )}
+          {!loading && <Button variant="secondary" size="sm" loading={recovering} onClick={recoverMissingResults}><RefreshCw size={13} /> Pulihkan</Button>}
           {!loading && <Button variant="secondary" size="sm" loading={exporting} onClick={handleExport}><FileDown size={13} /> Export</Button>}
         </div>
       </div>
