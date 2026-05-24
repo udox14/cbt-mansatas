@@ -984,7 +984,7 @@ function ResultsView({ examId }: { examId: string }) {
   });
   const resultSortColumns = [
     { key: 'full_name', label: 'Nama' },
-    { key: 'nisn', label: 'NISN' },
+    { key: 'asal_sekolah', label: 'Asal Sekolah' },
     { key: 'session', label: 'Sesi' },
     { key: 'room_name', label: 'Ruangan' },
     { key: 'total_correct', label: 'Benar', center: true },
@@ -1091,7 +1091,7 @@ function ResultsView({ examId }: { examId: string }) {
                     <tr key={i} style={{ borderBottom: i < sortedVisible.length - 1 ? `1px solid ${C.borderLight}` : 'none' }}>
                       <td style={{ padding: '10px 14px', color: C.textMuted, fontWeight: 600 }}>{i + 1}</td>
                       <td style={{ padding: '10px 14px', color: C.text, fontWeight: 700 }}>{r.full_name}</td>
-                      <td style={{ padding: '10px 14px', color: C.textMuted, fontFamily: 'monospace' }}>{r.nisn || '—'}</td>
+                      <td style={{ padding: '10px 14px', color: C.textMuted }}>{r.asal_sekolah || '—'}</td>
                       <td style={{ padding: '10px 14px', color: C.textMuted, fontSize: '11px' }}>{sessionFilterLabel(r)}</td>
                       <td style={{ padding: '10px 14px', color: C.textMuted }}>{r.room_name}</td>
                       <td style={{ padding: '10px 14px', textAlign: 'center', color: C.green, fontWeight: 700 }}>{r.total_correct}</td>
