@@ -42,10 +42,18 @@ interface MansatasConfig {
   id: string;
   nisn: string;
   name: string;
-  className: string;
-  grade: string;
   gender: string;
   active: string;
+  className?: string;
+  grade?: string;
+  classRelation?: {
+    table: string;
+    id: string;
+    foreignKey: string;
+    grade: string;
+    number: string;
+    group: string;
+  };
   activeValue?: string;
 }
 
@@ -75,8 +83,6 @@ function readConfig(env: Env): MansatasConfig | null {
     id: env.MANSATAS_DB_ID_COLUMN,
     nisn: env.MANSATAS_DB_NISN_COLUMN,
     name: env.MANSATAS_DB_NAME_COLUMN,
-    className: env.MANSATAS_DB_CLASS_COLUMN,
-    grade: env.MANSATAS_DB_GRADE_COLUMN,
     gender: env.MANSATAS_DB_GENDER_COLUMN,
     active: env.MANSATAS_DB_ACTIVE_COLUMN,
   };
@@ -84,8 +90,28 @@ function readConfig(env: Env): MansatasConfig | null {
   const missing = Object.entries(raw)
     .filter(([, value]) => !value)
     .map(([key]) => key);
-  if (missing.length) {
-    throw new MansatasConfigError(`Mapping mansatas-db belum lengkap: ${missing.join(', ')}`);
+  const directClassMapping = {
+    className: env.MANSATAS_DB_CLASS_COLUMN,
+    grade: env.MANSATAS_DB_GRADE_COLUMN,
+  };
+  const relationMapping = {
+    table: env.MANSATAS_DB_CLASS_TABLE,
+    id: env.MANSATAS_DB_CLASS_ID_COLUMN,
+    foreignKey: env.MANSATAS_DB_CLASS_FOREIGN_KEY_COLUMN,
+    grade: env.MANSATAS_DB_CLASS_GRADE_COLUMN,
+    number: env.MANSATAS_DB_CLASS_NUMBER_COLUMN,
+    group: env.MANSATAS_DB_CLASS_GROUP_COLUMN,
+  };
+  const hasDirectClassMapping = Boolean(directClassMapping.className && directClassMapping.grade);
+  const hasRelationMapping = Object.values(relationMapping).every(Boolean);
+
+  if (missing.length || (!hasDirectClassMapping && !hasRelationMapping)) {
+    const classMessage = hasDirectClassMapping || hasRelationMapping
+      ? []
+      : ['class/grade (direct atau relasi tabel kelas)'];
+    throw new MansatasConfigError(
+      `Mapping mansatas-db belum lengkap: ${[...missing, ...classMessage].join(', ')}`,
+    );
   }
 
   // Validate all identifiers before interpolating them into SQL.
@@ -93,14 +119,33 @@ function readConfig(env: Env): MansatasConfig | null {
   identifier(raw.id, 'ID');
   identifier(raw.nisn, 'NISN');
   identifier(raw.name, 'nama');
-  identifier(raw.className, 'kelas');
-  identifier(raw.grade, 'tingkat');
   identifier(raw.gender, 'jenis kelamin');
   identifier(raw.active, 'status aktif');
 
+  if (hasDirectClassMapping) {
+    identifier(directClassMapping.className, 'kelas');
+    identifier(directClassMapping.grade, 'tingkat');
+  }
+
+  if (hasRelationMapping) {
+    identifier(relationMapping.table, 'tabel kelas');
+    identifier(relationMapping.id, 'ID tabel kelas');
+    identifier(relationMapping.foreignKey, 'foreign key kelas');
+    identifier(relationMapping.grade, 'tingkat tabel kelas');
+    identifier(relationMapping.number, 'nomor kelas');
+    identifier(relationMapping.group, 'kelompok kelas');
+  }
+
   return {
     table: raw.table!, id: raw.id!, nisn: raw.nisn!, name: raw.name!,
-    className: raw.className!, grade: raw.grade!, gender: raw.gender!,
+    className: hasDirectClassMapping ? directClassMapping.className : undefined,
+    grade: hasDirectClassMapping ? directClassMapping.grade : undefined,
+    classRelation: hasRelationMapping ? {
+      table: relationMapping.table!, id: relationMapping.id!,
+      foreignKey: relationMapping.foreignKey!, grade: relationMapping.grade!,
+      number: relationMapping.number!, group: relationMapping.group!,
+    } : undefined,
+    gender: raw.gender!,
     active: raw.active!, activeValue: env.MANSATAS_DB_ACTIVE_VALUE?.trim() || undefined,
   };
 }
@@ -119,15 +164,55 @@ function isTruthyActive(value: unknown, configuredValue?: string): boolean {
   return ['1', 'true', 'yes', 'y', 'aktif', 'active', 'a'].includes(normalized);
 }
 
+function qualified(alias: string, column: string, label: string): string {
+  return `${alias}.${identifier(column, label)}`;
+}
+
+function sourceFrom(config: MansatasConfig): string {
+  const source = `${identifier(config.table, 'tabel')} AS s`;
+  if (!config.classRelation) return source;
+  const relation = config.classRelation;
+  return `${source}
+    LEFT JOIN ${identifier(relation.table, 'tabel kelas')} AS k
+      ON ${qualified('k', relation.id, 'ID tabel kelas')} = ${qualified('s', relation.foreignKey, 'foreign key kelas')}`;
+}
+
+function gradeExpression(config: MansatasConfig): string {
+  if (config.classRelation) {
+    return `CAST(${qualified('k', config.classRelation.grade, 'tingkat tabel kelas')} AS TEXT)`;
+  }
+  return `CAST(${qualified('s', config.grade!, 'tingkat')} AS TEXT)`;
+}
+
+function classNameExpression(config: MansatasConfig): string {
+  if (!config.classRelation) {
+    return `CAST(${qualified('s', config.className!, 'kelas')} AS TEXT)`;
+  }
+
+  const relation = config.classRelation;
+  const grade = qualified('k', relation.grade, 'tingkat tabel kelas');
+  const group = qualified('k', relation.group, 'kelompok kelas');
+  const number = qualified('k', relation.number, 'nomor kelas');
+  return `TRIM(
+    COALESCE(CAST(${grade} AS TEXT), '')
+    || CASE WHEN ${group} IS NOT NULL AND TRIM(CAST(${group} AS TEXT)) <> ''
+       THEN ' ' || TRIM(CAST(${group} AS TEXT)) ELSE '' END
+    || CASE WHEN ${number} IS NOT NULL AND TRIM(CAST(${number} AS TEXT)) <> ''
+       THEN ' ' || TRIM(CAST(${number} AS TEXT)) ELSE '' END
+  )`;
+}
+
 function selectColumns(config: MansatasConfig): string {
+  const className = classNameExpression(config);
+  const grade = gradeExpression(config);
   return [
-    `${identifier(config.id, 'ID')} AS source_id`,
-    `${identifier(config.nisn, 'NISN')} AS nisn`,
-    `${identifier(config.name, 'nama')} AS full_name`,
-    `${identifier(config.className, 'kelas')} AS class_name`,
-    `${identifier(config.grade, 'tingkat')} AS grade`,
-    `${identifier(config.gender, 'jenis kelamin')} AS gender`,
-    `${identifier(config.active, 'status aktif')} AS active_value`,
+    `${qualified('s', config.id, 'ID')} AS source_id`,
+    `${qualified('s', config.nisn, 'NISN')} AS nisn`,
+    `${qualified('s', config.name, 'nama')} AS full_name`,
+    `${className} AS class_name`,
+    `${grade} AS grade`,
+    `${qualified('s', config.gender, 'jenis kelamin')} AS gender`,
+    `${qualified('s', config.active, 'status aktif')} AS active_value`,
   ].join(', ');
 }
 
@@ -151,15 +236,16 @@ function normalizeRow(row: any, config: MansatasConfig): NormalizedParticipant {
 function buildFilters(config: MansatasConfig, filters: ParticipantFilters, idList?: string[]) {
   const where: string[] = [];
   const params: (string | number)[] = [];
-  const qName = identifier(config.name, 'nama');
-  const qNisn = identifier(config.nisn, 'NISN');
-  const qClass = identifier(config.className, 'kelas');
-  const qGrade = identifier(config.grade, 'tingkat');
-  const qGender = identifier(config.gender, 'jenis kelamin');
-  const qActive = identifier(config.active, 'status aktif');
+  const qId = qualified('s', config.id, 'ID');
+  const qName = qualified('s', config.name, 'nama');
+  const qNisn = qualified('s', config.nisn, 'NISN');
+  const qClass = classNameExpression(config);
+  const qGrade = gradeExpression(config);
+  const qGender = qualified('s', config.gender, 'jenis kelamin');
+  const qActive = qualified('s', config.active, 'status aktif');
 
   if (idList?.length) {
-    where.push(`${identifier(config.id, 'ID')} IN (${idList.map(() => '?').join(',')})`);
+    where.push(`${qId} IN (${idList.map(() => '?').join(',')})`);
     params.push(...idList);
   }
   if (filters.q?.trim()) {
@@ -208,16 +294,18 @@ export async function listMansatasParticipants(
   const pageSize = Math.min(Math.max(Number(filters.page_size ?? 50) || 50, 1), max);
   const { where, params } = buildFilters(config, filters, options.ids);
   const whereSql = where.length ? ` WHERE ${where.join(' AND ')}` : '';
-  const table = identifier(config.table, 'tabel');
+  const fromSql = sourceFrom(config);
   const columns = selectColumns(config);
+  const name = qualified('s', config.name, 'nama');
+  const nisn = qualified('s', config.nisn, 'NISN');
 
   const [rowsResult, countResult] = await Promise.all([
     env.MANSATAS_DB.prepare(
-      `SELECT ${columns} FROM ${table}${whereSql}
-       ORDER BY LOWER(CAST(${identifier(config.name, 'nama')} AS TEXT)), CAST(${identifier(config.nisn, 'NISN')} AS TEXT)
+      `SELECT ${columns} FROM ${fromSql}${whereSql}
+       ORDER BY LOWER(CAST(${name} AS TEXT)), CAST(${nisn} AS TEXT)
        LIMIT ? OFFSET ?`
     ).bind(...params, pageSize, (page - 1) * pageSize).all(),
-    env.MANSATAS_DB.prepare(`SELECT COUNT(*) AS total FROM ${table}${whereSql}`).bind(...params).first<any>(),
+    env.MANSATAS_DB.prepare(`SELECT COUNT(*) AS total FROM ${fromSql}${whereSql}`).bind(...params).first<any>(),
   ]);
 
   const items = (rowsResult.results as any[]).map(row => normalizeRow(row, config));
@@ -232,10 +320,10 @@ export async function findMansatasByCredentials(
   const config = readConfig(env);
   if (!config || !env.MANSATAS_DB) return { participant: null, found: false };
 
-  const table = identifier(config.table, 'tabel');
-  const nisn = identifier(config.nisn, 'NISN');
+  const fromSql = sourceFrom(config);
+  const nisn = qualified('s', config.nisn, 'NISN');
   const row = await env.MANSATAS_DB.prepare(
-    `SELECT ${selectColumns(config)} FROM ${table}
+    `SELECT ${selectColumns(config)} FROM ${fromSql}
      WHERE CAST(${nisn} AS TEXT) = ? LIMIT 2`
   ).bind(username.trim()).first<any>();
 

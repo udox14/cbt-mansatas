@@ -26,6 +26,13 @@ export interface Env {
   MANSATAS_DB_GENDER_COLUMN?: string;
   MANSATAS_DB_ACTIVE_COLUMN?: string;
   MANSATAS_DB_ACTIVE_VALUE?: string;
+  // Optional relation mapping when class/grade live in a separate table.
+  MANSATAS_DB_CLASS_TABLE?: string;
+  MANSATAS_DB_CLASS_ID_COLUMN?: string;
+  MANSATAS_DB_CLASS_FOREIGN_KEY_COLUMN?: string;
+  MANSATAS_DB_CLASS_GRADE_COLUMN?: string;
+  MANSATAS_DB_CLASS_NUMBER_COLUMN?: string;
+  MANSATAS_DB_CLASS_GROUP_COLUMN?: string;
 }
 
 export type Role = 'admin' | 'proctor' | 'student';

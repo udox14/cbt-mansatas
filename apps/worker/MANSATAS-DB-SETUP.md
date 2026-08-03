@@ -1,8 +1,42 @@
 # Aktivasi sumber peserta `mansatas-db`
 
-Kode CBT sudah memiliki adapter `mansatas`, tetapi binding tidak diaktifkan otomatis karena database ID, nama tabel, dan nama kolom belum tersedia di workspace. Jangan mengisi mapping berdasarkan tebakan.
+Database dan schema yang sudah dikonfirmasi:
 
-## Data yang diperlukan
+- database: `mansatas-db`
+- database ID: `76b7b346-3f3f-4c1e-a347-2d51497bad97`
+- tabel peserta: `siswa`
+- tabel kelas: `kelas`
+- relasi kelas: `siswa.kelas_id` → `kelas.id`
+- status aktif: `siswa.status = 'aktif'`
+
+Kode CBT memiliki adapter `mansatas` yang memakai binding dan mapping eksplisit berikut. Database sekolah tetap read-only dari sisi CBT.
+
+## Mapping aktif
+
+Mapping yang dipakai Worker:
+
+```toml
+MANSATAS_DB_TABLE = "siswa"
+MANSATAS_DB_ID_COLUMN = "id"
+MANSATAS_DB_NISN_COLUMN = "nisn"
+MANSATAS_DB_NAME_COLUMN = "nama_lengkap"
+MANSATAS_DB_GENDER_COLUMN = "jenis_kelamin"
+MANSATAS_DB_ACTIVE_COLUMN = "status"
+MANSATAS_DB_ACTIVE_VALUE = "aktif"
+
+MANSATAS_DB_CLASS_TABLE = "kelas"
+MANSATAS_DB_CLASS_ID_COLUMN = "id"
+MANSATAS_DB_CLASS_FOREIGN_KEY_COLUMN = "kelas_id"
+MANSATAS_DB_CLASS_GRADE_COLUMN = "tingkat"
+MANSATAS_DB_CLASS_NUMBER_COLUMN = "nomor_kelas"
+MANSATAS_DB_CLASS_GROUP_COLUMN = "kelompok"
+```
+
+`class_name` dinormalisasi sebagai gabungan `tingkat`, `kelompok`, dan
+`nomor_kelas`, misalnya `10 UMUM 1`. Database sekolah hanya dibaca; CBT
+tidak melakukan INSERT, UPDATE, atau DELETE ke database tersebut.
+
+## Verifikasi schema berikutnya
 
 Jalankan pada database `mansatas-db` dan kirimkan hasilnya secara aman:
 
@@ -11,7 +45,7 @@ PRAGMA table_list;
 PRAGMA table_info(<tabel_siswa_yang_dipilih>);
 ```
 
-Mapping wajib:
+Jika schema sumber berubah, verifikasi kembali:
 
 - primary key siswa
 - NISN/NIS (dipakai sebagai username dan password)
@@ -23,31 +57,16 @@ Mapping wajib:
 
 ## Binding Wrangler
 
-Setelah database ID dikonfirmasi, tambahkan blok berikut ke `wrangler.toml` dan isi UUID sebenarnya:
+Binding berikut sudah aktif di `wrangler.toml`:
 
 ```toml
 [[d1_databases]]
 binding = "MANSATAS_DB"
 database_name = "mansatas-db"
-database_id = "<MANSATAS_DB_DATABASE_ID>"
+database_id = "76b7b346-3f3f-4c1e-a347-2d51497bad97"
 ```
 
-Tambahkan mapping non-rahasia berikut pada `[vars]`:
-
-```toml
-MANSATAS_DB_TABLE = "<table>"
-MANSATAS_DB_ID_COLUMN = "<primary_key>"
-MANSATAS_DB_NISN_COLUMN = "<nisn_or_nis>"
-MANSATAS_DB_NAME_COLUMN = "<full_name>"
-MANSATAS_DB_CLASS_COLUMN = "<class>"
-MANSATAS_DB_GRADE_COLUMN = "<grade>"
-MANSATAS_DB_GENDER_COLUMN = "<gender>"
-MANSATAS_DB_ACTIVE_COLUMN = "<active_status>"
-# Opsional bila status aktif memakai nilai selain 1/true/aktif:
-# MANSATAS_DB_ACTIVE_VALUE = "<active_value>"
-```
-
-Adapter memvalidasi identifier sebelum dipakai di SQL, hanya membaca database sekolah, dan tidak pernah menulis ke sana. Tanpa binding atau mapping lengkap, login PMB tetap berjalan; endpoint participant mansatas mengembalikan error konfigurasi yang jelas kepada admin.
+Adapter memvalidasi identifier sebelum dipakai di SQL, hanya membaca database sekolah, dan tidak pernah menulis ke sana. Jika binding atau mapping tidak tersedia, login PMB tetap berjalan dan endpoint participant mansatas mengembalikan error konfigurasi yang jelas kepada admin.
 
 ## Migration
 

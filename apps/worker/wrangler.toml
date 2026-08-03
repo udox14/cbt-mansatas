@@ -8,16 +8,22 @@ compatibility_date = "2024-06-01"
 # Lalu masukkan secret baru yang kuat (random 64 hex chars)
 CORS_ORIGIN = "https://cbtmansatas.pages.dev,https://cbt.man1tasikmalaya.sch.id"
 
-# Mapping wajib diisi setelah schema mansatas-db dikonfirmasi.
-# MANSATAS_DB_TABLE = "<table>"
-# MANSATAS_DB_ID_COLUMN = "<primary_key>"
-# MANSATAS_DB_NISN_COLUMN = "<nisn_or_nis>"
-# MANSATAS_DB_NAME_COLUMN = "<full_name>"
-# MANSATAS_DB_CLASS_COLUMN = "<class>"
-# MANSATAS_DB_GRADE_COLUMN = "<grade>"
-# MANSATAS_DB_GENDER_COLUMN = "<gender>"
-# MANSATAS_DB_ACTIVE_COLUMN = "<active_status>"
-# MANSATAS_DB_ACTIVE_VALUE = "<active_value>"
+# Mapping mansatas-db yang sudah dikonfirmasi melalui PRAGMA.
+MANSATAS_DB_TABLE = "siswa"
+MANSATAS_DB_ID_COLUMN = "id"
+MANSATAS_DB_NISN_COLUMN = "nisn"
+MANSATAS_DB_NAME_COLUMN = "nama_lengkap"
+MANSATAS_DB_GENDER_COLUMN = "jenis_kelamin"
+MANSATAS_DB_ACTIVE_COLUMN = "status"
+MANSATAS_DB_ACTIVE_VALUE = "aktif"
+
+# Kelas disimpan sebagai relasi siswa.kelas_id -> kelas.id.
+MANSATAS_DB_CLASS_TABLE = "kelas"
+MANSATAS_DB_CLASS_ID_COLUMN = "id"
+MANSATAS_DB_CLASS_FOREIGN_KEY_COLUMN = "kelas_id"
+MANSATAS_DB_CLASS_GRADE_COLUMN = "tingkat"
+MANSATAS_DB_CLASS_NUMBER_COLUMN = "nomor_kelas"
+MANSATAS_DB_CLASS_GROUP_COLUMN = "kelompok"
 
 # Bind ke database PMB EXISTING — JANGAN buat baru!
 [[d1_databases]]
@@ -25,13 +31,12 @@ binding = "DB"
 database_name = "pmb-man1-tasik"
 database_id = "b28a3f9e-331d-4bd2-9b85-95b12d6f313f"
 
-# mansatas-db: aktifkan setelah database ID dan hasil PRAGMA dikonfirmasi.
-# Jangan mengganti placeholder dengan tebakan; adapter akan membaca mapping
-# kolom eksplisit di bawah ini dan tetap read-only terhadap sumber sekolah.
-# [[d1_databases]]
-# binding = "MANSATAS_DB"
-# database_name = "mansatas-db"
-# database_id = "<MANSATAS_DB_DATABASE_ID>"
+# mansatas-db: database ID dan mapping schema sudah dikonfirmasi.
+# Adapter tetap read-only terhadap database sekolah.
+[[d1_databases]]
+binding = "MANSATAS_DB"
+database_name = "mansatas-db"
+database_id = "76b7b346-3f3f-4c1e-a347-2d51497bad97"
 
 # R2 untuk media soal
 [[r2_buckets]]
