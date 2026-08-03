@@ -11,13 +11,13 @@ const FEATURES = [
 ];
 
 const DEFAULTS: Record<string, string> = {
-  landing_badge: 'Penerimaan Murid Baru 2025/2026',
-  landing_title_1: 'Ujian Seleksi',
-  landing_title_2: 'Penerimaan',
-  landing_title_3: 'Murid Baru',
-  landing_subtitle: 'Sistem CBT resmi MAN 1 Tasikmalaya. Aman, terstruktur, dan hasil tersedia langsung setelah ujian.',
-  landing_login_hint: 'NISN & tanggal lahir (DDMMYYYY) sebagai password',
-  landing_trust: 'Data terintegrasi langsung dari sistem pendaftaran PMB.',
+  landing_badge: 'PMB · OSN · OMI · Kegiatan lainnya',
+  landing_title_1: 'Sistem CBT',
+  landing_title_2: 'Ujian Seleksi',
+  landing_title_3: 'MAN 1 Tasikmalaya',
+  landing_subtitle: 'Satu sistem ujian berbasis web untuk berbagai kegiatan. Aman, terstruktur, dan mudah dipantau panitia.',
+  landing_login_hint: 'Username dan password sesuai sumber peserta kegiatan',
+  landing_trust: 'Peserta dipilih per kegiatan dengan roster snapshot yang konsisten.',
 };
 
 export default function LandingPage() {

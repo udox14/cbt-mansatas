@@ -20,6 +20,32 @@ body {
 
 .exam-text { font-size: var(--exam-font-size, 1rem); line-height: 1.75; }
 
+/* LaTeX rendered by KaTeX. Display formulas stay scrollable on narrow phones. */
+.math-inline {
+  display: inline-block;
+  padding: 0 0.12em;
+  vertical-align: middle;
+}
+
+.math-block {
+  display: block;
+  max-width: 100%;
+  margin: 0.55rem 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.15rem 0;
+  text-align: center;
+}
+
+.math-inline .katex,
+.math-block .katex {
+  font-size: 1.05em;
+}
+
+.exam-text .katex-display {
+  margin: 0;
+}
+
 .exam-rules-content {
   line-height: 1.7;
 }
@@ -64,3 +90,132 @@ audio { width: 100%; height: 40px; border-radius: 8px; }
 /* active press feedback for touch */
 button:active { opacity: 0.85; }
 a:active { opacity: 0.85; }
+
+/* Exam Room desktop workspace: internal scrolling keeps the question area
+   usable while the navigator/status panes stay visible. */
+.exam-room-workspace {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.exam-room-side-header {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 12px;
+  color: #1e2e22;
+  font-size: 11px;
+  font-weight: 900;
+  border-bottom: 1px solid #edf0ed;
+  background: #fff;
+}
+
+.exam-room-side-header button {
+  width: 27px;
+  height: 27px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #d4dbd4;
+  border-radius: 8px;
+  background: #f4f6f4;
+  color: #4a6655;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+
+@media (min-width: 1200px) {
+  .exam-room-shell {
+    min-height: 0 !important;
+    overflow: hidden;
+  }
+
+  .exam-room-workspace {
+    display: grid;
+    grid-template-columns: var(--exam-left-width, 250px) minmax(0, 1fr) var(--exam-right-width, 280px);
+    min-height: 0;
+    overflow: hidden;
+    transition: grid-template-columns 160ms ease;
+  }
+
+  .exam-room-main-scroll {
+    min-width: 0;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+
+  .exam-room-navigator,
+  .exam-room-status {
+    min-width: 0;
+    min-height: 0;
+    overflow-y: auto;
+    background: #fff;
+  }
+
+  .exam-room-navigator {
+    border-right: 1px solid #e0e5e0;
+  }
+
+  .exam-room-status {
+    border-left: 1px solid #e0e5e0;
+  }
+
+  .exam-room-navigator[data-collapsed='true'] .exam-nav-content,
+  .exam-room-status[data-collapsed='true'] .exam-status-content {
+    display: none;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1199px) {
+  .exam-room-shell {
+    min-height: 0 !important;
+    overflow: hidden;
+  }
+
+  .exam-room-workspace {
+    display: block;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .exam-room-main-scroll {
+    height: 100%;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+
+  .exam-room-navigator {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 65;
+    width: min(300px, 82vw);
+    background: #fff;
+    box-shadow: 12px 0 30px rgba(30, 46, 34, 0.18);
+    transform: translateX(-105%);
+    transition: transform 180ms ease;
+    overflow-y: auto;
+  }
+
+  .exam-room-navigator.is-open {
+    transform: translateX(0);
+  }
+
+  .exam-room-navigator-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 64;
+    background: rgba(30, 46, 34, 0.28);
+  }
+}
+
+@media (max-width: 767px) {
+  .exam-room-workspace {
+    display: contents;
+  }
+}

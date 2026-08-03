@@ -98,7 +98,7 @@ export default function LoginPage() {
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9ab5a2" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
                 </div>
                 <input type={showPw ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)}
-                  placeholder="Tanggal lahir (DDMMYYYY)" autoComplete="current-password"
+                  placeholder="Password sesuai kegiatan" autoComplete="current-password"
                   className="w-full font-medium transition-all"
                   style={{ padding: '12px 40px 12px 36px', fontSize: '14px', border: '1.5px solid #d4dbd4', borderRadius: '12px', color: '#1e2e22', background: '#fafbfa', outline: 'none' }}
                   onFocus={e => { e.target.style.borderColor = '#2d7a4f'; e.target.style.boxShadow = '0 0 0 3px rgba(45,122,79,0.1)'; }}
@@ -138,7 +138,7 @@ export default function LoginPage() {
         <div className="flex items-start gap-2.5" style={{ background: '#fff', border: '1.5px solid #d4dbd4', borderRadius: '14px', padding: '12px 14px' }}>
           <Info size={13} strokeWidth={2.2} color="#2d7a4f" className="shrink-0 mt-0.5" />
           <p className="font-medium leading-relaxed" style={{ color: '#8a9e8d', fontSize: '11px' }}>
-            Hubungi panitia PMB jika mengalami kendala saat login.
+            Hubungi panitia kegiatan jika mengalami kendala saat login.
           </p>
         </div>
       </main>

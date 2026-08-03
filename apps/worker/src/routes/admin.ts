@@ -391,15 +391,20 @@ admin.get('/pendaftar/groups', async (c) => {
 
 admin.get('/exams', async (c) => {
   const { results } = await c.env.DB.prepare(
-    `SELECT e.*, COUNT(q.id) as question_count
-     FROM cbt_exams e LEFT JOIN cbt_questions q ON q.exam_id = e.id
+    `SELECT e.*, ev.name AS event_name, ev.code AS event_code, COUNT(q.id) as question_count
+     FROM cbt_exams e
+     LEFT JOIN cbt_events ev ON ev.id = e.event_id
+     LEFT JOIN cbt_questions q ON q.exam_id = e.id
      GROUP BY e.id ORDER BY e.created_at DESC`
   ).all();
   return c.json(ok(results));
 });
 
 admin.get('/exams/:id', async (c) => {
-  const exam = await c.env.DB.prepare('SELECT * FROM cbt_exams WHERE id=?').bind(c.req.param('id')).first();
+  const exam = await c.env.DB.prepare(
+    `SELECT e.*, ev.name AS event_name, ev.code AS event_code
+     FROM cbt_exams e LEFT JOIN cbt_events ev ON ev.id = e.event_id WHERE e.id=?`
+  ).bind(c.req.param('id')).first();
   if (!exam) return c.json(err('Ujian tidak ditemukan'), 404);
   return c.json(ok(exam));
 });
@@ -421,24 +426,30 @@ admin.post('/exams', async (c) => {
     return c.json(err('Cheat action tidak valid'), 400);
   if (b.active_status && !['draft', 'active', 'finished'].includes(b.active_status))
     return c.json(err('Status tidak valid'), 400);
+  // Existing exam UI does not yet send an event selector; keep its behavior
+  // under the migrated PMB event instead of creating an unscoped exam.
+  const eventId = b.event_id ? String(b.event_id) : 'event-pmb';
+  if (eventId && !await c.env.DB.prepare('SELECT id FROM cbt_events WHERE id=?').bind(eventId).first())
+    return c.json(err('Kegiatan tidak ditemukan'), 400);
 
   const id = newId();
   await c.env.DB.prepare(
     `INSERT INTO cbt_exams (id, title, description, duration_minutes, rules_text, completion_message,
      is_score_visible, randomize_questions, randomize_options, active_status, passing_score, created_by,
-     target_jalur, cheat_limit, cheat_action, enforce_fullscreen)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+     target_jalur, event_id, cheat_limit, cheat_action, enforce_fullscreen)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
   ).bind(id, b.title.trim(), b.description || null, duration,
     b.rules_text || null, b.completion_message || 'Ujian telah selesai. Terima kasih.',
     b.is_score_visible ? 1 : 0, b.randomize_questions ? 1 : 0,
     b.randomize_options ? 1 : 0, b.active_status || 'draft', b.passing_score || 0, user.sub,
-    b.target_jalur || null, cheatLimit, 'lock', b.enforce_fullscreen ? 1 : 0
+    b.target_jalur || null, eventId, cheatLimit, 'lock', b.enforce_fullscreen ? 1 : 0
   ).run();
   return c.json(ok({ id }, 'Ujian dibuat'), 201);
 });
 
 admin.put('/exams/:id', async (c) => {
   const b = await c.req.json();
+  const existingExam = await c.env.DB.prepare('SELECT event_id FROM cbt_exams WHERE id=?').bind(c.req.param('id')).first<any>();
 
   // ── M2: Validasi input ──
   if (!b.title || typeof b.title !== 'string' || b.title.trim().length === 0)
@@ -453,15 +464,20 @@ admin.put('/exams/:id', async (c) => {
     return c.json(err('Cheat action tidak valid'), 400);
   if (b.active_status && !['draft', 'active', 'finished'].includes(b.active_status))
     return c.json(err('Status tidak valid'), 400);
+  const eventId = b.event_id === undefined
+    ? (existingExam?.event_id || 'event-pmb')
+    : (b.event_id ? String(b.event_id) : 'event-pmb');
+  if (eventId && !await c.env.DB.prepare('SELECT id FROM cbt_events WHERE id=?').bind(eventId).first())
+    return c.json(err('Kegiatan tidak ditemukan'), 400);
 
   await c.env.DB.prepare(
     `UPDATE cbt_exams SET title=?, description=?, duration_minutes=?, rules_text=?,
      completion_message=?, is_score_visible=?, randomize_questions=?, randomize_options=?,
-     active_status=?, passing_score=?, target_jalur=?,
+     active_status=?, passing_score=?, target_jalur=?, event_id=?,
      cheat_limit=?, cheat_action=?, enforce_fullscreen=?, updated_at=? WHERE id=?`
   ).bind(b.title.trim(), b.description, duration, b.rules_text, b.completion_message,
     b.is_score_visible ? 1 : 0, b.randomize_questions ? 1 : 0, b.randomize_options ? 1 : 0,
-    b.active_status, b.passing_score || 0, b.target_jalur || null,
+    b.active_status, b.passing_score || 0, b.target_jalur || null, eventId,
     cheatLimit, 'lock', b.enforce_fullscreen ? 1 : 0,
     now(), c.req.param('id')
   ).run();
@@ -579,6 +595,12 @@ async function getAssignedTokenTargets(db: D1Database, examId: string) {
     targets.set(`${target.room_id}|${target.tanggal_tes}|${target.sesi_tes}`, target);
   };
 
+  const { results: rosterTargets } = await db.prepare(
+    `SELECT DISTINCT room_id, tanggal_tes, sesi_tes
+     FROM cbt_exam_roster WHERE exam_id=? AND room_id IS NOT NULL`
+  ).bind(examId).all();
+  for (const target of rosterTargets as any[]) add(target.room_id, target.tanggal_tes, target.sesi_tes);
+
   const { results: assignments } = await db.prepare(
     'SELECT user_id, user_type FROM cbt_exam_assignments WHERE exam_id=?'
   ).bind(examId).all();
@@ -671,6 +693,21 @@ async function getAssignedResultParticipants(db: D1Database, examId: string) {
     });
   };
   const addAll = (rows: any[] = []) => rows.forEach(add);
+
+  // Roster snapshot is the authoritative participant list for new events.
+  // Legacy assignments are still expanded below so PMB history remains
+  // exportable without rewriting old rows.
+  const { results: rosterRows } = await db.prepare(
+    `SELECT r.source_id as user_id,
+            CASE WHEN r.source_key = 'pmb' THEN 'pendaftar' ELSE r.source_key END as user_type,
+            r.full_name, COALESCE(r.nisn, r.username) as nisn, r.username,
+            r.tanggal_tes, r.sesi_tes, r.room_id, COALESCE(rm.room_name, '') as room_name,
+            COALESCE(r.metadata_json, '{}') as metadata_json
+     FROM cbt_exam_roster r
+     LEFT JOIN cbt_rooms rm ON rm.id = r.room_id
+     WHERE r.exam_id=?`
+  ).bind(examId).all();
+  addAll(rosterRows as any[]);
 
   const pendaftarSelect = `
     SELECT p.id as user_id, 'pendaftar' as user_type,
@@ -966,19 +1003,21 @@ admin.post('/upload', async (c) => {
 admin.get('/exams/:examId/results', async (c) => {
   const { results } = await c.env.DB.prepare(
     `SELECT er.*,
-       COALESCE(p.nama_lengkap, cu.nama_lengkap) as full_name,
-       COALESCE(p.nisn, cu.nisn) as nisn,
-       COALESCE(p.nisn, cu.username) as username,
+       COALESCE(rr.full_name, p.nama_lengkap, cu.nama_lengkap) as full_name,
+       COALESCE(rr.nisn, p.nisn, cu.nisn) as nisn,
+       COALESCE(rr.username, p.nisn, cu.username) as username,
        COALESCE(p.asal_sekolah, '') as asal_sekolah,
        COALESCE(p.pilihan_pesantren, '') as pilihan_pesantren,
-       COALESCE(p.sesi_tes, '') as sesi_tes,
-       COALESCE(p.tanggal_tes, '') as tanggal_tes,
+       COALESCE(rr.sesi_tes, p.sesi_tes, '') as sesi_tes,
+       COALESCE(rr.tanggal_tes, p.tanggal_tes, '') as tanggal_tes,
        r.room_name
      FROM cbt_exam_results er
      JOIN cbt_exam_sessions es ON es.id = er.session_id
      JOIN cbt_rooms r ON r.id = es.room_id
      LEFT JOIN pendaftar p ON er.user_id = p.id AND er.user_type = 'pendaftar'
      LEFT JOIN cbt_users cu ON er.user_id = cu.id AND er.user_type = 'cbt_user'
+     LEFT JOIN cbt_exam_roster rr ON rr.exam_id = er.exam_id AND rr.source_id = er.user_id
+       AND rr.source_key = CASE WHEN er.user_type = 'pendaftar' THEN 'pmb' ELSE er.user_type END
      WHERE er.exam_id = ?
      ORDER BY r.room_name, full_name`
   ).bind(c.req.param('examId')).all();
@@ -1036,17 +1075,19 @@ admin.post('/exams/:examId/results/recompute-missing', async (c) => {
 admin.get('/exams/:examId/sessions', async (c) => {
   const { results } = await c.env.DB.prepare(
     `SELECT es.*,
-       COALESCE(p.nama_lengkap, cu.nama_lengkap) as full_name,
-       COALESCE(p.nisn, cu.nisn) as nisn,
-       COALESCE(p.nisn, cu.username) as username,
-       COALESCE(p.sesi_tes, '') as sesi_tes,
-       COALESCE(p.tanggal_tes, '') as tanggal_tes,
+       COALESCE(rr.full_name, p.nama_lengkap, cu.nama_lengkap) as full_name,
+       COALESCE(rr.nisn, p.nisn, cu.nisn) as nisn,
+       COALESCE(rr.username, p.nisn, cu.username) as username,
+       COALESCE(rr.sesi_tes, p.sesi_tes, '') as sesi_tes,
+       COALESCE(rr.tanggal_tes, p.tanggal_tes, '') as tanggal_tes,
        r.room_name,
        COALESCE(cl.cheat_log_count, 0) as cheat_log_count
      FROM cbt_exam_sessions es
      JOIN cbt_rooms r ON r.id = es.room_id
      LEFT JOIN pendaftar p ON es.user_id = p.id AND es.user_type = 'pendaftar'
      LEFT JOIN cbt_users cu ON es.user_id = cu.id AND es.user_type = 'cbt_user'
+     LEFT JOIN cbt_exam_roster rr ON rr.exam_id = es.exam_id AND rr.source_id = es.user_id
+       AND rr.source_key = CASE WHEN es.user_type = 'pendaftar' THEN 'pmb' ELSE es.user_type END
      LEFT JOIN (
        SELECT session_id, COUNT(*) as cheat_log_count
        FROM cbt_cheat_logs
@@ -1087,12 +1128,14 @@ admin.get('/exams/:examId/question-analytics', async (c) => {
             es.started_at,
             COALESCE(es.finished_at, es.last_heartbeat) as ended_at,
             r.room_name,
-            COALESCE(p.tanggal_tes, '') as tanggal_tes,
-            COALESCE(p.sesi_tes, '') as sesi_tes
+            COALESCE(rr.tanggal_tes, p.tanggal_tes, '') as tanggal_tes,
+            COALESCE(rr.sesi_tes, p.sesi_tes, '') as sesi_tes
      FROM cbt_questions q
      JOIN cbt_exam_sessions es ON es.exam_id = q.exam_id
      JOIN cbt_rooms r ON r.id = es.room_id
      LEFT JOIN pendaftar p ON es.user_id = p.id AND es.user_type = 'pendaftar'
+     LEFT JOIN cbt_exam_roster rr ON rr.exam_id = es.exam_id AND rr.source_id = es.user_id
+       AND rr.source_key = CASE WHEN es.user_type = 'pendaftar' THEN 'pmb' ELSE es.user_type END
      LEFT JOIN cbt_student_answers a ON a.session_id = es.id AND a.question_id = q.id
      LEFT JOIN cbt_question_options co ON co.id = a.selected_option_id
      WHERE q.exam_id=?

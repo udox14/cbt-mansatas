@@ -1,5 +1,5 @@
 // ============================================================
-// CBT PMB Worker - Main Entry Point
+// Sistem CBT Worker - Main Entry Point
 // ============================================================
 
 import { Hono } from 'hono';
@@ -9,6 +9,7 @@ import type { Env } from './types';
 
 import authRoutes from './routes/auth';
 import adminRoutes from './routes/admin';
+import adminEventRoutes from './routes/admin-events';
 import proctorRoutes from './routes/proctor';
 import studentRoutes from './routes/student';
 
@@ -46,6 +47,7 @@ app.get('/api/health', (c) => {
 // ── Routes ───────────────────────────────────────────────────
 
 app.route('/api/auth', authRoutes);
+app.route('/api/admin', adminEventRoutes);
 app.route('/api/admin', adminRoutes);
 app.route('/api/proctor', proctorRoutes);
 app.route('/api/student', studentRoutes);

@@ -69,7 +69,11 @@ proctor.get('/sessions', async (c) => {
       JOIN pendaftar p ON p.ruang_tes = t.room_name
        AND (t.tanggal_tes = '' OR p.tanggal_tes = t.tanggal_tes)
        AND (t.sesi_tes = '' OR p.sesi_tes = t.sesi_tes)
-      WHERE UPPER(p.jalur) NOT LIKE '%PRESTASI%'
+       WHERE UPPER(COALESCE(p.jalur, '')) NOT LIKE '%PRESTASI%'
+         AND NOT EXISTS (
+           SELECT 1 FROM cbt_exam_roster rr
+           WHERE rr.exam_id = t.exam_id AND rr.source_key = 'pmb' AND rr.source_id = p.id
+         )
 
       UNION ALL
 
@@ -82,6 +86,23 @@ proctor.get('/sessions', async (c) => {
        AND cu.is_active = 1
        AND t.tanggal_tes = ''
        AND t.sesi_tes = ''
+       AND NOT EXISTS (
+         SELECT 1 FROM cbt_exam_roster rr
+         WHERE rr.exam_id = t.exam_id AND rr.source_key = 'cbt_user' AND rr.source_id = cu.id
+       )
+
+      UNION ALL
+
+      SELECT DISTINCT t.exam_id, t.room_id,
+             t.exam_title, t.duration_minutes, rr.source_id as user_id,
+             CASE WHEN rr.source_key = 'pmb' THEN 'pendaftar' ELSE rr.source_key END as user_type,
+             rr.full_name, COALESCE(rr.nisn, rr.username) as nisn,
+             COALESCE(rr.sesi_tes, '') as sesi_tes, COALESCE(rr.tanggal_tes, '') as tanggal_tes
+      FROM active_tokens t
+      JOIN cbt_exam_roster rr ON rr.exam_id = t.exam_id AND rr.room_id = t.room_id
+       AND rr.source_key IN ('pmb', 'mansatas', 'cbt_user')
+       AND (t.tanggal_tes = '' OR rr.tanggal_tes = t.tanggal_tes)
+       AND (t.sesi_tes = '' OR rr.sesi_tes = t.sesi_tes)
     )
     SELECT es.id, p.exam_id, p.user_id, p.user_type,
            COALESCE(es.status, 'not_started') as status,

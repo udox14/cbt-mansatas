@@ -1,11 +1,11 @@
-// ── CBT PMB Service Worker ────────────────────────────────────
+// ── Sistem CBT Service Worker ─────────────────────────────────
 // Strategy:
 //   - App shell (HTML/JS/CSS/fonts) → Cache First
 //   - API calls (/api/*) → Network Only (tidak boleh di-cache, data harus fresh)
 //   - Images/icons → Cache First dengan fallback
 // ─────────────────────────────────────────────────────────────
 
-const CACHE_NAME = 'cbt-pmb-v1';
+const CACHE_NAME = 'cbt-multikegiatan-v2';
 const SHELL_URLS = [
   '/',
   '/student/',

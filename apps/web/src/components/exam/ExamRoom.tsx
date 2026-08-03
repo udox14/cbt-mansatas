@@ -3,11 +3,8 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { API_BASE_URL, GET, POST } from '@/lib/api';
 import { Modal, Spinner } from '@/components/ui';
 import { Clock, ChevronLeft, ChevronRight, Minus, Plus, Send, AlertTriangle, Maximize, Info, RefreshCw } from 'lucide-react';
-import DOMPurify from 'dompurify';
+import MathContent from '@/components/content/MathContent';
 import { useAntiCheatAlarm } from '@/hooks/useAntiCheatAlarm';
-
-// Helper: sanitize HTML sebelum render
-const sanitize = (html: string) => DOMPurify.sanitize(html, { USE_PROFILES: { html: true } });
 
 interface Question {
   index: number; id: string; question_text: string; question_type: string;
@@ -153,6 +150,11 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
   // Pesan kunci permanen (bukan toast)
   const [lockedMsg, setLockedMsg] = useState('');
   const [isCheatLocked, setIsCheatLocked] = useState(false);
+  const [viewport, setViewport] = useState<'mobile' | 'tablet' | 'desktop'>('mobile');
+  const [leftCollapsed, setLeftCollapsed] = useState(false);
+  const [rightCollapsed, setRightCollapsed] = useState(false);
+  const [navigatorOpen, setNavigatorOpen] = useState(false);
+  const mainScrollRef = useRef<HTMLElement | null>(null);
   const toastIdRef = useRef(0);
   const dirtyRef = useRef(new Set<string>());
   const submittedRef = useRef(false);
@@ -168,6 +170,32 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
   const VIOLATION_COOLDOWN_MS = 4000;
   // ── M4: answersRef selalu up-to-date (fix stale closure) ──
   const answersRef = useRef<Map<string, Answer>>(new Map());
+
+  useEffect(() => {
+    const updateViewport = () => {
+      const width = window.innerWidth;
+      setViewport(width >= 1200 ? 'desktop' : width >= 768 ? 'tablet' : 'mobile');
+    };
+    updateViewport();
+    window.addEventListener('resize', updateViewport);
+    return () => window.removeEventListener('resize', updateViewport);
+  }, []);
+
+  useEffect(() => {
+    setLeftCollapsed(localStorage.getItem('cbt_exam_left_collapsed') === '1');
+    setRightCollapsed(localStorage.getItem('cbt_exam_right_collapsed') === '1');
+  }, []);
+
+  const toggleLeftCollapsed = () => setLeftCollapsed(value => {
+    const next = !value;
+    localStorage.setItem('cbt_exam_left_collapsed', next ? '1' : '0');
+    return next;
+  });
+  const toggleRightCollapsed = () => setRightCollapsed(value => {
+    const next = !value;
+    localStorage.setItem('cbt_exam_right_collapsed', next ? '1' : '0');
+    return next;
+  });
 
   useEffect(() => {
     setEffectiveStartedAt(startedAt);
@@ -498,6 +526,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
     setCurrent(i);
     setShowGrid(false);
     localStorage.setItem(`cbt_pos_${sessionId}`, String(i));
+    mainScrollRef.current?.scrollTo(0, 0);
     window.scrollTo(0, 0);
   }, [sessionId, enterFullscreen]);
 
@@ -599,9 +628,11 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
   const urgent = timeLeft < 300;
   const isLast = current === questions.length - 1;
   const needsFullscreen = enforceFullscreen && fullscreenSupported && !isFullscreen && !submittedRef.current && !isCheatLocked;
+  const isDesktopLayout = viewport !== 'mobile';
+  const isWideLayout = viewport === 'desktop';
 
   return (
-    <div className="no-select" style={{ minHeight: '100vh', background: C.bg, display: 'flex', flexDirection: 'column', fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}>
+    <div className="no-select exam-room-shell" style={{ minHeight: '100vh', height: isDesktopLayout ? '100dvh' : undefined, background: C.bg, display: 'flex', flexDirection: 'column', fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}>
 
       {/* ── WATERMARK NAMA PESERTA (fixed overlay, muncul di screenshot) ── */}
       <WatermarkOverlay name={studentName} />
@@ -739,7 +770,13 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
       )}
 
       <header style={{ position: 'sticky', top: toasts.length > 0 ? 'auto' : 0, zIndex: 40, background: C.white, borderBottom: `1.5px solid ${C.border}` }}>
-        <div style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', maxWidth: '680px', margin: '0 auto' }}>
+        <div style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', maxWidth: isDesktopLayout ? 'none' : '680px', margin: '0 auto' }}>
+
+          {viewport === 'tablet' && (
+            <button onClick={() => setNavigatorOpen(true)} style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '6px 9px', borderRadius: '8px', border: `1.5px solid ${C.borderMid}`, background: C.bg, color: C.textMid, fontSize: '11px', fontWeight: 800, cursor: 'pointer' }}>
+              Soal
+            </button>
+          )}
 
           {/* timer pill */}
           <div style={{
@@ -794,7 +831,33 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
       </header>
 
       {/* ── QUESTION ── */}
-      <main style={{ flex: 1, padding: '12px', maxWidth: '680px', width: '100%', margin: '0 auto', paddingBottom: 'calc(128px + env(safe-area-inset-bottom, 0px))' }}>
+      <div className="exam-room-workspace" style={{ '--exam-left-width': leftCollapsed ? '58px' : '250px', '--exam-right-width': rightCollapsed ? '58px' : '280px' } as React.CSSProperties}>
+        {viewport === 'tablet' && navigatorOpen && <div className="exam-room-navigator-overlay" onClick={() => setNavigatorOpen(false)} />}
+        {isDesktopLayout && (
+          <aside className={`exam-room-navigator ${viewport === 'tablet' && navigatorOpen ? 'is-open' : ''}`} data-collapsed={leftCollapsed}>
+            <div className="exam-room-side-header">
+              <span>{viewport === 'tablet' ? 'Navigasi soal' : leftCollapsed ? 'Soal' : 'Navigasi soal'}</span>
+              <button onClick={() => viewport === 'tablet' ? setNavigatorOpen(false) : toggleLeftCollapsed()} aria-label={viewport === 'tablet' ? 'Tutup navigator' : 'Lipat navigator'}>{viewport === 'tablet' ? '×' : leftCollapsed ? '›' : '‹'}</button>
+            </div>
+            <div className="exam-nav-content">
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', padding: '8px 10px', borderBottom: `1px solid ${C.borderLight}` }}>
+                {[{ color: C.green, label: 'Dijawab' }, { color: '#f59e0b', label: 'Ragu' }, { color: '#e8eae8', label: 'Belum' }].map(item => <span key={item.label} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: C.textMuted, fontSize: '9px', fontWeight: 700 }}><span style={{ width: '8px', height: '8px', borderRadius: '3px', background: item.color }} />{item.label}</span>)}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '6px', padding: '12px 10px' }}>
+                {questions.map((qq, i) => {
+                  const a = answers.get(qq.id);
+                  const answered = !!(a?.selected_option_id || a?.essay_answer?.trim());
+                  const doubt = !!a?.is_doubtful;
+                  const isMissing = missingQuestionIds.has(qq.id) && !answered;
+                  const bg = isMissing ? '#dc2626' : doubt ? '#f59e0b' : answered ? C.green : '#e8eae8';
+                  return <button key={qq.id} onClick={() => { goTo(i); if (viewport === 'tablet') setNavigatorOpen(false); }} disabled={isCheatLocked} style={{ aspectRatio: '1', border: isMissing ? '2px solid #fecaca' : i === current ? `2px solid ${C.green}` : 'none', borderRadius: '8px', background: i === current && !isMissing ? C.greenLight : bg, color: i === current && !isMissing ? C.green : answered || doubt || isMissing ? '#fff' : C.textMuted, fontSize: '11px', fontWeight: 800, cursor: isCheatLocked ? 'not-allowed' : 'pointer', opacity: isCheatLocked ? 0.55 : 1 }}>{i + 1}</button>;
+                })}
+              </div>
+            </div>
+          </aside>
+        )}
+
+      <main ref={mainScrollRef} className="exam-room-main-scroll" style={{ flex: 1, padding: '12px', maxWidth: isDesktopLayout ? 'none' : '680px', width: '100%', margin: '0 auto', paddingBottom: isDesktopLayout ? '24px' : 'calc(128px + env(safe-area-inset-bottom, 0px))' }}>
         <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '18px', overflow: 'hidden' }}>
 
           {/* soal header */}
@@ -819,8 +882,11 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
           </div>
 
           {/* soal text — H2: sanitize HTML sebelum render */}
-          <div className="exam-text" style={{ padding: '16px 14px 12px', color: C.text, lineHeight: 1.75, '--exam-font-size': `${fontSize}px` } as any}
-            dangerouslySetInnerHTML={{ __html: sanitize(q.question_text) }} />
+          <MathContent
+            html={q.question_text}
+            className="exam-text"
+            style={{ padding: '16px 14px 12px', color: C.text, lineHeight: 1.75, '--exam-font-size': `${fontSize}px` } as any}
+          />
 
           {/* media */}
           {q.image_url && (
@@ -862,7 +928,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
                     <span style={{ flex: 1, fontSize: `${fontSize}px`, color: C.text, fontWeight: 500, paddingTop: '2px' }}>
                       {o.image_url
                         ? <img src={`${API_BASE_URL}${o.image_url}`} alt={o.option_label} style={{ maxWidth: '100%', borderRadius: '8px' }} />
-                        : <span dangerouslySetInnerHTML={{ __html: sanitize(o.option_text) }} />}
+                        : <MathContent as="span" html={o.option_text} />}
                     </span>
                   </button>
                 );
@@ -882,13 +948,45 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
       </main>
 
       {/* ── FLOATING GRID BUTTON ── */}
+        {isWideLayout && (
+          <aside className="exam-room-status" data-collapsed={rightCollapsed}>
+            <div className="exam-room-side-header">
+              <span>{rightCollapsed ? 'Status' : 'Status ujian'}</span>
+              <button onClick={toggleRightCollapsed} aria-label="Lipat panel status">{rightCollapsed ? '‹' : '›'}</button>
+            </div>
+            <div className="exam-status-content">
+              <div style={{ background: urgent ? '#fef2f2' : C.greenLight, border: `1.5px solid ${urgent ? '#fecaca' : C.greenBorder}`, borderRadius: '12px', padding: '14px', textAlign: 'center', marginBottom: '12px' }}>
+                <Clock size={18} color={urgent ? '#dc2626' : C.green} style={{ margin: '0 auto 5px' }} />
+                <p style={{ fontFamily: 'monospace', fontSize: '27px', fontWeight: 900, color: urgent ? '#dc2626' : C.text, letterSpacing: '0.04em' }}>{String(mm).padStart(2, '0')}:{String(ss).padStart(2, '0')}</p>
+                <p style={{ color: C.textMuted, fontSize: '10px', fontWeight: 700, marginTop: '3px' }}>Sisa waktu</p>
+              </div>
+              <div style={{ border: `1.5px solid ${C.borderLight}`, borderRadius: '12px', padding: '12px', marginBottom: '12px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: C.textMid, fontSize: '11px', fontWeight: 800 }}><span>Progress</span><span>{answeredCount}/{questions.length}</span></div>
+                <div style={{ height: '7px', background: C.bg, borderRadius: '999px', overflow: 'hidden', marginTop: '7px' }}><div style={{ width: `${(answeredCount / questions.length) * 100}%`, height: '100%', background: C.green, borderRadius: '999px' }} /></div>
+                <p style={{ color: C.textMuted, fontSize: '10px', marginTop: '8px' }}>{questions.length - answeredCount} soal belum dijawab · {doubtCount} ragu</p>
+              </div>
+              {cheatCount > 0 && <div style={{ background: '#fef2f2', border: '1.5px solid #fecaca', borderRadius: '10px', padding: '9px 10px', color: '#dc2626', fontSize: '11px', fontWeight: 800, marginBottom: '12px' }}>⚠ Pelanggaran {cheatCount}/{cheatLimit}</div>}
+              <div style={{ display: 'flex', gap: '7px', marginBottom: '12px' }}>
+                <button onClick={() => changeFontSize(-2)} style={{ flex: 1, padding: '9px', borderRadius: '9px', border: `1.5px solid ${C.borderMid}`, background: C.bg, cursor: 'pointer', color: C.textMid, fontWeight: 800 }}><Minus size={13} /></button>
+                <button onClick={() => changeFontSize(2)} style={{ flex: 1, padding: '9px', borderRadius: '9px', border: `1.5px solid ${C.borderMid}`, background: C.bg, cursor: 'pointer', color: C.textMid, fontWeight: 800 }}><Plus size={13} /></button>
+                {enforceFullscreen && fullscreenSupported && !isFullscreen && <button onClick={enterFullscreen} title="Masuk fullscreen" style={{ flex: 1, padding: '9px', borderRadius: '9px', border: '1.5px solid #fde68a', background: '#fffbeb', cursor: 'pointer' }}><Maximize size={13} color="#b45309" /></button>}
+              </div>
+              <div style={{ borderTop: `1.5px solid ${C.borderLight}`, paddingTop: '12px' }}>
+                <button onClick={() => goTo(Math.max(0, current - 1))} disabled={current === 0 || isCheatLocked} style={{ width: '100%', padding: '9px', marginBottom: '7px', borderRadius: '9px', border: `1.5px solid ${C.borderMid}`, background: C.bg, color: C.textMid, fontSize: '11px', fontWeight: 800, cursor: 'pointer', opacity: current === 0 || isCheatLocked ? 0.4 : 1 }}>‹ Sebelumnya</button>
+                {isLast ? <button onClick={openSubmitConfirm} disabled={isCheatLocked} style={{ width: '100%', padding: '10px', borderRadius: '9px', border: 'none', background: '#1a5fa8', color: '#fff', fontSize: '11px', fontWeight: 900, cursor: 'pointer', opacity: isCheatLocked ? 0.45 : 1 }}>Kirim ujian <Send size={12} style={{ display: 'inline', marginLeft: '4px' }} /></button> : <button onClick={() => goTo(current + 1)} disabled={isCheatLocked} style={{ width: '100%', padding: '10px', borderRadius: '9px', border: 'none', background: C.green, color: '#fff', fontSize: '11px', fontWeight: 900, cursor: 'pointer', opacity: isCheatLocked ? 0.45 : 1 }}>Selanjutnya ›</button>}
+              </div>
+            </div>
+          </aside>
+        )}
+      </div>
+
       <button onClick={openGrid} disabled={isCheatLocked}
         style={{
           position: 'fixed', bottom: 'calc(82px + env(safe-area-inset-bottom, 0px))', right: '16px', zIndex: 38,
           width: '48px', height: '48px', borderRadius: '14px',
           background: C.green, border: 'none', cursor: isCheatLocked ? 'not-allowed' : 'pointer',
           opacity: isCheatLocked ? 0.45 : 1,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          display: isWideLayout ? 'none' : 'flex', alignItems: 'center', justifyContent: 'center',
           boxShadow: '0 4px 14px rgba(45,122,79,0.35)',
         }}>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -898,7 +996,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
       </button>
 
       {/* ── BOTTOM NAV ── */}
-      <div style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 55, background: C.white, borderTop: `1.5px solid ${C.border}`, padding: '10px 14px calc(10px + env(safe-area-inset-bottom, 0px))', boxShadow: '0 -10px 26px rgba(30,46,34,0.08)' }}>
+      <div style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 55, background: C.white, borderTop: `1.5px solid ${C.border}`, padding: '10px 14px calc(10px + env(safe-area-inset-bottom, 0px))', boxShadow: '0 -10px 26px rgba(30,46,34,0.08)', display: isWideLayout ? 'none' : 'block' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', maxWidth: '680px', margin: '0 auto' }}>
           <button onClick={() => goTo(Math.max(0, current - 1))} disabled={current === 0 || isCheatLocked}
             style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '10px 16px', borderRadius: '12px', fontSize: '13px', fontWeight: 700, background: C.bg, color: C.textMid, border: `1.5px solid ${C.borderMid}`, cursor: current === 0 || isCheatLocked ? 'not-allowed' : 'pointer', opacity: current === 0 || isCheatLocked ? 0.35 : 1 }}>

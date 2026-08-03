@@ -5,11 +5,12 @@ import { GET, POST } from '@/lib/api';
 import { getDeviceId } from '@/lib/device';
 import { Button, Modal, LoadingScreen, EmptyState, ToastProvider } from '@/components/ui';
 import ExamRoom from '@/components/exam/ExamRoom';
+import MathContent from '@/components/content/MathContent';
 import { Clock, ArrowRight, Check, KeyRound, CalendarClock, Lock } from 'lucide-react';
-import DOMPurify from 'dompurify';
 
 interface Exam {
   id: string; title: string; description: string | null;
+  event_name?: string | null; event_code?: string | null;
   duration_minutes: number; rules_text: string | null;
   session_id: string | null; session_status: string | null;
   enforce_fullscreen?: boolean;
@@ -272,6 +273,7 @@ function StudentContent() {
                   }}>
                     <div className="flex items-start justify-between gap-2.5 mb-2">
                       <div className="flex-1">
+                        {exam.event_name && <span style={{ display: 'inline-block', color: '#2d7a4f', background: '#e2ebe3', borderRadius: '999px', padding: '3px 8px', fontSize: '9px', fontWeight: 800, marginBottom: '5px' }}>{exam.event_code || 'KEGIATAN'} · {exam.event_name}</span>}
                         <p className="font-extrabold leading-tight mb-1" style={{ color: done ? '#6b7c6e' : '#1e2e22', fontSize: '14px' }}>{exam.title}</p>
                         {exam.description && <p className="leading-relaxed" style={{ color: '#8a9e8d', fontSize: '11.5px' }}>{exam.description}</p>}
                       </div>
@@ -327,7 +329,7 @@ function StudentContent() {
                     return (
                       <tr key={exam.id} style={{ borderBottom: i < exams.length - 1 ? '1px solid #edf0ed' : 'none', background: i % 2 !== 0 ? '#fafbfa' : '#fff' }}>
                         <td style={{ padding: '14px 20px', textAlign: 'center', fontSize: '12px', fontWeight: 600, ...(done ? dimmed : { color: '#8a9e8d' }) }}>{i + 1}</td>
-                        <td style={{ padding: '14px 20px', fontSize: '13px', fontWeight: 700, whiteSpace: 'nowrap', ...(done ? dimmed : { color: '#1e2e22' }) }}>{exam.title}</td>
+                        <td style={{ padding: '14px 20px', fontSize: '13px', fontWeight: 700, whiteSpace: 'nowrap', ...(done ? dimmed : { color: '#1e2e22' }) }}><div>{exam.title}</div>{exam.event_name && <div style={{ color: '#2d7a4f', fontSize: '9px', fontWeight: 800, marginTop: '4px' }}>{exam.event_code || 'KEGIATAN'} · {exam.event_name}</div>}</td>
                         <td style={{ padding: '14px 20px', fontSize: '12px', maxWidth: '280px' }}>
                           {exam.jadwal_info ? <JadwalInfo exam={exam} /> : <span style={{ color: '#a8b9aa' }}>—</span>}
                         </td>
@@ -365,7 +367,7 @@ function StudentContent() {
       {/* MODAL: Tata Tertib */}
       <Modal open={showRules} onClose={() => setShowRules(false)} title="Tata Tertib Ujian">
         {selected?.rules_text
-          ? <div className="exam-rules-content text-sm" style={{ color: '#4a6655' }} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(selected.rules_text) }} />
+          ? <MathContent as="div" html={selected.rules_text} className="exam-rules-content text-sm" style={{ color: '#4a6655' }} />
           : <ol className="exam-rules-content text-sm" style={{ color: '#4a6655' }}>
             <li>Kerjakan ujian dengan jujur dan mandiri.</li>
             <li>Dilarang membuka tab atau aplikasi lain selama ujian.</li>

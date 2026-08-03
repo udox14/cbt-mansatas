@@ -1,5 +1,5 @@
 -- ============================================================
--- CBT PMB - Schema (Numpang di Database PMB Existing)
+-- Sistem CBT - Schema (Numpang di Database PMB Existing)
 -- Semua tabel di-prefix "cbt_" agar tidak bentrok
 -- ============================================================
 -- Tabel existing yang TIDAK disentuh:
@@ -20,6 +20,22 @@ CREATE TABLE IF NOT EXISTS cbt_users (
 );
 CREATE INDEX IF NOT EXISTS idx_cbt_users_username ON cbt_users(username);
 CREATE INDEX IF NOT EXISTS idx_cbt_users_role ON cbt_users(role);
+
+-- Kegiatan CBT. Satu kegiatan hanya memakai satu sumber peserta.
+CREATE TABLE IF NOT EXISTS cbt_events (
+  id TEXT PRIMARY KEY,
+  code TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  activity_type TEXT NOT NULL DEFAULT 'other',
+  participant_source TEXT NOT NULL CHECK (participant_source IN ('pmb', 'mansatas', 'cbt_user')),
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('draft', 'active', 'archived')),
+  created_by TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_cbt_events_status ON cbt_events(status);
+INSERT OR IGNORE INTO cbt_events (id, code, name, activity_type, participant_source, status)
+VALUES ('event-pmb', 'PMB', 'Penerimaan Murid Baru', 'pmb', 'pmb', 'active');
 
 -- Ruangan Ujian
 CREATE TABLE IF NOT EXISTS cbt_rooms (
@@ -43,6 +59,7 @@ CREATE TABLE IF NOT EXISTS cbt_exams (
   active_status TEXT DEFAULT 'draft' CHECK (active_status IN ('draft', 'active', 'finished')),
   passing_score REAL DEFAULT 0,
   target_jalur TEXT DEFAULT NULL,
+  event_id TEXT REFERENCES cbt_events(id),
   cheat_limit INTEGER DEFAULT 3,
   cheat_action TEXT DEFAULT 'lock',
   enforce_fullscreen INTEGER DEFAULT 0,
@@ -51,6 +68,32 @@ CREATE TABLE IF NOT EXISTS cbt_exams (
   updated_at TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_cbt_exams_status ON cbt_exams(active_status);
+CREATE INDEX IF NOT EXISTS idx_cbt_exams_event ON cbt_exams(event_id);
+
+-- Snapshot roster: perubahan pada sumber peserta tidak mengubah histori ujian.
+CREATE TABLE IF NOT EXISTS cbt_exam_roster (
+  id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+  exam_id TEXT NOT NULL REFERENCES cbt_exams(id) ON DELETE CASCADE,
+  event_id TEXT NOT NULL REFERENCES cbt_events(id),
+  source_key TEXT NOT NULL CHECK (source_key IN ('pmb', 'mansatas', 'cbt_user')),
+  source_id TEXT NOT NULL,
+  username TEXT NOT NULL,
+  nisn TEXT,
+  full_name TEXT NOT NULL,
+  class_name TEXT,
+  grade TEXT,
+  gender TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  metadata_json TEXT,
+  room_id TEXT REFERENCES cbt_rooms(id),
+  tanggal_tes TEXT NOT NULL DEFAULT '',
+  sesi_tes TEXT NOT NULL DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(exam_id, source_key, source_id)
+);
+CREATE INDEX IF NOT EXISTS idx_cbt_roster_exam ON cbt_exam_roster(exam_id, room_id);
+CREATE INDEX IF NOT EXISTS idx_cbt_roster_source ON cbt_exam_roster(source_key, source_id);
 
 -- Token per Ruangan per Ujian
 CREATE TABLE IF NOT EXISTS cbt_exam_tokens (
@@ -94,12 +137,12 @@ CREATE TABLE IF NOT EXISTS cbt_question_options (
 CREATE INDEX IF NOT EXISTS idx_cbt_options_question ON cbt_question_options(question_id);
 
 -- Sesi Ujian
--- user_type: 'pendaftar' (dari tabel PMB) atau 'cbt_user' (dari cbt_users)
+-- user_type: 'pendaftar', 'mansatas', atau 'cbt_user'
 CREATE TABLE IF NOT EXISTS cbt_exam_sessions (
   id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
   exam_id TEXT NOT NULL REFERENCES cbt_exams(id) ON DELETE CASCADE,
   user_id TEXT NOT NULL,
-  user_type TEXT NOT NULL DEFAULT 'pendaftar' CHECK (user_type IN ('pendaftar', 'cbt_user')),
+  user_type TEXT NOT NULL DEFAULT 'pendaftar' CHECK (user_type IN ('pendaftar', 'mansatas', 'cbt_user')),
   room_id TEXT NOT NULL,
   device_id TEXT,
   status TEXT DEFAULT 'active' CHECK (status IN ('active', 'paused', 'submitted')),

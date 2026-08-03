@@ -3,6 +3,7 @@ import { useState, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import { Button, Modal, Badge, Spinner } from '@/components/ui';
 import { POST } from '@/lib/api';
+import MathContent from '@/components/content/MathContent';
 
 // ═══════════════════════════════════════════════════════════════
 // Bulk Import: Excel & Word (Client-side parsing, no Worker RAM)
@@ -471,7 +472,7 @@ D. Opsi D
                         <tr key={i}>
                           <td className="px-3 py-2 text-gray-400">{i + 1}</td>
                           <td className="px-3 py-2 text-gray-800">
-                            <div className="line-clamp-2" dangerouslySetInnerHTML={{ __html: q.question_text }} />
+                            <MathContent as="div" html={q.question_text} className="line-clamp-2" />
                           </td>
                           <td className="text-center px-2 py-2">{q.options.length}</td>
                           <td className="text-center px-2 py-2 font-bold text-primary-600">

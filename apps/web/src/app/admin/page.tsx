@@ -8,9 +8,10 @@ import {
 } from '@/components/ui';
 import RichEditor from '@/components/admin/RichEditor';
 import BulkImport from '@/components/admin/BulkImport';
+import MathContent from '@/components/content/MathContent';
 import { exportExamResults, exportExamAnalytics } from '@/lib/export';
 import {
-  ClipboardList, Users, School, Shield, LogOut, Menu,
+  ClipboardList, Users, School, Shield, LogOut, Menu, Layers,
   Plus, FileDown, RefreshCw, Pencil, Trash2, Upload,
   Image, Volume2, X, UserPlus, ChevronLeft, ArrowRight, Settings, Power,
 } from 'lucide-react';
@@ -19,10 +20,12 @@ import {
 interface Room { id: string; room_name: string; capacity: number; jumlah_peserta?: number }
 interface Proctor { id: string; username: string; full_name: string; role: string; room_id: string | null; room_name?: string }
 interface Pendaftar { id: string; nisn: string; nama_lengkap: string; no_pendaftaran: string; ruang_tes: string; jalur: string; asal_sekolah: string; jenis_kelamin: string; tanggal_lahir: string; tanggal_tes: string; sesi_tes: string }
-interface Exam { id: string; title: string; description: string | null; duration_minutes: number; active_status: string; question_count: number; is_score_visible: number; randomize_questions: number; randomize_options: number; rules_text: string | null; completion_message: string; passing_score: number; target_jalur: string | null; cheat_limit: number; cheat_action: string; enforce_fullscreen: number }
+interface Exam { id: string; title: string; description: string | null; duration_minutes: number; active_status: string; question_count: number; is_score_visible: number; randomize_questions: number; randomize_options: number; rules_text: string | null; completion_message: string; passing_score: number; target_jalur: string | null; cheat_limit: number; cheat_action: string; enforce_fullscreen: number; event_id?: string | null; event_name?: string | null }
+interface CbtEvent { id: string; code: string; name: string; activity_type: string; participant_source: 'pmb' | 'mansatas' | 'cbt_user'; status: string; exam_count?: number; roster_count?: number }
+interface RosterParticipant { source_id: string; source_key: string; username: string; nisn: string; full_name: string; class_name: string; grade: string; gender: string; is_active: number | boolean; room_name?: string | null; tanggal_tes?: string | null; sesi_tes?: string | null }
 interface Question { id: string; question_text: string; question_type: string; question_order: number; image_url: string | null; audio_url: string | null; options: QOption[] }
 interface QOption { id?: string; option_label: string; option_text: string; image_url: string | null; is_correct: number }
-type Page = 'exams' | 'peserta' | 'rooms' | 'pelaksana' | 'settings';
+type Page = 'exams' | 'kegiatan' | 'peserta' | 'rooms' | 'pelaksana' | 'settings';
 type ExamTab = 'soal' | 'token' | 'monitor' | 'hasil' | 'peserta' | 'analitik';
 
 const normalizeJenisKelamin = (value?: string | null) => {
@@ -137,6 +140,7 @@ function AdminContent() {
 
   const menu: { key: Page; label: string; icon: React.ReactNode }[] = [
     { key: 'exams', label: 'Ujian', icon: <ClipboardList size={14} strokeWidth={2} /> },
+    { key: 'kegiatan', label: 'Kegiatan & Roster', icon: <Layers size={14} strokeWidth={2} /> },
     { key: 'peserta', label: 'Peserta Tes', icon: <Users size={14} strokeWidth={2} /> },
     { key: 'rooms', label: 'Ruangan & Proktor', icon: <School size={14} strokeWidth={2} /> },
     { key: 'pelaksana', label: 'Pelaksana Tes', icon: <Shield size={14} strokeWidth={2} /> },
@@ -232,6 +236,7 @@ function AdminContent() {
 
         <main style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
           {page === 'exams' && <ExamsPage />}
+          {page === 'kegiatan' && <KegiatanPage />}
           {page === 'peserta' && <PesertaPage />}
           {page === 'rooms' && <RoomsPage />}
           {page === 'pelaksana' && <PelaksanaPage />}
@@ -646,8 +651,11 @@ function QuestionsView({ examId }: { examId: string }) {
               {questions.map((q, i) => (
                 <div key={q.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '11px 14px', borderBottom: i < questions.length - 1 ? `1px solid ${C.borderLight}` : 'none' }}>
                   <span style={{ color: C.textFaint, fontSize: '12px', fontWeight: 700, width: '22px', flexShrink: 0 }}>{i + 1}</span>
-                  <div className="flex-1 min-w-0" style={{ fontSize: '12.5px', color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                    dangerouslySetInnerHTML={{ __html: q.question_text }} />
+                  <MathContent
+                    html={q.question_text}
+                    className="flex-1 min-w-0"
+                    style={{ fontSize: '12.5px', color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                  />
                   <div style={{ display: 'flex', gap: '3px' }}>
                     {q.options?.map(o => (
                       <span key={o.option_label} style={{ background: o.is_correct ? C.greenLight : '#f1f1f0', color: o.is_correct ? '#2d6644' : '#8a9e8d', fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '999px' }}>{o.option_label}</span>
@@ -689,11 +697,12 @@ function QuestionsView({ examId }: { examId: string }) {
             {editQ.question_type === 'multiple_choice' && editQ.options && (
               <div className="space-y-2">
                 <label className="block text-xs font-medium text-gray-500">Opsi Jawaban</label>
+                <p className="text-[10px] text-gray-400">Untuk rumus, ketik dengan delimiter <code>$...$</code> atau <code>$$...$$</code>.</p>
                 {editQ.options.map((o, i) => (
                   <div key={i} className="flex items-center gap-2">
                     <input type="radio" name="correct" checked={!!o.is_correct} onChange={() => updOpt(i, 'is_correct', true)} className="text-primary-600" />
                     <span className="text-xs font-semibold text-gray-400 w-4">{o.option_label}</span>
-                    <input value={o.option_text} onChange={e => updOpt(i, 'option_text', e.target.value)} placeholder={`Opsi ${o.option_label}`}
+                    <input value={o.option_text} onChange={e => updOpt(i, 'option_text', e.target.value)} placeholder={`Opsi ${o.option_label} — contoh $x^2$`}
                       className="flex-1 px-2.5 py-1.5 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500" />
                   </div>
                 ))}
@@ -1933,6 +1942,227 @@ function AssignmentsView({ examId }: { examId: string }) {
 
 // ── PESERTA PAGE ──────────────────────────────────────────────
 // Hanya menampilkan peserta jalur REGULER MURNI (jalur yang membutuhkan tes)
+// ── KEGIATAN & ROSTER ─────────────────────────────────────────
+function KegiatanPage() {
+  const { toast } = useToast();
+  const [events, setEvents] = useState<CbtEvent[]>([]);
+  const [exams, setExams] = useState<Exam[]>([]);
+  const [rooms, setRooms] = useState<Room[]>([]);
+  const [eventId, setEventId] = useState('');
+  const [examId, setExamId] = useState('');
+  const [participants, setParticipants] = useState<RosterParticipant[]>([]);
+  const [roster, setRoster] = useState<RosterParticipant[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [participantLoading, setParticipantLoading] = useState(false);
+  const [rosterLoading, setRosterLoading] = useState(false);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [selectAll, setSelectAll] = useState(false);
+  const [q, setQ] = useState('');
+  const [className, setClassName] = useState('');
+  const [grade, setGrade] = useState('');
+  const [gender, setGender] = useState('');
+  const [activeFilter, setActiveFilter] = useState('all');
+  const [roomId, setRoomId] = useState('');
+  const [tanggalTes, setTanggalTes] = useState('');
+  const [sesiTes, setSesiTes] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
+  const [newEvent, setNewEvent] = useState({ code: '', name: '', activity_type: 'other', participant_source: 'mansatas' });
+
+  const selectedEvent = events.find(e => e.id === eventId);
+  const pageSize = 50;
+
+  const loadBase = useCallback(async () => {
+    const [eventResponse, examResponse, roomResponse] = await Promise.all([
+      GET<CbtEvent[]>('/api/admin/events'),
+      GET<Exam[]>('/api/admin/exams'),
+      GET<Room[]>('/api/admin/rooms'),
+    ]);
+    if (eventResponse.success) {
+      const next = eventResponse.data || [];
+      setEvents(next);
+      if (!eventId && next[0]) setEventId(next[0].id);
+    }
+    if (examResponse.success) {
+      const next = examResponse.data || [];
+      setExams(next);
+      if (!examId && next[0]) setExamId(next[0].id);
+    }
+    if (roomResponse.success) setRooms(roomResponse.data || []);
+    setLoading(false);
+  }, [eventId, examId]);
+
+  useEffect(() => { loadBase(); }, [loadBase]);
+
+  useEffect(() => {
+    if (!eventId) return;
+    let cancelled = false;
+    setParticipantLoading(true);
+    const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
+    if (q.trim()) params.set('q', q.trim());
+    if (className) params.set('class_name', className);
+    if (grade) params.set('grade', grade);
+    if (gender) params.set('gender', gender);
+    if (activeFilter !== 'all') params.set('is_active', activeFilter);
+    GET<{ items: RosterParticipant[]; pagination: { total: number } }>(`/api/admin/events/${eventId}/participants?${params.toString()}`)
+      .then(response => {
+        if (cancelled) return;
+        if (response.success) {
+          setParticipants(response.data?.items || []);
+          setTotal(response.data?.pagination?.total || 0);
+        } else toast('error', response.error || 'Peserta tidak dapat dimuat');
+      })
+      .finally(() => { if (!cancelled) setParticipantLoading(false); });
+    return () => { cancelled = true; };
+  }, [eventId, page, q, className, grade, gender, activeFilter, toast]);
+
+  const loadRoster = useCallback(async () => {
+    if (!examId) return;
+    setRosterLoading(true);
+    const response = await GET<RosterParticipant[]>(`/api/admin/exams/${examId}/roster`);
+    if (response.success) setRoster(response.data || []);
+    else toast('error', response.error || 'Roster tidak dapat dimuat');
+    setRosterLoading(false);
+  }, [examId, toast]);
+  useEffect(() => { loadRoster(); }, [loadRoster]);
+
+  const resetSelection = () => { setSelectedIds([]); setSelectAll(false); };
+  const resetFilters = () => {
+    setQ(''); setClassName(''); setGrade(''); setGender(''); setActiveFilter('all'); setPage(1); resetSelection();
+  };
+  const toggleParticipant = (id: string) => {
+    setSelectAll(false);
+    setSelectedIds(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id]);
+  };
+  const togglePage = () => {
+    setSelectAll(false);
+    const ids = participants.map(p => p.source_id);
+    setSelectedIds(current => ids.every(id => current.includes(id)) ? current.filter(id => !ids.includes(id)) : Array.from(new Set([...current, ...ids])));
+  };
+
+  const assignRoster = async () => {
+    if (!eventId || !examId) { toast('error', 'Pilih kegiatan dan ujian'); return; }
+    if (!selectAll && selectedIds.length === 0) { toast('error', 'Pilih peserta atau semua hasil filter'); return; }
+    setSaving(true);
+    const response = await POST(`/api/admin/exams/${examId}/roster/batch`, {
+      event_id: eventId,
+      select_all: selectAll,
+      participant_ids: selectAll ? [] : selectedIds,
+      filters: { q, class_name: className, grade, gender, is_active: activeFilter === 'all' ? undefined : activeFilter === 'true' },
+      room_id: roomId || null,
+      tanggal_tes: tanggalTes,
+      sesi_tes: sesiTes,
+    });
+    setSaving(false);
+    if (!response.success) { toast('error', response.error || 'Assignment gagal'); return; }
+    toast('success', `Matched ${response.data?.matched || 0}, ditambahkan ${response.data?.added || 0}, dilewati ${response.data?.skipped || 0}`);
+    resetSelection();
+    loadRoster();
+  };
+
+  const createEvent = async () => {
+    if (!newEvent.code.trim() || !newEvent.name.trim()) { toast('error', 'Kode dan nama kegiatan wajib diisi'); return; }
+    const response = await POST('/api/admin/events', newEvent);
+    if (!response.success) { toast('error', response.error || 'Kegiatan gagal dibuat'); return; }
+    toast('success', 'Kegiatan dibuat');
+    setShowCreate(false);
+    setNewEvent({ code: '', name: '', activity_type: 'other', participant_source: 'mansatas' });
+    await loadBase();
+    if (response.data?.id) setEventId(response.data.id);
+  };
+
+  const removeRoster = async (row: RosterParticipant & { id?: string }) => {
+    if (!row.id || !examId || !window.confirm(`Hapus ${row.full_name} dari roster?`)) return;
+    const response = await DEL(`/api/admin/exams/${examId}/roster/${row.id}`);
+    if (response.success) { toast('success', 'Roster dihapus'); loadRoster(); }
+    else toast('error', response.error || 'Roster tidak dapat dihapus');
+  };
+
+  if (loading) return <LoadingScreen />;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const allPageSelected = participants.length > 0 && participants.every(p => selectedIds.includes(p.source_id));
+
+  return (
+    <div style={{ flex: 1, padding: '20px', overflow: 'auto' }}>
+      <div style={{ maxWidth: '1450px', margin: '0 auto' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px', marginBottom: '16px' }}>
+          <div>
+            <h1 style={{ color: C.text, fontSize: '19px', fontWeight: 900, letterSpacing: '-0.3px' }}>Kegiatan & roster</h1>
+            <p style={{ color: C.textMuted, fontSize: '12px', marginTop: '3px' }}>Pilih peserta berdasarkan filter lalu simpan snapshot roster per ujian.</p>
+          </div>
+          <button onClick={() => setShowCreate(v => !v)} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: C.green, color: '#fff', border: 'none', borderRadius: '10px', padding: '9px 13px', fontSize: '12px', fontWeight: 800, cursor: 'pointer' }}>
+            <Plus size={14} /> Kegiatan baru
+          </button>
+        </div>
+
+        {showCreate && (
+          <div style={{ ...{ background: C.white, border: `1.5px solid ${C.greenBorder}`, borderRadius: '14px', padding: '14px', marginBottom: '14px' } }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '140px minmax(180px, 1fr) 150px 160px auto', gap: '8px', alignItems: 'end' }}>
+              <label style={{ fontSize: '10px', color: C.textMid, fontWeight: 800 }}>KODE<input value={newEvent.code} onChange={e => setNewEvent({ ...newEvent, code: e.target.value.toUpperCase() })} placeholder="OSN" style={{ width: '100%', marginTop: '5px', padding: '9px 10px', border: `1.5px solid ${C.borderMid}`, borderRadius: '9px', fontSize: '12px' }} /></label>
+              <label style={{ fontSize: '10px', color: C.textMid, fontWeight: 800 }}>NAMA KEGIATAN<input value={newEvent.name} onChange={e => setNewEvent({ ...newEvent, name: e.target.value })} placeholder="Olimpiade Sains Nasional" style={{ width: '100%', marginTop: '5px', padding: '9px 10px', border: `1.5px solid ${C.borderMid}`, borderRadius: '9px', fontSize: '12px' }} /></label>
+              <label style={{ fontSize: '10px', color: C.textMid, fontWeight: 800 }}>JENIS<input value={newEvent.activity_type} onChange={e => setNewEvent({ ...newEvent, activity_type: e.target.value })} placeholder="olimpiade" style={{ width: '100%', marginTop: '5px', padding: '9px 10px', border: `1.5px solid ${C.borderMid}`, borderRadius: '9px', fontSize: '12px' }} /></label>
+              <label style={{ fontSize: '10px', color: C.textMid, fontWeight: 800 }}>SUMBER<select value={newEvent.participant_source} onChange={e => setNewEvent({ ...newEvent, participant_source: e.target.value })} style={{ width: '100%', marginTop: '5px', padding: '9px 10px', border: `1.5px solid ${C.borderMid}`, borderRadius: '9px', fontSize: '12px', background: C.white }}><option value="mansatas">mansatas-db</option><option value="pmb">PMB</option><option value="cbt_user">Manual CBT</option></select></label>
+              <button onClick={createEvent} style={{ background: '#1a5fa8', color: '#fff', border: 'none', borderRadius: '9px', padding: '10px 13px', fontSize: '12px', fontWeight: 800, cursor: 'pointer' }}>Simpan</button>
+            </div>
+          </div>
+        )}
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 1fr) minmax(220px, 1.2fr) 110px', gap: '10px', marginBottom: '14px' }}>
+          <label style={{ ...{ background: C.white, border: `1.5px solid ${C.border}`, borderRadius: '12px', padding: '10px 12px' }, fontSize: '10px', color: C.textMid, fontWeight: 800 }}>KEGIATAN
+            <select value={eventId} onChange={e => { setEventId(e.target.value); setPage(1); resetSelection(); }} style={{ width: '100%', border: 'none', outline: 'none', marginTop: '5px', color: C.text, fontWeight: 700, fontSize: '13px', background: C.white }}>{events.map(e => <option key={e.id} value={e.id}>{e.code} · {e.name}</option>)}</select>
+          </label>
+          <label style={{ ...{ background: C.white, border: `1.5px solid ${C.border}`, borderRadius: '12px', padding: '10px 12px' }, fontSize: '10px', color: C.textMid, fontWeight: 800 }}>UJIAN
+            <select value={examId} onChange={e => setExamId(e.target.value)} style={{ width: '100%', border: 'none', outline: 'none', marginTop: '5px', color: C.text, fontWeight: 700, fontSize: '13px', background: C.white }}>{exams.map(e => <option key={e.id} value={e.id}>{e.title}{e.event_id && e.event_id !== eventId ? ' · kegiatan lain' : ''}</option>)}</select>
+          </label>
+          <div style={{ background: C.greenLight, border: `1.5px solid ${C.greenBorder}`, borderRadius: '12px', padding: '10px 12px' }}><p style={{ fontSize: '10px', color: C.textMid, fontWeight: 800 }}>SUMBER</p><p style={{ marginTop: '5px', fontSize: '13px', fontWeight: 900, color: C.green }}>{selectedEvent?.participant_source || '-'}</p></div>
+        </div>
+
+        <div style={{ background: C.white, border: `1.5px solid ${C.border}`, borderRadius: '14px', padding: '14px', marginBottom: '14px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 1.5fr) repeat(4, minmax(100px, 1fr)) auto', gap: '8px', alignItems: 'end' }}>
+            <label style={{ fontSize: '10px', color: C.textMid, fontWeight: 800 }}>CARI NAMA / NISN<input value={q} onChange={e => { setQ(e.target.value); setPage(1); }} placeholder="Ketik pencarian..." style={{ width: '100%', marginTop: '5px', padding: '9px 10px', border: `1.5px solid ${C.borderMid}`, borderRadius: '9px', fontSize: '12px' }} /></label>
+            <label style={{ fontSize: '10px', color: C.textMid, fontWeight: 800 }}>KELAS<input value={className} onChange={e => { setClassName(e.target.value); setPage(1); }} placeholder="Semua" style={{ width: '100%', marginTop: '5px', padding: '9px 10px', border: `1.5px solid ${C.borderMid}`, borderRadius: '9px', fontSize: '12px' }} /></label>
+            <label style={{ fontSize: '10px', color: C.textMid, fontWeight: 800 }}>TINGKAT<input value={grade} onChange={e => { setGrade(e.target.value); setPage(1); }} placeholder="Semua" style={{ width: '100%', marginTop: '5px', padding: '9px 10px', border: `1.5px solid ${C.borderMid}`, borderRadius: '9px', fontSize: '12px' }} /></label>
+            <label style={{ fontSize: '10px', color: C.textMid, fontWeight: 800 }}>JENIS KELAMIN<select value={gender} onChange={e => { setGender(e.target.value); setPage(1); }} style={{ width: '100%', marginTop: '5px', padding: '9px 7px', border: `1.5px solid ${C.borderMid}`, borderRadius: '9px', fontSize: '12px', background: C.white }}><option value="">Semua</option><option value="L">Laki-laki</option><option value="P">Perempuan</option></select></label>
+            <label style={{ fontSize: '10px', color: C.textMid, fontWeight: 800 }}>STATUS<select value={activeFilter} onChange={e => { setActiveFilter(e.target.value); setPage(1); }} style={{ width: '100%', marginTop: '5px', padding: '9px 7px', border: `1.5px solid ${C.borderMid}`, borderRadius: '9px', fontSize: '12px', background: C.white }}><option value="all">Semua</option><option value="true">Aktif</option><option value="false">Nonaktif</option></select></label>
+            <button onClick={resetFilters} style={{ background: C.bg, color: C.textMid, border: `1.5px solid ${C.borderMid}`, borderRadius: '9px', padding: '9px 10px', fontSize: '11px', fontWeight: 800, cursor: 'pointer' }}>Reset</button>
+          </div>
+          {selectedEvent?.participant_source === 'pmb' && <p style={{ color: C.textMuted, fontSize: '10.5px', marginTop: '9px' }}>Filter kelas/tingkat belum tersedia pada sumber PMB legacy; jalur, ruang, tanggal, dan sesi tetap dipertahankan pada API lama.</p>}
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.6fr) minmax(300px, 0.9fr)', gap: '14px', alignItems: 'start' }}>
+          <section style={{ background: C.white, border: `1.5px solid ${C.border}`, borderRadius: '14px', overflow: 'hidden' }}>
+            <div style={{ padding: '12px 14px', borderBottom: `1.5px solid ${C.borderLight}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
+              <div><p style={{ color: C.text, fontSize: '13px', fontWeight: 900 }}>Peserta sumber</p><p style={{ color: C.textMuted, fontSize: '10.5px', marginTop: '2px' }}>{total.toLocaleString('id-ID')} hasil · halaman {page}/{totalPages}</p></div>
+              <button onClick={() => { setSelectAll(true); setSelectedIds([]); }} disabled={participantLoading || total === 0} style={{ background: selectAll ? C.greenLight : '#e0f0ff', color: selectAll ? C.green : '#1a5fa8', border: `1.5px solid ${selectAll ? C.greenBorder : '#b7d6f5'}`, borderRadius: '9px', padding: '8px 10px', fontSize: '11px', fontWeight: 800, cursor: 'pointer' }}>✓ Pilih semua hasil filter</button>
+            </div>
+            {selectAll && <div style={{ padding: '8px 14px', background: '#f0fdf4', color: C.green, fontSize: '11px', fontWeight: 700 }}>Semua {total.toLocaleString('id-ID')} hasil filter akan diproses di server.</div>}
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '620px' }}>
+                <thead><tr style={{ background: C.bg }}>{['', 'Nama', 'NISN / Username', 'Kelas', 'Tingkat', 'JK', 'Status'].map((label, i) => <th key={label || 'check'} style={{ textAlign: i === 0 ? 'center' : 'left', padding: '9px 10px', color: C.textMid, fontSize: '10px', fontWeight: 800 }}>{i === 0 ? <input type="checkbox" checked={allPageSelected} onChange={togglePage} /> : label}</th>)}</tr></thead>
+                <tbody>{participantLoading ? <tr><td colSpan={7} style={{ padding: '24px', textAlign: 'center', color: C.textMuted, fontSize: '12px' }}>Memuat peserta...</td></tr> : participants.length === 0 ? <tr><td colSpan={7} style={{ padding: '24px', textAlign: 'center', color: C.textMuted, fontSize: '12px' }}>Tidak ada peserta sesuai filter.</td></tr> : participants.map(p => { const checked = selectAll || selectedIds.includes(p.source_id); return <tr key={p.source_id} style={{ borderTop: `1px solid ${C.borderLight}`, background: checked ? '#f7fbf8' : C.white }}><td style={{ padding: '8px 10px', textAlign: 'center' }}><input type="checkbox" checked={checked} onChange={() => toggleParticipant(p.source_id)} /></td><td style={{ padding: '8px 10px', color: C.text, fontSize: '12px', fontWeight: 700 }}>{p.full_name}</td><td style={{ padding: '8px 10px', color: C.textMid, fontSize: '11px', fontFamily: 'monospace' }}>{p.nisn || p.username}</td><td style={{ padding: '8px 10px', color: C.textMid, fontSize: '11px' }}>{p.class_name || '-'}</td><td style={{ padding: '8px 10px', color: C.textMid, fontSize: '11px' }}>{p.grade || '-'}</td><td style={{ padding: '8px 10px', color: C.textMid, fontSize: '11px' }}>{p.gender || '-'}</td><td style={{ padding: '8px 10px', color: p.is_active ? C.green : '#dc2626', fontSize: '11px', fontWeight: 700 }}>{p.is_active ? 'Aktif' : 'Nonaktif'}</td></tr>; })}</tbody>
+              </table>
+            </div>
+            <div style={{ padding: '10px 14px', borderTop: `1.5px solid ${C.borderLight}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><span style={{ color: C.textMuted, fontSize: '11px' }}>{selectAll ? `${total} terpilih` : `${selectedIds.length} terpilih`}</span><div style={{ display: 'flex', gap: '5px' }}><button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1} style={{ padding: '5px 9px', borderRadius: '7px', border: `1px solid ${C.borderMid}`, background: C.white, cursor: page <= 1 ? 'not-allowed' : 'pointer' }}>‹</button><button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages} style={{ padding: '5px 9px', borderRadius: '7px', border: `1px solid ${C.borderMid}`, background: C.white, cursor: page >= totalPages ? 'not-allowed' : 'pointer' }}>›</button></div></div>
+          </section>
+
+          <aside style={{ background: C.white, border: `1.5px solid ${C.border}`, borderRadius: '14px', padding: '14px', position: 'sticky', top: '14px' }}>
+            <p style={{ color: C.text, fontSize: '13px', fontWeight: 900 }}>Assignment roster</p>
+            <p style={{ color: C.textMuted, fontSize: '10.5px', lineHeight: 1.5, margin: '3px 0 12px' }}>Snapshot nama, NISN, kelas, tingkat, dan status disimpan di CBT. Data sumber tidak diubah.</p>
+            <label style={{ display: 'block', color: C.textMid, fontSize: '10px', fontWeight: 800 }}>RUANGAN<select value={roomId} onChange={e => setRoomId(e.target.value)} style={{ width: '100%', marginTop: '5px', padding: '9px 8px', border: `1.5px solid ${C.borderMid}`, borderRadius: '9px', background: C.white, fontSize: '12px' }}><option value="">Pilih ruangan</option>{rooms.map(r => <option key={r.id} value={r.id}>{r.room_name}</option>)}</select></label>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: '9px' }}><label style={{ color: C.textMid, fontSize: '10px', fontWeight: 800 }}>TANGGAL<input type="date" value={tanggalTes} onChange={e => setTanggalTes(e.target.value)} style={{ width: '100%', marginTop: '5px', padding: '8px', border: `1.5px solid ${C.borderMid}`, borderRadius: '9px', fontSize: '11px' }} /></label><label style={{ color: C.textMid, fontSize: '10px', fontWeight: 800 }}>SESI<input value={sesiTes} onChange={e => setSesiTes(e.target.value)} placeholder="Sesi 1 (...)" style={{ width: '100%', marginTop: '5px', padding: '8px', border: `1.5px solid ${C.borderMid}`, borderRadius: '9px', fontSize: '11px' }} /></label></div>
+            <button onClick={assignRoster} disabled={saving || (!selectAll && selectedIds.length === 0)} style={{ width: '100%', marginTop: '12px', background: C.green, color: '#fff', border: 'none', borderRadius: '10px', padding: '11px', fontSize: '12px', fontWeight: 900, cursor: 'pointer', opacity: saving || (!selectAll && selectedIds.length === 0) ? 0.5 : 1 }}>{saving ? 'Memproses...' : 'Simpan roster'}</button>
+            <div style={{ height: '1px', background: C.borderLight, margin: '16px 0 12px' }} />
+            <p style={{ color: C.text, fontSize: '12px', fontWeight: 900, marginBottom: '7px' }}>Roster tersimpan {rosterLoading ? '...' : `(${roster.length})`}</p>
+            <div style={{ maxHeight: '360px', overflowY: 'auto' }}>{roster.map((r: any) => <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', borderBottom: `1px solid ${C.borderLight}`, padding: '8px 0' }}><div style={{ minWidth: 0 }}><p style={{ color: C.text, fontSize: '11px', fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.full_name}</p><p style={{ color: C.textMuted, fontSize: '10px', marginTop: '2px' }}>{r.nisn || r.username} · {r.room_name || 'Tanpa ruang'}</p></div><button onClick={() => removeRoster(r)} title="Hapus roster" style={{ border: 'none', background: 'none', color: '#dc2626', cursor: 'pointer', padding: '2px' }}><Trash2 size={13} /></button></div>)}</div>
+          </aside>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PesertaPage() {
   const { toast } = useToast();
   const [data, setData] = useState<Pendaftar[]>([]);

@@ -4,14 +4,32 @@
 
 export interface Env {
   DB: D1Database;
+  /**
+   * Optional until the owner supplies the real mansatas-db binding and schema
+   * mapping. Keeping it optional preserves the existing PMB deployment while
+   * allowing the same Worker to be deployed with a second D1 binding.
+   */
+  MANSATAS_DB?: D1Database;
   R2: R2Bucket;
   JWT_SECRET: string;
   CORS_ORIGIN: string;
   RATE_LIMIT: KVNamespace;
+
+  // These are intentionally explicit: the Worker must never guess source
+  // table/column names from a school database it does not own.
+  MANSATAS_DB_TABLE?: string;
+  MANSATAS_DB_ID_COLUMN?: string;
+  MANSATAS_DB_NISN_COLUMN?: string;
+  MANSATAS_DB_NAME_COLUMN?: string;
+  MANSATAS_DB_CLASS_COLUMN?: string;
+  MANSATAS_DB_GRADE_COLUMN?: string;
+  MANSATAS_DB_GENDER_COLUMN?: string;
+  MANSATAS_DB_ACTIVE_COLUMN?: string;
+  MANSATAS_DB_ACTIVE_VALUE?: string;
 }
 
 export type Role = 'admin' | 'proctor' | 'student';
-export type UserSource = 'admins' | 'pendaftar' | 'cbt_user';
+export type UserSource = 'admins' | 'pendaftar' | 'cbt_user' | 'mansatas';
 
 export interface JWTPayload {
   sub: string;         // user id (TEXT)

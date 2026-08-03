@@ -8,7 +8,7 @@ export interface AuthUser {
   role: 'admin' | 'proctor' | 'student';
   room_id: string | null;
   full_name: string;
-  source: 'admins' | 'pendaftar' | 'cbt_user';
+  source: 'admins' | 'pendaftar' | 'cbt_user' | 'mansatas';
 }
 
 export function useAuth(requiredRole?: string) {

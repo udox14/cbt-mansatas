@@ -1,13 +1,14 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
+import 'katex/dist/katex.min.css';
 
 export const metadata: Metadata = {
-  title: 'CBT PMB - MAN 1 Tasikmalaya',
-  description: 'Sistem Computer Based Test Penerimaan Murid Baru MAN 1 Tasikmalaya',
+  title: 'Sistem CBT - MAN 1 Tasikmalaya',
+  description: 'Computer Based Test untuk PMB, OSN, OMI, dan kegiatan lainnya',
   manifest: '/manifest.json',
   appleWebApp: {
     capable: true,
-    title: 'CBT PMB',
+    title: 'Sistem CBT',
     statusBarStyle: 'black-translucent', // fullscreen style di iOS
   },
   icons: {

@@ -2,9 +2,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { POST } from '@/lib/api';
 import { Bold, Italic, Underline, Strikethrough, ListOrdered, List, Image, Music, Code, Type } from 'lucide-react';
+import { renderLatexToString } from '@/components/content/MathContent';
 
 // ═══════════════════════════════════════════════════════════════
-// TipTap-like Rich Editor (Zero-dependency, custom implementation)
+// TipTap-like Rich Editor (custom implementation)
 // Supports: Bold, Italic, Underline, Math (KaTeX), RTL, Image/Audio upload
 // ═══════════════════════════════════════════════════════════════
 
@@ -16,38 +17,6 @@ interface RichEditorProps {
 }
 
 // ── KaTeX Rendering ──────────────────────────────────────────
-let katexLoaded = false;
-let katexPromise: Promise<void> | null = null;
-
-function loadKaTeX(): Promise<void> {
-  if (katexLoaded) return Promise.resolve();
-  if (katexPromise) return katexPromise;
-  katexPromise = new Promise((resolve) => {
-    if (!document.querySelector('link[href*="katex"]')) {
-      const link = document.createElement('link');
-      link.rel = 'stylesheet';
-      link.href = 'https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css';
-      document.head.appendChild(link);
-    }
-    if ((window as any).katex) { katexLoaded = true; resolve(); return; }
-    const script = document.createElement('script');
-    script.src = 'https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js';
-    script.onload = () => { katexLoaded = true; resolve(); };
-    script.onerror = () => resolve();
-    document.head.appendChild(script);
-  });
-  return katexPromise;
-}
-
-function renderKaTeX(latex: string): string {
-  try {
-    if ((window as any).katex) {
-      return (window as any).katex.renderToString(latex, { throwOnError: false, displayMode: false });
-    }
-  } catch {}
-  return `<code>${latex}</code>`;
-}
-
 export default function RichEditor({ value, onChange, placeholder = 'Tulis di sini...', minHeight = 150 }: RichEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null);
   const savedRangeRef = useRef<Range | null>(null);
@@ -61,9 +30,6 @@ export default function RichEditor({ value, onChange, placeholder = 'Tulis di si
   const fileInputRef = useRef<HTMLInputElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
   const initRef = useRef(false);
-
-  // Load KaTeX on mount
-  useEffect(() => { loadKaTeX(); }, []);
 
   // Initialize editor content only once
   useEffect(() => {
@@ -140,7 +106,7 @@ export default function RichEditor({ value, onChange, placeholder = 'Tulis di si
   const updateMathPreview = (expr: string) => {
     setMathExpr(expr);
     if (expr.trim()) {
-      loadKaTeX().then(() => setMathPreview(renderKaTeX(expr)));
+      setMathPreview(renderLatexToString(expr));
     } else {
       setMathPreview('');
     }
@@ -148,7 +114,7 @@ export default function RichEditor({ value, onChange, placeholder = 'Tulis di si
 
   const insertMath = () => {
     if (!mathExpr.trim()) return;
-    const html = renderKaTeX(mathExpr);
+    const html = renderLatexToString(mathExpr);
     const mathSpan = `<span class="math-inline" data-latex="${encodeURIComponent(mathExpr)}" contenteditable="false" style="display:inline-block;padding:0 2px;cursor:default;">${html}</span>&nbsp;`;
     restoreSelection();
     document.execCommand('insertHTML', false, mathSpan);
@@ -327,6 +293,12 @@ export default function RichEditor({ value, onChange, placeholder = 'Tulis di si
           />
         )}
 
+        {!showSource && (
+          <p className="px-3 py-1.5 text-[10px] text-gray-400 border-t border-gray-100 bg-gray-50/40">
+            Rumus dapat ditulis langsung dengan <code>$...$</code> (inline) atau <code>$$...$$</code> (blok), atau gunakan tombol <strong>fx</strong>.
+          </p>
+        )}
+
         {/* Math Input Modal */}
         {showMathInput && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" onClick={() => setShowMathInput(false)}>
@@ -340,7 +312,7 @@ export default function RichEditor({ value, onChange, placeholder = 'Tulis di si
                   <input
                     value={mathExpr}
                     onChange={e => updateMathPreview(e.target.value)}
-                    placeholder="contoh: \frac{a}{b}, x^2, \sqrt{n}"
+                    placeholder={'contoh: \\frac{a}{b}, x^2, \\sqrt{n}'}
                     className="w-full px-3 py-2 mt-1 text-sm font-mono bg-gray-50 border border-gray-200 rounded-lg outline-none focus:border-primary-500"
                     autoFocus
                     onKeyDown={e => { if (e.key === 'Enter') insertMath(); }}

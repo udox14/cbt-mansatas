@@ -7,6 +7,7 @@ import type { Env } from '../types';
 import { authMiddleware, requireRole } from '../middleware/auth';
 import { buildRandomMaps, newId, ok, err, now, parseSesiJam, cekJadwal } from '../utils/helpers';
 import { checkRateLimit } from '../utils/ratelimit';
+import { sourceToSessionUserType, sourceToRosterKey } from '../services/participants';
 
 const student = new Hono<{ Bindings: Env }>();
 student.use('*', authMiddleware, requireRole('student'));
@@ -20,14 +21,16 @@ function parseServerTime(value?: string | null) {
 // ── GET daftar ujian aktif ────────────────────────────────────
 student.get('/exams', async (c) => {
   const user = c.get('user');
-  const userType = user.source === 'pendaftar' ? 'pendaftar' : 'cbt_user';
+  const userType = sourceToSessionUserType(user.source);
 
   const { results } = await c.env.DB.prepare(
     `SELECT e.id, e.title, e.description, e.duration_minutes, e.rules_text, e.active_status, e.target_jalur, e.enforce_fullscreen,
+            e.event_id, ev.name as event_name, ev.code as event_code,
             es.id as session_id, es.status as session_status, es.is_time_locked,
             COALESCE(ac.answered_count, 0) as answered_count,
             COALESCE(qc.total_questions, 0) as total_questions
      FROM cbt_exams e
+     LEFT JOIN cbt_events ev ON ev.id = e.event_id
      LEFT JOIN cbt_exam_sessions es ON es.exam_id = e.id AND es.user_id = ? AND es.user_type = ?
      LEFT JOIN (
        SELECT session_id, COUNT(*) as answered_count
@@ -48,6 +51,7 @@ student.get('/exams', async (c) => {
   let studentRoom: string | null = null;
   let studentSesi: string | null = null;
   let studentGroupKey: string | null = null; // composite key "tanggal_tes|sesi_tes"
+  const rosterByExam = new Map<string, { room_id: string | null; tanggal_tes: string; sesi_tes: string }>();
 
   if (userType === 'pendaftar') {
     jadwalData = await c.env.DB.prepare(
@@ -57,6 +61,19 @@ student.get('/exams', async (c) => {
     studentSesi = jadwalData?.sesi_tes || null;
     if (jadwalData?.tanggal_tes && jadwalData?.sesi_tes) {
       studentGroupKey = `${jadwalData.tanggal_tes}|${jadwalData.sesi_tes}`;
+    }
+  } else if (userType === 'mansatas') {
+    const { results: rosterRows } = await c.env.DB.prepare(
+      `SELECT exam_id, room_id, tanggal_tes, sesi_tes
+       FROM cbt_exam_roster
+       WHERE source_key = ? AND source_id = ?`
+    ).bind(sourceToRosterKey(user.source), user.sub).all();
+    for (const row of rosterRows as any[]) {
+      rosterByExam.set(row.exam_id, {
+        room_id: row.room_id || null,
+        tanggal_tes: row.tanggal_tes || '',
+        sesi_tes: row.sesi_tes || '',
+      });
     }
   } else if (user.room_id) {
     // cbt_user — resolve room_name dari room_id
@@ -78,6 +95,7 @@ student.get('/exams', async (c) => {
 
   // Filter: cek assignment dulu, lalu target_jalur
   const filtered = (results as any[]).filter(exam => {
+    if (userType === 'mansatas') return rosterByExam.has(exam.id);
     if (assignedExamIds.has(exam.id)) return true;
     if (!exam.target_jalur) return true;
     if (!jadwalData?.jalur) return true;
@@ -88,15 +106,16 @@ student.get('/exams', async (c) => {
   const enriched = filtered.map(exam => {
     let jadwal_status: 'aktif' | 'belum' | 'selesai' | 'dikunci' | 'no_schedule' = 'no_schedule';
     let jadwal_info: string | null = null;
+    const schedule = userType === 'mansatas' ? rosterByExam.get(exam.id) : jadwalData;
 
     if (exam.is_time_locked) {
       jadwal_status = 'dikunci';
       jadwal_info = 'Ujian dikunci. Hubungi proktor untuk membuka kembali.';
-    } else if (jadwalData?.sesi_tes && jadwalData?.tanggal_tes) {
-      const parsed = parseSesiJam(jadwalData.sesi_tes);
+    } else if (schedule?.sesi_tes && schedule?.tanggal_tes) {
+      const parsed = parseSesiJam(schedule.sesi_tes);
       if (parsed) {
-        jadwal_status = cekJadwal(jadwalData.tanggal_tes, parsed.jamMulai, parsed.jamSelesai);
-        const tgl = new Date(jadwalData.tanggal_tes + 'T00:00:00+07:00');
+        jadwal_status = cekJadwal(schedule.tanggal_tes, parsed.jamMulai, parsed.jamSelesai);
+        const tgl = new Date(schedule.tanggal_tes + 'T00:00:00+07:00');
         const tglStr = tgl.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
         jadwal_info = `${tglStr}, ${parsed.jamMulai}–${parsed.jamSelesai} WIB`;
       }
@@ -122,9 +141,21 @@ student.post('/exams/:examId/validate-token', async (c) => {
   }
 
   const { token_code, device_id } = body;
-  const userType = user.source === 'pendaftar' ? 'pendaftar' : 'cbt_user';
+  const userType = sourceToSessionUserType(user.source);
+  let roomId = user.room_id;
 
-  if (!user.room_id) return c.json(err('Anda belum di-assign ke ruangan'), 400);
+  if (userType === 'mansatas') {
+    const roster = await c.env.DB.prepare(
+      `SELECT room_id, tanggal_tes, sesi_tes
+       FROM cbt_exam_roster
+       WHERE exam_id = ? AND source_key = ? AND source_id = ?`
+    ).bind(examId, sourceToRosterKey(user.source), user.sub).first<any>();
+    if (!roster) return c.json(err('Anda belum di-assign ke roster ujian ini'), 403);
+    roomId = roster.room_id || null;
+    if (!roomId) return c.json(err('Anda belum di-assign ke ruangan'), 400);
+  }
+
+  if (!roomId) return c.json(err('Anda belum di-assign ke ruangan'), 400);
   if (!token_code)   return c.json(err('Token wajib diisi'), 400);
   if (!device_id)    return c.json(err('Device ID diperlukan'), 400);
 
@@ -152,14 +183,31 @@ student.post('/exams/:examId/validate-token', async (c) => {
         if (status === 'selesai') return c.json(err(`Waktu ujian Anda telah berakhir (${jadwal.sesi_tes})`), 403);
       }
     }
+  } else if (userType === 'mansatas') {
+    const roster = await c.env.DB.prepare(
+      `SELECT tanggal_tes, sesi_tes
+       FROM cbt_exam_roster
+       WHERE exam_id = ? AND source_key = ? AND source_id = ?`
+    ).bind(examId, sourceToRosterKey(user.source), user.sub).first<any>();
+    if (roster) {
+      tanggalTes = roster.tanggal_tes || '';
+      sesiTes = roster.sesi_tes || '';
+      const parsed = parseSesiJam(sesiTes);
+      if (parsed && tanggalTes) {
+        const status = cekJadwal(tanggalTes, parsed.jamMulai, parsed.jamSelesai);
+        if (status === 'belum') return c.json(err(`Ujian belum dimulai. Jadwal Anda: ${sesiTes}`), 403);
+        if (status === 'selesai') return c.json(err(`Waktu ujian Anda telah berakhir (${sesiTes})`), 403);
+      }
+    }
   }
 
   // ── H5: Validasi token + cek expires_at ──
+
   let tokenRow = await c.env.DB.prepare(
     `SELECT * FROM cbt_exam_tokens
      WHERE exam_id=? AND room_id=? AND tanggal_tes=? AND sesi_tes=? AND token_code=? AND is_active=1
        AND (expires_at IS NULL OR expires_at > datetime('now'))`
-  ).bind(examId, user.room_id, tanggalTes, sesiTes, token_code).first();
+  ).bind(examId, roomId, tanggalTes, sesiTes, token_code).first();
 
   // Akun dummy/manual tidak punya tanggal_tes/sesi_tes. Untuk simulasi,
   // izinkan mereka memakai token aktif ruangan yang sama walau token itu dibuat
@@ -171,7 +219,7 @@ student.post('/exams/:examId/validate-token', async (c) => {
          AND (expires_at IS NULL OR expires_at > datetime('now'))
        ORDER BY tanggal_tes DESC, sesi_tes DESC
        LIMIT 1`
-    ).bind(examId, user.room_id, token_code).first();
+    ).bind(examId, roomId, token_code).first();
   }
 
   if (!tokenRow) return c.json(err('Token tidak valid atau sudah kedaluwarsa'), 401);
@@ -205,7 +253,7 @@ student.post('/exams/:examId/validate-token', async (c) => {
     await c.env.DB.prepare(
       `INSERT INTO cbt_exam_sessions (id, exam_id, user_id, user_type, room_id, device_id, question_map, option_map, started_at, last_heartbeat, ip_address, user_agent)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
-    ).bind(sessionId, examId, user.sub, userType, user.room_id, device_id,
+    ).bind(sessionId, examId, user.sub, userType, roomId, device_id,
       JSON.stringify(questionMap), JSON.stringify(optionMap), startedAt, startedAt,
       c.req.header('CF-Connecting-IP') || '', c.req.header('User-Agent') || ''
     ).run();
@@ -253,7 +301,7 @@ student.post('/exams/:examId/validate-token', async (c) => {
 // ── GET soal ujian ────────────────────────────────────────────
 student.get('/sessions/:sessionId/questions', async (c) => {
   const user = c.get('user');
-  const userType = user.source === 'pendaftar' ? 'pendaftar' : 'cbt_user';
+  const userType = sourceToSessionUserType(user.source);
   const session = await c.env.DB.prepare(
     'SELECT * FROM cbt_exam_sessions WHERE id=? AND user_id=? AND user_type=?'
   ).bind(c.req.param('sessionId'), user.sub, userType).first<any>();
@@ -317,7 +365,7 @@ student.get('/sessions/:sessionId/questions', async (c) => {
 // ── POST batch save jawaban ───────────────────────────────────
 student.post('/sessions/:sessionId/answers', async (c) => {
   const user = c.get('user');
-  const userType = user.source === 'pendaftar' ? 'pendaftar' : 'cbt_user';
+  const userType = sourceToSessionUserType(user.source);
   const sessionId = c.req.param('sessionId');
   let body: { answers?: any[] };
   try {
@@ -360,7 +408,7 @@ student.post('/sessions/:sessionId/answers', async (c) => {
 student.post('/sessions/:sessionId/heartbeat', async (c) => {
   const user = c.get('user');
   const sessionId = c.req.param('sessionId');
-  const userType = user.source === 'pendaftar' ? 'pendaftar' : 'cbt_user';
+  const userType = sourceToSessionUserType(user.source);
 
   const session = await c.env.DB.prepare(
     `SELECT es.*, e.duration_minutes, e.cheat_action, e.cheat_limit
@@ -379,6 +427,21 @@ student.post('/sessions/:sessionId/heartbeat', async (c) => {
     const jadwal = await c.env.DB.prepare(
       'SELECT sesi_tes, tanggal_tes FROM pendaftar WHERE id = ?'
     ).bind(user.sub).first<any>();
+    if (jadwal?.sesi_tes && jadwal?.tanggal_tes) {
+      const parsed = parseSesiJam(jadwal.sesi_tes);
+      if (parsed && cekJadwal(jadwal.tanggal_tes, parsed.jamMulai, parsed.jamSelesai) === 'selesai') {
+        await c.env.DB.prepare(
+          'UPDATE cbt_exam_sessions SET is_time_locked=1, locked_at=COALESCE(locked_at, ?), last_heartbeat=? WHERE id=? AND user_id=? AND user_type=?'
+        ).bind(now(), now(), sessionId, user.sub, userType).run();
+        return c.json(ok({ time_locked: true, auto_submitted: false, started_at: session.started_at }, 'Waktu ujian berakhir dan sesi dikunci'));
+      }
+    }
+  } else if (userType === 'mansatas') {
+    const jadwal = await c.env.DB.prepare(
+      `SELECT tanggal_tes, sesi_tes
+       FROM cbt_exam_roster
+       WHERE exam_id = ? AND source_key = ? AND source_id = ?`
+    ).bind(session.exam_id, sourceToRosterKey(user.source), user.sub).first<any>();
     if (jadwal?.sesi_tes && jadwal?.tanggal_tes) {
       const parsed = parseSesiJam(jadwal.sesi_tes);
       if (parsed && cekJadwal(jadwal.tanggal_tes, parsed.jamMulai, parsed.jamSelesai) === 'selesai') {
@@ -430,7 +493,7 @@ student.post('/sessions/:sessionId/heartbeat', async (c) => {
 // ── POST cheat ────────────────────────────────────────────────
 student.post('/sessions/:sessionId/cheat', async (c) => {
   const user = c.get('user');
-  const userType = user.source === 'pendaftar' ? 'pendaftar' : 'cbt_user';
+  const userType = sourceToSessionUserType(user.source);
   const sessionId = c.req.param('sessionId');
   const body = await c.req.json<{ violation_type?: string }>().catch(() => ({} as { violation_type?: string }));
   const violationType = body.violation_type || 'tab_switch';
@@ -475,7 +538,7 @@ student.post('/sessions/:sessionId/cheat', async (c) => {
 // ── POST submit ───────────────────────────────────────────────
 student.post('/sessions/:sessionId/submit', async (c) => {
   const user = c.get('user');
-  const userType = user.source === 'pendaftar' ? 'pendaftar' : 'cbt_user';
+  const userType = sourceToSessionUserType(user.source);
   const sessionId = c.req.param('sessionId');
   const body = await c.req.json<{ answers?: any[] }>().catch(() => ({} as { answers?: any[] }));
   const session = await c.env.DB.prepare(
