@@ -24,7 +24,7 @@ student.get('/exams', async (c) => {
   const userType = sourceToSessionUserType(user.source);
 
   const { results } = await c.env.DB.prepare(
-    `SELECT e.id, e.title, e.description, e.duration_minutes, e.rules_text, e.active_status, e.target_jalur, e.enforce_fullscreen,
+    `SELECT e.id, e.title, e.subject_name, e.sequence_order, e.description, e.duration_minutes, e.rules_text, e.active_status, e.target_jalur, e.enforce_fullscreen,
             e.event_id, ev.name as event_name, ev.code as event_code,
             es.id as session_id, es.status as session_status, es.is_time_locked,
             COALESCE(ac.answered_count, 0) as answered_count,
@@ -43,7 +43,7 @@ student.get('/exams', async (c) => {
        GROUP BY exam_id
      ) qc ON qc.exam_id = e.id
      WHERE e.active_status = 'active'
-     ORDER BY e.title`
+     ORDER BY COALESCE(ev.code, ''), COALESCE(e.sequence_order, 0), LOWER(e.title)`
   ).bind(user.sub, userType).all();
 
   // Kalau pendaftar PMB, ambil jadwal, jalur, dan ruangan

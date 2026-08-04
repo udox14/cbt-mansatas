@@ -10,6 +10,7 @@ import RichEditor from '@/components/admin/RichEditor';
 import BulkImport from '@/components/admin/BulkImport';
 import MathContent from '@/components/content/MathContent';
 import { exportExamResults, exportExamAnalytics } from '@/lib/export';
+import { isFullArabic } from '@/lib/rtl';
 import {
   ClipboardList, Users, School, Shield, LogOut, Menu, Layers,
   Plus, FileDown, RefreshCw, Pencil, Trash2, Upload,
@@ -20,7 +21,7 @@ import {
 interface Room { id: string; room_name: string; capacity: number; jumlah_peserta?: number }
 interface Proctor { id: string; username: string; full_name: string; role: string; room_id: string | null; room_name?: string }
 interface Pendaftar { id: string; nisn: string; nama_lengkap: string; no_pendaftaran: string; ruang_tes: string; jalur: string; asal_sekolah: string; jenis_kelamin: string; tanggal_lahir: string; tanggal_tes: string; sesi_tes: string }
-interface Exam { id: string; title: string; description: string | null; duration_minutes: number; active_status: string; question_count: number; is_score_visible: number; randomize_questions: number; randomize_options: number; rules_text: string | null; completion_message: string; passing_score: number; target_jalur: string | null; cheat_limit: number; cheat_action: string; enforce_fullscreen: number; event_id?: string | null; event_name?: string | null }
+interface Exam { id: string; title: string; subject_name?: string | null; sequence_order?: number; description: string | null; duration_minutes: number; active_status: string; question_count: number; is_score_visible: number; randomize_questions: number; randomize_options: number; rules_text: string | null; completion_message: string; passing_score: number; target_jalur: string | null; cheat_limit: number; cheat_action: string; enforce_fullscreen: number; event_id?: string | null; event_name?: string | null; event_code?: string | null }
 interface CbtEvent { id: string; code: string; name: string; activity_type: string; participant_source: 'pmb' | 'mansatas' | 'cbt_user'; status: string; exam_count?: number; roster_count?: number }
 interface RosterParticipant { source_id: string; source_key: string; username: string; nisn: string; full_name: string; class_name: string; grade: string; gender: string; is_active: number | boolean; room_name?: string | null; tanggal_tes?: string | null; sesi_tes?: string | null }
 interface Question { id: string; question_text: string; question_type: string; question_order: number; image_url: string | null; audio_url: string | null; options: QOption[] }
@@ -255,6 +256,7 @@ function AdminContent() {
 function ExamsPage() {
   const { toast } = useToast();
   const [exams, setExams] = useState<Exam[]>([]);
+  const [events, setEvents] = useState<CbtEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [editExam, setEditExam] = useState<Partial<Exam> | null>(null);
   const [saving, setSaving] = useState(false);
@@ -264,20 +266,29 @@ function ExamsPage() {
   const [jalurList, setJalurList] = useState<string[]>([]);
 
   const fetchExams = useCallback(async () => {
-    const [r, j] = await Promise.all([
+    const [r, j, e] = await Promise.all([
       GET<Exam[]>('/api/admin/exams'),
       GET<string[]>('/api/admin/pendaftar/jalur'),
+      GET<CbtEvent[]>('/api/admin/events'),
     ]);
     if (r.success) setExams(r.data || []);
     if (j.success) setJalurList(j.data || []);
+    if (e.success) setEvents(e.data || []);
     setLoading(false);
   }, []);
   useEffect(() => { fetchExams(); }, [fetchExams]);
 
   const saveExam = async () => {
     if (!editExam?.title) { toast('error', 'Judul wajib'); return; }
+    if (!editExam.event_id) { toast('error', 'Pilih kegiatan terlebih dahulu'); return; }
     setSaving(true);
-    const payload = { ...editExam, cheat_action: 'lock' };
+    const payload = {
+      ...editExam,
+      event_id: editExam.event_id,
+      subject_name: editExam.subject_name || null,
+      sequence_order: Number(editExam.sequence_order || 0),
+      cheat_action: 'lock',
+    };
     const r = editExam.id ? await PUT(`/api/admin/exams/${editExam.id}`, payload) : await POST('/api/admin/exams', payload);
     setSaving(false);
     if (r.success) { toast('success', 'Berhasil'); setEditExam(null); fetchExams(); } else toast('error', r.error || 'Gagal');
@@ -291,6 +302,13 @@ function ExamsPage() {
     fetchExams();
   };
   const openDetail = (exam: Exam) => { setSelectedExam(exam); setActiveTab('soal'); };
+  const openNewExam = () => setEditExam({
+    duration_minutes: 60,
+    active_status: 'draft',
+    event_id: events.find(e => e.id === 'event-pmb')?.id || events[0]?.id || '',
+    subject_name: '',
+    sequence_order: 1,
+  });
 
   if (selectedExam) return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
@@ -309,6 +327,11 @@ function ExamsPage() {
               <span style={{ color: C.text, fontSize: '16px', fontWeight: 900, letterSpacing: '-0.3px' }}>{selectedExam.title}</span>
               <StatusBadge status={selectedExam.active_status} />
             </div>
+            <p style={{ color: C.green, fontSize: '11px', fontWeight: 800, marginBottom: '4px' }}>
+              {selectedExam.event_code || 'KEGIATAN'} · {selectedExam.event_name || 'Belum terhubung'}
+              {selectedExam.subject_name ? ` · Mapel: ${selectedExam.subject_name}` : ''}
+              {selectedExam.sequence_order ? ` · Urutan ${selectedExam.sequence_order}` : ''}
+            </p>
             <p style={{ color: C.textMuted, fontSize: '11.5px' }}>
               {selectedExam.duration_minutes} menit · {selectedExam.question_count} soal
               {selectedExam.randomize_questions ? ' · Acak soal' : ''}
@@ -361,6 +384,12 @@ function ExamsPage() {
           <div className="space-y-3">
             <Input label="Judul" value={editExam.title || ''} onChange={e => setEditExam({ ...editExam, title: e.target.value })} />
             <Textarea label="Deskripsi" value={editExam.description || ''} rows={2} onChange={e => setEditExam({ ...editExam, description: e.target.value })} />
+            <Select label="Kegiatan" value={editExam.event_id || ''} onChange={e => setEditExam({ ...editExam, event_id: e.target.value })}
+              options={[{ value: '', label: 'Pilih kegiatan' }, ...events.map(event => ({ value: event.id, label: `${event.code} · ${event.name}` }))]} />
+            <div className="grid grid-cols-2 gap-3">
+              <Input label="Mapel / bagian" placeholder="Contoh: Matematika" value={editExam.subject_name || ''} onChange={e => setEditExam({ ...editExam, subject_name: e.target.value })} />
+              <Input label="Urutan mapel" type="number" min={0} value={editExam.sequence_order ?? 1} onChange={e => setEditExam({ ...editExam, sequence_order: parseInt(e.target.value) || 0 })} />
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <Input label="Durasi (menit)" type="number" value={editExam.duration_minutes || 60} onChange={e => setEditExam({ ...editExam, duration_minutes: parseInt(e.target.value) })} />
               <Select label="Status" value={editExam.active_status || 'draft'} onChange={e => setEditExam({ ...editExam, active_status: e.target.value })}
@@ -455,7 +484,7 @@ function ExamsPage() {
           <p style={{ color: C.text, fontSize: '15px', fontWeight: 800, letterSpacing: '-0.3px' }}>Daftar Ujian</p>
           <p style={{ color: C.textMuted, fontSize: '11px', marginTop: '1px' }}>{exams.length} ujian terdaftar</p>
         </div>
-        <button onClick={() => setEditExam({ duration_minutes: 60, active_status: 'draft' })}
+        <button onClick={openNewExam}
           style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: C.green, color: '#fff', fontSize: '12px', fontWeight: 700, padding: '8px 14px', borderRadius: '10px', border: 'none', cursor: 'pointer' }}>
           <Plus size={13} strokeWidth={2.5} /> Buat Ujian
         </button>
@@ -481,6 +510,11 @@ function ExamsPage() {
                         <span style={{ color: exam.active_status === 'finished' ? '#6b7c6e' : C.text, fontSize: '13.5px', fontWeight: 800 }}>{exam.title}</span>
                         <StatusBadge status={exam.active_status} />
                       </div>
+                      <p style={{ color: C.green, fontSize: '10.5px', fontWeight: 800, marginBottom: '3px' }}>
+                        {exam.event_code || 'KEGIATAN'} · {exam.event_name || 'Belum terhubung'}
+                        {exam.subject_name ? ` · Mapel: ${exam.subject_name}` : ''}
+                        {exam.sequence_order ? ` · #${exam.sequence_order}` : ''}
+                      </p>
                       <p style={{ color: exam.active_status === 'finished' ? C.textFaint : C.textMuted, fontSize: '11.5px' }}>
                         {exam.duration_minutes} menit · {exam.question_count} soal
                         {exam.randomize_questions ? ' · Acak soal' : ''}
@@ -500,6 +534,12 @@ function ExamsPage() {
           <div className="space-y-3">
             <Input label="Judul" value={editExam.title || ''} onChange={e => setEditExam({ ...editExam, title: e.target.value })} />
             <Textarea label="Deskripsi" value={editExam.description || ''} rows={2} onChange={e => setEditExam({ ...editExam, description: e.target.value })} />
+            <Select label="Kegiatan" value={editExam.event_id || ''} onChange={e => setEditExam({ ...editExam, event_id: e.target.value })}
+              options={[{ value: '', label: 'Pilih kegiatan' }, ...events.map(event => ({ value: event.id, label: `${event.code} · ${event.name}` }))]} />
+            <div className="grid grid-cols-2 gap-3">
+              <Input label="Mapel / bagian" placeholder="Contoh: Matematika" value={editExam.subject_name || ''} onChange={e => setEditExam({ ...editExam, subject_name: e.target.value })} />
+              <Input label="Urutan mapel" type="number" min={0} value={editExam.sequence_order ?? 1} onChange={e => setEditExam({ ...editExam, sequence_order: parseInt(e.target.value) || 0 })} />
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <Input label="Durasi (menit)" type="number" value={editExam.duration_minutes || 60} onChange={e => setEditExam({ ...editExam, duration_minutes: parseInt(e.target.value) })} />
               <Select label="Status" value={editExam.active_status || 'draft'} onChange={e => setEditExam({ ...editExam, active_status: e.target.value })}
@@ -702,8 +742,8 @@ function QuestionsView({ examId }: { examId: string }) {
                   <div key={i} className="flex items-center gap-2">
                     <input type="radio" name="correct" checked={!!o.is_correct} onChange={() => updOpt(i, 'is_correct', true)} className="text-primary-600" />
                     <span className="text-xs font-semibold text-gray-400 w-4">{o.option_label}</span>
-                    <input value={o.option_text} onChange={e => updOpt(i, 'option_text', e.target.value)} placeholder={`Opsi ${o.option_label} — contoh $x^2$`}
-                      className="flex-1 px-2.5 py-1.5 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500" />
+                    <input value={o.option_text} onChange={e => updOpt(i, 'option_text', e.target.value)} placeholder={`Opsi ${o.option_label} — contoh $x^2$`} dir="auto"
+                      className={`flex-1 px-2.5 py-1.5 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 ${isFullArabic(o.option_text) ? 'arabic' : ''}`} />
                   </div>
                 ))}
                 {editQ.options.length < 5 && (
@@ -1972,6 +2012,8 @@ function KegiatanPage() {
   const [newEvent, setNewEvent] = useState({ code: '', name: '', activity_type: 'other', participant_source: 'mansatas' });
 
   const selectedEvent = events.find(e => e.id === eventId);
+  const eventExams = useMemo(() => exams.filter(exam => exam.event_id === eventId), [exams, eventId]);
+  const selectedExam = eventExams.find(exam => exam.id === examId);
   const pageSize = 50;
 
   const loadBase = useCallback(async () => {
@@ -1986,15 +2028,18 @@ function KegiatanPage() {
       if (!eventId && next[0]) setEventId(next[0].id);
     }
     if (examResponse.success) {
-      const next = examResponse.data || [];
-      setExams(next);
-      if (!examId && next[0]) setExamId(next[0].id);
+      setExams(examResponse.data || []);
     }
     if (roomResponse.success) setRooms(roomResponse.data || []);
     setLoading(false);
-  }, [eventId, examId]);
+  }, [eventId]);
 
   useEffect(() => { loadBase(); }, [loadBase]);
+
+  useEffect(() => {
+    if (!eventId) return;
+    if (!eventExams.some(exam => exam.id === examId)) setExamId(eventExams[0]?.id || '');
+  }, [eventId, eventExams, examId]);
 
   useEffect(() => {
     if (!eventId) return;
@@ -2019,7 +2064,7 @@ function KegiatanPage() {
   }, [eventId, page, q, className, grade, gender, activeFilter, toast]);
 
   const loadRoster = useCallback(async () => {
-    if (!examId) return;
+    if (!examId) { setRoster([]); return; }
     setRosterLoading(true);
     const response = await GET<RosterParticipant[]>(`/api/admin/exams/${examId}/roster`);
     if (response.success) setRoster(response.data || []);
@@ -2043,7 +2088,7 @@ function KegiatanPage() {
   };
 
   const assignRoster = async () => {
-    if (!eventId || !examId) { toast('error', 'Pilih kegiatan dan ujian'); return; }
+    if (!eventId || !examId || !selectedExam) { toast('error', 'Pilih kegiatan dan mapel yang sesuai'); return; }
     if (!selectAll && selectedIds.length === 0) { toast('error', 'Pilih peserta atau semua hasil filter'); return; }
     setSaving(true);
     const response = await POST(`/api/admin/exams/${examId}/roster/batch`, {
@@ -2113,10 +2158,22 @@ function KegiatanPage() {
           <label style={{ ...{ background: C.white, border: `1.5px solid ${C.border}`, borderRadius: '12px', padding: '10px 12px' }, fontSize: '10px', color: C.textMid, fontWeight: 800 }}>KEGIATAN
             <select value={eventId} onChange={e => { setEventId(e.target.value); setPage(1); resetSelection(); }} style={{ width: '100%', border: 'none', outline: 'none', marginTop: '5px', color: C.text, fontWeight: 700, fontSize: '13px', background: C.white }}>{events.map(e => <option key={e.id} value={e.id}>{e.code} · {e.name}</option>)}</select>
           </label>
-          <label style={{ ...{ background: C.white, border: `1.5px solid ${C.border}`, borderRadius: '12px', padding: '10px 12px' }, fontSize: '10px', color: C.textMid, fontWeight: 800 }}>UJIAN
-            <select value={examId} onChange={e => setExamId(e.target.value)} style={{ width: '100%', border: 'none', outline: 'none', marginTop: '5px', color: C.text, fontWeight: 700, fontSize: '13px', background: C.white }}>{exams.map(e => <option key={e.id} value={e.id}>{e.title}{e.event_id && e.event_id !== eventId ? ' · kegiatan lain' : ''}</option>)}</select>
+          <label style={{ ...{ background: C.white, border: `1.5px solid ${C.border}`, borderRadius: '12px', padding: '10px 12px' }, fontSize: '10px', color: C.textMid, fontWeight: 800 }}>UJIAN / MAPEL
+            <select value={examId} onChange={e => setExamId(e.target.value)} style={{ width: '100%', border: 'none', outline: 'none', marginTop: '5px', color: C.text, fontWeight: 700, fontSize: '13px', background: C.white }}>
+              {!eventExams.length && <option value="">Belum ada ujian untuk kegiatan ini</option>}
+              {eventExams.map(e => <option key={e.id} value={e.id}>{e.subject_name || e.title}{e.subject_name ? ` · ${e.title}` : ''}</option>)}
+            </select>
           </label>
           <div style={{ background: C.greenLight, border: `1.5px solid ${C.greenBorder}`, borderRadius: '12px', padding: '10px 12px' }}><p style={{ fontSize: '10px', color: C.textMid, fontWeight: 800 }}>SUMBER</p><p style={{ marginTop: '5px', fontSize: '13px', fontWeight: 900, color: C.green }}>{selectedEvent?.participant_source || '-'}</p></div>
+        </div>
+
+        <div style={{ background: '#f0fdf4', border: `1.5px solid ${C.greenBorder}`, borderRadius: '12px', padding: '10px 12px', marginBottom: '14px' }}>
+          <p style={{ color: C.green, fontSize: '11px', fontWeight: 900 }}>Roster per mapel</p>
+          <p style={{ color: C.textMid, fontSize: '11px', lineHeight: 1.5, marginTop: '3px' }}>
+            {selectedExam
+              ? <>Peserta yang dipilih akan masuk ke <strong>{selectedExam.subject_name || selectedExam.title}</strong> saja. Siswa yang sama boleh dipilih lagi pada mapel lain.</>
+              : 'Buat ujian/mapel terlebih dahulu dari menu Ujian, lalu pilih mapel tersebut di sini.'}
+          </p>
         </div>
 
         <div style={{ background: C.white, border: `1.5px solid ${C.border}`, borderRadius: '14px', padding: '14px', marginBottom: '14px' }}>
@@ -2152,7 +2209,7 @@ function KegiatanPage() {
             <p style={{ color: C.textMuted, fontSize: '10.5px', lineHeight: 1.5, margin: '3px 0 12px' }}>Snapshot nama, NISN, kelas, tingkat, dan status disimpan di CBT. Data sumber tidak diubah.</p>
             <label style={{ display: 'block', color: C.textMid, fontSize: '10px', fontWeight: 800 }}>RUANGAN<select value={roomId} onChange={e => setRoomId(e.target.value)} style={{ width: '100%', marginTop: '5px', padding: '9px 8px', border: `1.5px solid ${C.borderMid}`, borderRadius: '9px', background: C.white, fontSize: '12px' }}><option value="">Pilih ruangan</option>{rooms.map(r => <option key={r.id} value={r.id}>{r.room_name}</option>)}</select></label>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: '9px' }}><label style={{ color: C.textMid, fontSize: '10px', fontWeight: 800 }}>TANGGAL<input type="date" value={tanggalTes} onChange={e => setTanggalTes(e.target.value)} style={{ width: '100%', marginTop: '5px', padding: '8px', border: `1.5px solid ${C.borderMid}`, borderRadius: '9px', fontSize: '11px' }} /></label><label style={{ color: C.textMid, fontSize: '10px', fontWeight: 800 }}>SESI<input value={sesiTes} onChange={e => setSesiTes(e.target.value)} placeholder="Sesi 1 (...)" style={{ width: '100%', marginTop: '5px', padding: '8px', border: `1.5px solid ${C.borderMid}`, borderRadius: '9px', fontSize: '11px' }} /></label></div>
-            <button onClick={assignRoster} disabled={saving || (!selectAll && selectedIds.length === 0)} style={{ width: '100%', marginTop: '12px', background: C.green, color: '#fff', border: 'none', borderRadius: '10px', padding: '11px', fontSize: '12px', fontWeight: 900, cursor: 'pointer', opacity: saving || (!selectAll && selectedIds.length === 0) ? 0.5 : 1 }}>{saving ? 'Memproses...' : 'Simpan roster'}</button>
+            <button onClick={assignRoster} disabled={saving || !selectedExam || (!selectAll && selectedIds.length === 0)} style={{ width: '100%', marginTop: '12px', background: C.green, color: '#fff', border: 'none', borderRadius: '10px', padding: '11px', fontSize: '12px', fontWeight: 900, cursor: 'pointer', opacity: saving || !selectedExam || (!selectAll && selectedIds.length === 0) ? 0.5 : 1 }}>{saving ? 'Memproses...' : 'Simpan roster'}</button>
             <div style={{ height: '1px', background: C.borderLight, margin: '16px 0 12px' }} />
             <p style={{ color: C.text, fontSize: '12px', fontWeight: 900, marginBottom: '7px' }}>Roster tersimpan {rosterLoading ? '...' : `(${roster.length})`}</p>
             <div style={{ maxHeight: '360px', overflowY: 'auto' }}>{roster.map((r: any) => <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', borderBottom: `1px solid ${C.borderLight}`, padding: '8px 0' }}><div style={{ minWidth: 0 }}><p style={{ color: C.text, fontSize: '11px', fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.full_name}</p><p style={{ color: C.textMuted, fontSize: '10px', marginTop: '2px' }}>{r.nisn || r.username} · {r.room_name || 'Tanpa ruang'}</p></div><button onClick={() => removeRoster(r)} title="Hapus roster" style={{ border: 'none', background: 'none', color: '#dc2626', cursor: 'pointer', padding: '2px' }}><Trash2 size={13} /></button></div>)}</div>

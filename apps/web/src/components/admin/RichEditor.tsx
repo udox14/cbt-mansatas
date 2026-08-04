@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { POST } from '@/lib/api';
 import { Bold, Italic, Underline, Strikethrough, ListOrdered, List, Image, Music, Code, Type } from 'lucide-react';
 import { renderLatexToString } from '@/components/content/MathContent';
+import { isFullArabic } from '@/lib/rtl';
 
 // ═══════════════════════════════════════════════════════════════
 // TipTap-like Rich Editor (custom implementation)
@@ -31,13 +32,22 @@ export default function RichEditor({ value, onChange, placeholder = 'Tulis di si
   const audioInputRef = useRef<HTMLInputElement>(null);
   const initRef = useRef(false);
 
+  const applyDirection = useCallback((el: HTMLElement, rtl: boolean) => {
+    el.dir = rtl ? 'rtl' : 'ltr';
+    el.style.textAlign = rtl ? 'right' : 'left';
+  }, []);
+
   // Initialize editor content only once
   useEffect(() => {
     if (editorRef.current && !initRef.current) {
       editorRef.current.innerHTML = value || '';
       initRef.current = true;
+      // Auto-detect soal full berbahasa Arab → mode RTL
+      const rtl = isFullArabic(value);
+      setIsRTL(rtl);
+      applyDirection(editorRef.current, rtl);
     }
-  }, [value]);
+  }, [value, applyDirection]);
 
   // ── Save & Restore Selection ────────────────────────────────
   // This is the key fix: before a toolbar button steals focus,
@@ -67,8 +77,12 @@ export default function RichEditor({ value, onChange, placeholder = 'Tulis di si
   const handleInput = useCallback(() => {
     if (editorRef.current && !showSource) {
       onChange(editorRef.current.innerHTML);
+      // Auto-detect full Arabic → aktifkan RTL
+      const rtl = isFullArabic(editorRef.current.innerHTML);
+      setIsRTL(rtl);
+      applyDirection(editorRef.current, rtl);
     }
-  }, [onChange, showSource]);
+  }, [onChange, showSource, applyDirection]);
 
   // ── Toolbar Commands ────────────────────────────────────────
   // Uses mouseDown (not onClick) to prevent editor from losing focus/selection
@@ -89,10 +103,7 @@ export default function RichEditor({ value, onChange, placeholder = 'Tulis di si
   const toggleRTL = () => {
     const next = !isRTL;
     setIsRTL(next);
-    if (editorRef.current) {
-      editorRef.current.dir = next ? 'rtl' : 'ltr';
-      editorRef.current.style.textAlign = next ? 'right' : 'left';
-    }
+    if (editorRef.current) applyDirection(editorRef.current, next);
   };
 
   // ── Math Insert ────────────────────────────────────────────

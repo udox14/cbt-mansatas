@@ -60,6 +60,8 @@ CREATE TABLE IF NOT EXISTS cbt_exams (
   passing_score REAL DEFAULT 0,
   target_jalur TEXT DEFAULT NULL,
   event_id TEXT REFERENCES cbt_events(id),
+  subject_name TEXT,
+  sequence_order INTEGER NOT NULL DEFAULT 0,
   cheat_limit INTEGER DEFAULT 3,
   cheat_action TEXT DEFAULT 'lock',
   enforce_fullscreen INTEGER DEFAULT 0,

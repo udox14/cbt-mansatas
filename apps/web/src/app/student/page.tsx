@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { Fragment, useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { GET, POST } from '@/lib/api';
 import { getDeviceId } from '@/lib/device';
@@ -10,6 +10,7 @@ import { Clock, ArrowRight, Check, KeyRound, CalendarClock, Lock } from 'lucide-
 
 interface Exam {
   id: string; title: string; description: string | null;
+  event_id?: string | null; subject_name?: string | null; sequence_order?: number;
   event_name?: string | null; event_code?: string | null;
   duration_minutes: number; rules_text: string | null;
   session_id: string | null; session_status: string | null;
@@ -217,6 +218,19 @@ function StudentContent() {
     setActiveSession({ sessionId: r.data.session_id, startedAt: r.data.started_at, durationMinutes: r.data.duration_minutes });
   };
 
+  const eventGroups = Array.from(exams.reduce<Map<string, { key: string; label: string; code: string; exams: Exam[] }>>((groups, exam) => {
+    const key = exam.event_id || 'without-event';
+    const group = groups.get(key) || {
+      key,
+      label: exam.event_name || 'Kegiatan lainnya',
+      code: exam.event_code || 'KEGIATAN',
+      exams: [],
+    };
+    group.exams.push(exam);
+    groups.set(key, group);
+    return groups;
+  }, new Map()).values());
+
   return (
     <div className="min-h-screen flex flex-col" style={{ background: '#f4f6f4' }}>
 
@@ -252,56 +266,76 @@ function StudentContent() {
       <main className="relative z-10 flex-1 px-5 py-5 mx-auto w-full" style={{ maxWidth: '900px' }}>
         <div className="flex items-center justify-between mb-4">
           <p className="font-bold uppercase" style={{ color: '#4a6655', fontSize: '11px', letterSpacing: '0.1em' }}>Daftar Ujian</p>
-          <p style={{ color: '#8a9e8d', fontSize: '11px' }}>{exams.length} ujian tersedia</p>
+          <p style={{ color: '#8a9e8d', fontSize: '11px' }}>{exams.length} mapel · {eventGroups.length} kegiatan</p>
         </div>
+
+        {exams.length > 0 && (
+          <div className="mb-4" style={{ background: '#f0fdf4', border: '1.5px solid #b5d9c4', borderRadius: '14px', padding: '12px 14px' }}>
+            <p style={{ color: '#2d7a4f', fontSize: '12px', fontWeight: 900 }}>Pilih satu mapel untuk dikerjakan</p>
+            <p style={{ color: '#4a6655', fontSize: '11px', lineHeight: 1.5, marginTop: '3px' }}>Setiap mapel memiliki timer, token, soal, dan hasil sendiri. Setelah selesai, kembali ke daftar untuk melanjutkan mapel berikutnya.</p>
+          </div>
+        )}
 
         {exams.length === 0 ? <EmptyState title="Belum ada ujian" desc="Hubungi panitia jika ada kendala" /> : (
           <>
             {/* ── MOBILE: CARDS ── */}
             <div className="flex flex-col gap-2.5 md:hidden">
-              {exams.map(exam => {
-                const done = exam.session_status === 'submitted';
-                const active = exam.session_status === 'active';
-                const canStart = !done && (exam.jadwal_status === 'aktif' || exam.jadwal_status === 'no_schedule');
-                const pct = active && exam.total_questions ? Math.round((exam.answered_count || 0) / exam.total_questions * 100) : 0;
-                return (
-                  <div key={exam.id} style={{
-                    background: done ? '#fafbfa' : '#fff',
-                    border: `1.5px solid ${active ? '#b5d9c4' : done ? '#e8ebe8' : '#d4dbd4'}`,
-                    borderRadius: '18px', padding: '16px 18px',
-                    opacity: done ? 0.75 : 1,
-                  }}>
-                    <div className="flex items-start justify-between gap-2.5 mb-2">
-                      <div className="flex-1">
-                        {exam.event_name && <span style={{ display: 'inline-block', color: '#2d7a4f', background: '#e2ebe3', borderRadius: '999px', padding: '3px 8px', fontSize: '9px', fontWeight: 800, marginBottom: '5px' }}>{exam.event_code || 'KEGIATAN'} · {exam.event_name}</span>}
-                        <p className="font-extrabold leading-tight mb-1" style={{ color: done ? '#6b7c6e' : '#1e2e22', fontSize: '14px' }}>{exam.title}</p>
-                        {exam.description && <p className="leading-relaxed" style={{ color: '#8a9e8d', fontSize: '11.5px' }}>{exam.description}</p>}
-                      </div>
-                      <BadgeStatus status={exam.session_status} />
+              {eventGroups.map(group => (
+                <section key={group.key}>
+                  <div className="flex items-center justify-between mb-2 px-1">
+                    <div>
+                      <p style={{ color: '#2d7a4f', fontSize: '9px', fontWeight: 900, letterSpacing: '0.08em' }}>{group.code}</p>
+                      <p style={{ color: '#1e2e22', fontSize: '13px', fontWeight: 900 }}>{group.label}</p>
                     </div>
-                    {exam.jadwal_info && <div className="mb-3"><JadwalInfo exam={exam} /></div>}
-                    {/* #6: Progress bar untuk sesi aktif */}
-                    {active && exam.total_questions && exam.total_questions > 0 && (
-                      <div style={{ marginBottom: '10px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '3px' }}>
-                          <span style={{ fontSize: '10px', fontWeight: 700, color: '#4a6655' }}>{exam.answered_count || 0}/{exam.total_questions} dijawab</span>
-                          <span style={{ fontSize: '10px', color: '#8a9e8d' }}>{pct}%</span>
-                        </div>
-                        <div style={{ height: '5px', background: '#e0e5e0', borderRadius: '999px', overflow: 'hidden' }}>
-                          <div style={{ height: '100%', background: '#2d7a4f', borderRadius: '999px', width: `${pct}%`, transition: 'width 0.3s' }} />
-                        </div>
-                      </div>
-                    )}
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5 font-semibold" style={{ color: done ? '#a8b9aa' : '#6b7c6e', fontSize: '11.5px' }}>
-                        <Clock size={13} strokeWidth={2} />
-                        {exam.duration_minutes} menit
-                      </div>
-                      {!done && <ActionBtn label={active ? 'Lanjut' : 'Mulai'} variant={active ? 'resume' : 'primary'} onClick={() => start(exam)} disabled={!canStart} />}
-                    </div>
+                    <span style={{ color: '#8a9e8d', fontSize: '10px', fontWeight: 700 }}>{group.exams.length} mapel</span>
                   </div>
-                );
-              })}
+                  <div className="flex flex-col gap-2.5">
+                    {group.exams.map((exam, subjectIndex) => {
+                      const done = exam.session_status === 'submitted';
+                      const active = exam.session_status === 'active';
+                      const canStart = !done && (exam.jadwal_status === 'aktif' || exam.jadwal_status === 'no_schedule');
+                      const pct = active && exam.total_questions ? Math.round((exam.answered_count || 0) / exam.total_questions * 100) : 0;
+                      return (
+                        <div key={exam.id} style={{
+                          background: done ? '#fafbfa' : '#fff',
+                          border: `1.5px solid ${active ? '#b5d9c4' : done ? '#e8ebe8' : '#d4dbd4'}`,
+                          borderRadius: '18px', padding: '16px 18px',
+                          opacity: done ? 0.75 : 1,
+                        }}>
+                          <div className="flex items-start justify-between gap-2.5 mb-2">
+                            <div className="flex-1">
+                              <span style={{ display: 'inline-block', color: '#2d7a4f', background: '#e2ebe3', borderRadius: '999px', padding: '3px 8px', fontSize: '9px', fontWeight: 800, marginBottom: '5px' }}>Mapel {subjectIndex + 1}</span>
+                              <p className="font-extrabold leading-tight mb-1" style={{ color: done ? '#6b7c6e' : '#1e2e22', fontSize: '14px' }}>{exam.subject_name || exam.title}</p>
+                              {exam.subject_name && exam.title !== exam.subject_name && <p style={{ color: '#8a9e8d', fontSize: '10.5px', marginBottom: '3px' }}>{exam.title}</p>}
+                              {exam.description && <p className="leading-relaxed" style={{ color: '#8a9e8d', fontSize: '11.5px' }}>{exam.description}</p>}
+                            </div>
+                            <BadgeStatus status={exam.session_status} />
+                          </div>
+                          {exam.jadwal_info && <div className="mb-3"><JadwalInfo exam={exam} /></div>}
+                          {active && exam.total_questions && exam.total_questions > 0 && (
+                            <div style={{ marginBottom: '10px' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '3px' }}>
+                                <span style={{ fontSize: '10px', fontWeight: 700, color: '#4a6655' }}>{exam.answered_count || 0}/{exam.total_questions} dijawab</span>
+                                <span style={{ fontSize: '10px', color: '#8a9e8d' }}>{pct}%</span>
+                              </div>
+                              <div style={{ height: '5px', background: '#e0e5e0', borderRadius: '999px', overflow: 'hidden' }}>
+                                <div style={{ height: '100%', background: '#2d7a4f', borderRadius: '999px', width: `${pct}%`, transition: 'width 0.3s' }} />
+                              </div>
+                            </div>
+                          )}
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-1.5 font-semibold" style={{ color: done ? '#a8b9aa' : '#6b7c6e', fontSize: '11.5px' }}>
+                              <Clock size={13} strokeWidth={2} />
+                              {exam.duration_minutes} menit
+                            </div>
+                            {!done && <ActionBtn label={active ? 'Lanjut' : 'Mulai'} variant={active ? 'resume' : 'primary'} onClick={() => start(exam)} disabled={!canStart} />}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+              ))}
             </div>
 
             {/* ── DESKTOP: TABLE ── */}
@@ -309,7 +343,7 @@ function StudentContent() {
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ background: '#f4f6f4', borderBottom: '1.5px solid #d4dbd4' }}>
-                    {['#', 'Nama Ujian', 'Jadwal', 'Durasi', 'Status', 'Aksi'].map((h, i) => (
+                    {['#', 'Mapel / Ujian', 'Jadwal', 'Durasi', 'Status', 'Aksi'].map((h, i) => (
                       <th key={h} style={{
                         padding: '12px 20px', color: '#4a6655', fontSize: '11px', fontWeight: 700,
                         letterSpacing: '0.07em', textTransform: 'uppercase',
@@ -320,38 +354,52 @@ function StudentContent() {
                   </tr>
                 </thead>
                 <tbody>
-                  {exams.map((exam, i) => {
-                    const done = exam.session_status === 'submitted';
-                    const active = exam.session_status === 'active';
-                    const canStart = !done && (exam.jadwal_status === 'aktif' || exam.jadwal_status === 'no_schedule');
-                    const pct = active && exam.total_questions ? Math.round((exam.answered_count || 0) / exam.total_questions * 100) : 0;
-                    const dimmed = { color: '#a8b9aa' };
-                    return (
-                      <tr key={exam.id} style={{ borderBottom: i < exams.length - 1 ? '1px solid #edf0ed' : 'none', background: i % 2 !== 0 ? '#fafbfa' : '#fff' }}>
-                        <td style={{ padding: '14px 20px', textAlign: 'center', fontSize: '12px', fontWeight: 600, ...(done ? dimmed : { color: '#8a9e8d' }) }}>{i + 1}</td>
-                        <td style={{ padding: '14px 20px', fontSize: '13px', fontWeight: 700, whiteSpace: 'nowrap', ...(done ? dimmed : { color: '#1e2e22' }) }}><div>{exam.title}</div>{exam.event_name && <div style={{ color: '#2d7a4f', fontSize: '9px', fontWeight: 800, marginTop: '4px' }}>{exam.event_code || 'KEGIATAN'} · {exam.event_name}</div>}</td>
-                        <td style={{ padding: '14px 20px', fontSize: '12px', maxWidth: '280px' }}>
-                          {exam.jadwal_info ? <JadwalInfo exam={exam} /> : <span style={{ color: '#a8b9aa' }}>—</span>}
-                        </td>
-                        <td style={{ padding: '14px 20px', textAlign: 'center', fontSize: '12px', fontWeight: 600, whiteSpace: 'nowrap', ...(done ? dimmed : { color: '#6b7c6e' }) }}>{exam.duration_minutes} menit</td>
-                        <td style={{ padding: '14px 20px', textAlign: 'center' }}><BadgeStatus status={exam.session_status} /></td>
-                        <td style={{ padding: '14px 20px', textAlign: 'center', minWidth: '130px' }}>
-                          {/* #6: Progress di desktop */}
-                          {active && exam.total_questions && exam.total_questions > 0 && (
-                            <div style={{ marginBottom: '6px' }}>
-                              <div style={{ fontSize: '10px', fontWeight: 700, color: '#4a6655', marginBottom: '2px' }}>{exam.answered_count || 0}/{exam.total_questions}</div>
-                              <div style={{ height: '4px', background: '#e0e5e0', borderRadius: '999px', overflow: 'hidden' }}>
-                                <div style={{ height: '100%', background: '#2d7a4f', borderRadius: '999px', width: `${pct}%` }} />
-                              </div>
-                            </div>
-                          )}
-                          {!done
-                            ? <ActionBtn label={active ? 'Lanjut' : 'Mulai'} variant={active ? 'resume' : 'primary'} onClick={() => start(exam)} disabled={!canStart} />
-                            : <span style={{ color: '#c4cec4', fontSize: '14px', fontWeight: 700 }}>—</span>}
+                  {eventGroups.map(group => (
+                    <Fragment key={group.key}>
+                      <tr style={{ background: '#f0fdf4', borderTop: '1px solid #b5d9c4', borderBottom: '1px solid #b5d9c4' }}>
+                        <td colSpan={6} style={{ padding: '10px 20px' }}>
+                          <span style={{ color: '#2d7a4f', fontSize: '10px', fontWeight: 900, letterSpacing: '0.08em' }}>{group.code}</span>
+                          <span style={{ color: '#1e2e22', fontSize: '12px', fontWeight: 900, marginLeft: '8px' }}>{group.label}</span>
+                          <span style={{ color: '#8a9e8d', fontSize: '10px', fontWeight: 700, marginLeft: '8px' }}>{group.exams.length} mapel</span>
                         </td>
                       </tr>
-                    );
-                  })}
+                      {group.exams.map((exam, subjectIndex) => {
+                        const examIndex = exams.findIndex(item => item.id === exam.id);
+                        const done = exam.session_status === 'submitted';
+                        const active = exam.session_status === 'active';
+                        const canStart = !done && (exam.jadwal_status === 'aktif' || exam.jadwal_status === 'no_schedule');
+                        const pct = active && exam.total_questions ? Math.round((exam.answered_count || 0) / exam.total_questions * 100) : 0;
+                        const dimmed = { color: '#a8b9aa' };
+                        return (
+                          <tr key={exam.id} style={{ borderBottom: examIndex < exams.length - 1 ? '1px solid #edf0ed' : 'none', background: examIndex % 2 !== 0 ? '#fafbfa' : '#fff' }}>
+                            <td style={{ padding: '14px 20px', textAlign: 'center', fontSize: '12px', fontWeight: 600, ...(done ? dimmed : { color: '#8a9e8d' }) }}>{subjectIndex + 1}</td>
+                            <td style={{ padding: '14px 20px', fontSize: '13px', fontWeight: 700, whiteSpace: 'nowrap', ...(done ? dimmed : { color: '#1e2e22' }) }}>
+                              <div>{exam.subject_name || exam.title}</div>
+                              {exam.subject_name && exam.title !== exam.subject_name && <div style={{ color: '#8a9e8d', fontSize: '10px', fontWeight: 600, marginTop: '3px' }}>{exam.title}</div>}
+                            </td>
+                            <td style={{ padding: '14px 20px', fontSize: '12px', maxWidth: '280px' }}>
+                              {exam.jadwal_info ? <JadwalInfo exam={exam} /> : <span style={{ color: '#a8b9aa' }}>—</span>}
+                            </td>
+                            <td style={{ padding: '14px 20px', textAlign: 'center', fontSize: '12px', fontWeight: 600, whiteSpace: 'nowrap', ...(done ? dimmed : { color: '#6b7c6e' }) }}>{exam.duration_minutes} menit</td>
+                            <td style={{ padding: '14px 20px', textAlign: 'center' }}><BadgeStatus status={exam.session_status} /></td>
+                            <td style={{ padding: '14px 20px', textAlign: 'center', minWidth: '130px' }}>
+                              {active && exam.total_questions && exam.total_questions > 0 && (
+                                <div style={{ marginBottom: '6px' }}>
+                                  <div style={{ fontSize: '10px', fontWeight: 700, color: '#4a6655', marginBottom: '2px' }}>{exam.answered_count || 0}/{exam.total_questions}</div>
+                                  <div style={{ height: '4px', background: '#e0e5e0', borderRadius: '999px', overflow: 'hidden' }}>
+                                    <div style={{ height: '100%', background: '#2d7a4f', borderRadius: '999px', width: `${pct}%` }} />
+                                  </div>
+                                </div>
+                              )}
+                              {!done
+                                ? <ActionBtn label={active ? 'Lanjut' : 'Mulai'} variant={active ? 'resume' : 'primary'} onClick={() => start(exam)} disabled={!canStart} />
+                                : <span style={{ color: '#c4cec4', fontSize: '14px', fontWeight: 700 }}>—</span>}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </Fragment>
+                  ))}
                 </tbody>
               </table>
             </div>

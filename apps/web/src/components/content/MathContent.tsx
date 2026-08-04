@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import DOMPurify from 'dompurify';
 import katex from 'katex';
+import { isFullArabic } from '@/lib/rtl';
 
 const SANITIZE_OPTIONS = {
   USE_PROFILES: { html: true },
@@ -106,15 +107,18 @@ interface MathContentProps {
  */
 export default function MathContent({ html, as = 'div', className, style }: MathContentProps) {
   const [renderedHtml, setRenderedHtml] = useState('');
+  const [isRtl, setIsRtl] = useState(false);
 
   useEffect(() => {
     setRenderedHtml(renderMathNodes(html || ''));
+    setIsRtl(isFullArabic(html));
   }, [html]);
 
   const Tag = as;
   return (
     <Tag
-      className={className}
+      className={isRtl ? `${className || ''} arabic`.trim() : className}
+      dir={isRtl ? 'rtl' : undefined}
       style={style}
       suppressHydrationWarning
       dangerouslySetInnerHTML={{ __html: renderedHtml }}

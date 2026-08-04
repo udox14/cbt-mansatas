@@ -48,10 +48,21 @@ CREATE INDEX IF NOT EXISTS idx_cbt_roster_source ON cbt_exam_roster(source_key, 
 
 -- Existing databases have a CHECK constraint that only allows pendaftar and
 -- cbt_user. Rebuild just this CBT-owned table so mansatas sessions can be
--- stored while preserving all session IDs and timestamps. Child tables keep
--- their existing REFERENCES name because the old table is dropped/recreated
--- with foreign_keys temporarily disabled.
-PRAGMA foreign_keys=OFF;
+-- stored while preserving all session IDs and timestamps.
+--
+-- IMPORTANT: D1 executes imported statements separately. Therefore a
+-- PRAGMA foreign_keys=OFF cannot be relied on across the DROP TABLE below.
+-- Dropping the parent with foreign keys enabled cascades into answers,
+-- results, and cheat logs. Make constraint-free copies first, then restore
+-- those rows after the new parent table exists. The backups are intentionally
+-- left in place until post-migration verification completes.
+DROP TABLE IF EXISTS cbt_migration_student_answers_backup;
+DROP TABLE IF EXISTS cbt_migration_exam_results_backup;
+DROP TABLE IF EXISTS cbt_migration_cheat_logs_backup;
+CREATE TABLE cbt_migration_student_answers_backup AS SELECT * FROM cbt_student_answers;
+CREATE TABLE cbt_migration_exam_results_backup AS SELECT * FROM cbt_exam_results;
+CREATE TABLE cbt_migration_cheat_logs_backup AS SELECT * FROM cbt_cheat_logs;
+
 DROP INDEX IF EXISTS idx_cbt_sessions_exam;
 DROP INDEX IF EXISTS idx_cbt_sessions_room;
 DROP TABLE IF EXISTS cbt_exam_sessions_new;
@@ -62,7 +73,7 @@ CREATE TABLE cbt_exam_sessions_new (
   user_type TEXT NOT NULL DEFAULT 'pendaftar' CHECK (user_type IN ('pendaftar', 'mansatas', 'cbt_user')),
   room_id TEXT NOT NULL,
   device_id TEXT,
-  status TEXT DEFAULT 'active' CHECK (status IN ('active', 'paused', 'submitted')),
+  status TEXT DEFAULT 'active' CHECK (status IN ('active', 'paused', 'submitted', 'force_submitted')),
   cheat_warnings INTEGER DEFAULT 0,
   question_map TEXT,
   option_map TEXT,
@@ -87,4 +98,20 @@ DROP TABLE cbt_exam_sessions;
 ALTER TABLE cbt_exam_sessions_new RENAME TO cbt_exam_sessions;
 CREATE INDEX IF NOT EXISTS idx_cbt_sessions_exam ON cbt_exam_sessions(exam_id, status);
 CREATE INDEX IF NOT EXISTS idx_cbt_sessions_room ON cbt_exam_sessions(room_id, status);
-PRAGMA foreign_keys=ON;
+
+-- Restore all child rows. INSERT OR IGNORE makes this safe if a D1 import
+-- implementation leaves a child table intact instead of cascading it.
+INSERT OR IGNORE INTO cbt_student_answers
+  (id, session_id, question_id, selected_option_id, essay_answer, is_doubtful, answered_at)
+SELECT id, session_id, question_id, selected_option_id, essay_answer, is_doubtful, answered_at
+FROM cbt_migration_student_answers_backup;
+INSERT OR IGNORE INTO cbt_exam_results
+  (id, session_id, exam_id, user_id, user_type, total_questions, total_correct,
+   total_wrong, total_unanswered, score, computed_at)
+SELECT id, session_id, exam_id, user_id, user_type, total_questions, total_correct,
+       total_wrong, total_unanswered, score, computed_at
+FROM cbt_migration_exam_results_backup;
+INSERT OR IGNORE INTO cbt_cheat_logs
+  (id, session_id, violation_type, happened_at)
+SELECT id, session_id, violation_type, happened_at
+FROM cbt_migration_cheat_logs_backup;

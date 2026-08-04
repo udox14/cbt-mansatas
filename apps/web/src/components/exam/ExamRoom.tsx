@@ -5,6 +5,7 @@ import { Modal, Spinner } from '@/components/ui';
 import { Clock, ChevronLeft, ChevronRight, Minus, Plus, Send, AlertTriangle, Maximize, Info, RefreshCw } from 'lucide-react';
 import MathContent from '@/components/content/MathContent';
 import { useAntiCheatAlarm } from '@/hooks/useAntiCheatAlarm';
+import { isFullArabic } from '@/lib/rtl';
 
 interface Question {
   index: number; id: string; question_text: string; question_type: string;
@@ -907,10 +908,12 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
             <div style={{ padding: '0 14px 16px', display: 'flex', flexDirection: 'column', gap: '7px' }}>
               {q.options.map(o => {
                 const sel = ans?.selected_option_id === o.id;
+                const optRtl = isFullArabic(o.option_text);
                 return (
                   <button key={o.id} onClick={() => setAnswer(q.id, { selected_option_id: o.id })} disabled={isCheatLocked}
                     style={{
-                      width: '100%', textAlign: 'left', display: 'flex', alignItems: 'flex-start', gap: '10px',
+                      width: '100%', textAlign: optRtl ? 'right' : 'left', display: 'flex', alignItems: 'flex-start', gap: '10px',
+                      flexDirection: optRtl ? 'row-reverse' : 'row',
                       padding: '11px 12px', borderRadius: '12px', cursor: isCheatLocked ? 'not-allowed' : 'pointer',
                       opacity: isCheatLocked ? 0.62 : 1,
                       border: `1.5px solid ${sel ? C.green : C.borderMid}`,
@@ -925,7 +928,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
                       border: `2px solid ${sel ? C.green : C.borderMid}`,
                       color: sel ? '#fff' : C.textMuted,
                     }}>{o.option_label}</span>
-                    <span style={{ flex: 1, fontSize: `${fontSize}px`, color: C.text, fontWeight: 500, paddingTop: '2px' }}>
+                    <span style={{ flex: 1, fontSize: `${fontSize}px`, color: C.text, fontWeight: 500, paddingTop: '2px', textAlign: optRtl ? 'right' : 'left' }}>
                       {o.image_url
                         ? <img src={`${API_BASE_URL}${o.image_url}`} alt={o.option_label} style={{ maxWidth: '100%', borderRadius: '8px' }} />
                         : <MathContent as="span" html={o.option_text} />}
@@ -939,6 +942,8 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
               <textarea value={ans?.essay_answer || ''} onChange={e => setAnswer(q.id, { essay_answer: e.target.value })}
                 disabled={isCheatLocked}
                 placeholder="Tulis jawaban..." rows={5}
+                dir={isFullArabic(ans?.essay_answer) ? 'rtl' : 'ltr'}
+                className={isFullArabic(ans?.essay_answer) ? 'arabic' : ''}
                 style={{ width: '100%', padding: '10px 12px', fontSize: `${fontSize}px`, border: `1.5px solid ${C.borderMid}`, borderRadius: '12px', outline: 'none', resize: 'none', color: C.text, background: C.bg, fontFamily: 'inherit', cursor: isCheatLocked ? 'not-allowed' : 'text', opacity: isCheatLocked ? 0.62 : 1 }}
                 onFocus={e => { e.target.style.borderColor = C.green; e.target.style.boxShadow = '0 0 0 3px rgba(45,122,79,0.1)'; }}
                 onBlur={e => { e.target.style.borderColor = C.borderMid; e.target.style.boxShadow = 'none'; }} />

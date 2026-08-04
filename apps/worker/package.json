@@ -8,7 +8,9 @@
     "db:init": "wrangler d1 execute pmb-man1-tasik --remote --file=./schema.sql",
     "db:init:local": "wrangler d1 execute pmb-man1-tasik --local --file=./schema.sql",
     "db:migrate:multi-event": "wrangler d1 execute pmb-man1-tasik --remote --file=./migration-multi-event.sql",
-    "db:migrate:multi-event:local": "wrangler d1 execute pmb-man1-tasik --local --file=./migration-multi-event.sql"
+    "db:migrate:multi-event:local": "wrangler d1 execute pmb-man1-tasik --local --file=./migration-multi-event.sql",
+    "db:migrate:omi-multimapel": "wrangler d1 execute pmb-man1-tasik --remote --file=./migration-omi-multimapel.sql",
+    "db:migrate:omi-multimapel:local": "wrangler d1 execute pmb-man1-tasik --local --file=./migration-omi-multimapel.sql"
   },
   "dependencies": {
     "hono": "^4.4.0"

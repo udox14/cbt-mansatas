@@ -422,27 +422,29 @@ admin.post('/exams', async (c) => {
   const cheatLimit = Number(b.cheat_limit ?? 3);
   if (!Number.isInteger(cheatLimit) || cheatLimit < 1 || cheatLimit > 50)
     return c.json(err('Cheat limit harus antara 1–50'), 400);
+  const sequenceOrder = Number(b.sequence_order ?? 0);
+  if (!Number.isInteger(sequenceOrder) || sequenceOrder < 0 || sequenceOrder > 999)
+    return c.json(err('Urutan mapel harus antara 0–999'), 400);
   if (b.cheat_action && b.cheat_action !== 'lock')
     return c.json(err('Cheat action tidak valid'), 400);
   if (b.active_status && !['draft', 'active', 'finished'].includes(b.active_status))
     return c.json(err('Status tidak valid'), 400);
-  // Existing exam UI does not yet send an event selector; keep its behavior
-  // under the migrated PMB event instead of creating an unscoped exam.
   const eventId = b.event_id ? String(b.event_id) : 'event-pmb';
   if (eventId && !await c.env.DB.prepare('SELECT id FROM cbt_events WHERE id=?').bind(eventId).first())
     return c.json(err('Kegiatan tidak ditemukan'), 400);
+  const subjectName = b.subject_name == null ? null : String(b.subject_name).trim().slice(0, 120) || null;
 
   const id = newId();
   await c.env.DB.prepare(
     `INSERT INTO cbt_exams (id, title, description, duration_minutes, rules_text, completion_message,
      is_score_visible, randomize_questions, randomize_options, active_status, passing_score, created_by,
-     target_jalur, event_id, cheat_limit, cheat_action, enforce_fullscreen)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+     target_jalur, event_id, subject_name, sequence_order, cheat_limit, cheat_action, enforce_fullscreen)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
   ).bind(id, b.title.trim(), b.description || null, duration,
     b.rules_text || null, b.completion_message || 'Ujian telah selesai. Terima kasih.',
     b.is_score_visible ? 1 : 0, b.randomize_questions ? 1 : 0,
     b.randomize_options ? 1 : 0, b.active_status || 'draft', b.passing_score || 0, user.sub,
-    b.target_jalur || null, eventId, cheatLimit, 'lock', b.enforce_fullscreen ? 1 : 0
+    b.target_jalur || null, eventId, subjectName, sequenceOrder, cheatLimit, 'lock', b.enforce_fullscreen ? 1 : 0
   ).run();
   return c.json(ok({ id }, 'Ujian dibuat'), 201);
 });
@@ -460,6 +462,9 @@ admin.put('/exams/:id', async (c) => {
   const cheatLimit = Number(b.cheat_limit ?? 3);
   if (!Number.isInteger(cheatLimit) || cheatLimit < 1 || cheatLimit > 50)
     return c.json(err('Cheat limit harus antara 1–50'), 400);
+  const sequenceOrder = Number(b.sequence_order ?? 0);
+  if (!Number.isInteger(sequenceOrder) || sequenceOrder < 0 || sequenceOrder > 999)
+    return c.json(err('Urutan mapel harus antara 0–999'), 400);
   if (b.cheat_action && b.cheat_action !== 'lock')
     return c.json(err('Cheat action tidak valid'), 400);
   if (b.active_status && !['draft', 'active', 'finished'].includes(b.active_status))
@@ -469,15 +474,22 @@ admin.put('/exams/:id', async (c) => {
     : (b.event_id ? String(b.event_id) : 'event-pmb');
   if (eventId && !await c.env.DB.prepare('SELECT id FROM cbt_events WHERE id=?').bind(eventId).first())
     return c.json(err('Kegiatan tidak ditemukan'), 400);
+  if (existingExam?.event_id && existingExam.event_id !== eventId) {
+    const rosterCount = await c.env.DB.prepare('SELECT COUNT(*) AS total FROM cbt_exam_roster WHERE exam_id=?').bind(c.req.param('id')).first<any>();
+    const assignmentCount = await c.env.DB.prepare('SELECT COUNT(*) AS total FROM cbt_exam_assignments WHERE exam_id=?').bind(c.req.param('id')).first<any>();
+    if (Number(rosterCount?.total || 0) > 0 || Number(assignmentCount?.total || 0))
+      return c.json(err('Kegiatan tidak dapat diubah setelah peserta ditugaskan'), 409);
+  }
+  const subjectName = b.subject_name == null ? null : String(b.subject_name).trim().slice(0, 120) || null;
 
   await c.env.DB.prepare(
     `UPDATE cbt_exams SET title=?, description=?, duration_minutes=?, rules_text=?,
      completion_message=?, is_score_visible=?, randomize_questions=?, randomize_options=?,
-     active_status=?, passing_score=?, target_jalur=?, event_id=?,
+     active_status=?, passing_score=?, target_jalur=?, event_id=?, subject_name=?, sequence_order=?,
      cheat_limit=?, cheat_action=?, enforce_fullscreen=?, updated_at=? WHERE id=?`
   ).bind(b.title.trim(), b.description, duration, b.rules_text, b.completion_message,
     b.is_score_visible ? 1 : 0, b.randomize_questions ? 1 : 0, b.randomize_options ? 1 : 0,
-    b.active_status, b.passing_score || 0, b.target_jalur || null, eventId,
+    b.active_status, b.passing_score || 0, b.target_jalur || null, eventId, subjectName, sequenceOrder,
     cheatLimit, 'lock', b.enforce_fullscreen ? 1 : 0,
     now(), c.req.param('id')
   ).run();
