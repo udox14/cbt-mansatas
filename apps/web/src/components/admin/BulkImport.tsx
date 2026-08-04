@@ -9,26 +9,6 @@ import MathContent from '@/components/content/MathContent';
 // Bulk Import: Excel & Word (Client-side parsing, no Worker RAM)
 // ═══════════════════════════════════════════════════════════════
 
-// ── CDN Loader ───────────────────────────────────────────────
-let mammothLoaded = false;
-
-function loadScript(src: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (document.querySelector(`script[src="${src}"]`)) { resolve(); return; }
-    const s = document.createElement('script');
-    s.src = src;
-    s.onload = () => resolve();
-    s.onerror = () => reject(new Error(`Gagal memuat ${src}`));
-    document.head.appendChild(s);
-  });
-}
-
-async function ensureMammoth() {
-  if (mammothLoaded && (window as any).mammoth) return;
-  await loadScript('https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js');
-  mammothLoaded = true;
-}
-
 // ── Types ────────────────────────────────────────────────────
 interface ParsedQuestion {
   question_text: string;
@@ -105,8 +85,7 @@ export default function BulkImport({ type, examId, onSuccess, onClose, open }: B
   const parseWord = async (file: File) => {
     setError('');
     try {
-      await ensureMammoth();
-      const mammoth = (window as any).mammoth;
+      const mammoth = await import('mammoth');
       const data = await file.arrayBuffer();
       const result = await mammoth.convertToHtml({ arrayBuffer: data });
       const html = result.value;
