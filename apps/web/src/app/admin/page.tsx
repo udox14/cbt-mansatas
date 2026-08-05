@@ -35,7 +35,7 @@ Semoga mendapatkan hasil yang terbaik!`;
 
 
 // ── TYPES ────────────────────────────────────────────────────
-interface Room { id: string; room_name: string; capacity: number; jumlah_peserta?: number }
+interface Room { id: string; room_name: string; capacity: number; jumlah_peserta?: number; event_id?: string | null; event_code?: string; event_name?: string }
 interface Proctor { id: string; username: string; full_name: string; role: string; room_id: string | null; room_name?: string }
 interface Pendaftar { id: string; nisn: string; nama_lengkap: string; no_pendaftaran: string; ruang_tes: string; jalur: string; asal_sekolah: string; jenis_kelamin: string; tanggal_lahir: string; tanggal_tes: string; sesi_tes: string }
 interface Exam { id: string; title: string; subject_name?: string | null; sequence_order?: number; description: string | null; duration_minutes: number; active_status: string; question_count: number; is_score_visible: number; randomize_questions: number; randomize_options: number; rules_text: string | null; completion_message: string; passing_score: number; target_jalur: string | null; cheat_limit: number; cheat_action: string; enforce_fullscreen: number; event_id?: string | null; event_name?: string | null; event_code?: string | null }
@@ -147,6 +147,39 @@ function AdminContent() {
   const [collapsed, setCollapsed] = useState(() =>
     typeof window !== 'undefined' ? localStorage.getItem('admin_sidebar') === 'collapsed' : false
   );
+
+  // ── ACTIVE EVENT CONTEXT ──
+  const [activeEventId, setActiveEventIdState] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('cbt_active_event_id') || null;
+    }
+    return null;
+  });
+  const [allEventsList, setAllEventsList] = useState<CbtEvent[]>([]);
+  const [showEventModal, setShowEventModal] = useState(false);
+
+  const fetchEventsHeader = useCallback(async () => {
+    const res = await GET<CbtEvent[]>('/api/admin/events');
+    if (res.success && res.data) {
+      setAllEventsList(res.data);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchEventsHeader();
+  }, [fetchEventsHeader]);
+
+  const setActiveEventId = (id: string | null) => {
+    setActiveEventIdState(id);
+    if (id) {
+      localStorage.setItem('cbt_active_event_id', id);
+    } else {
+      localStorage.removeItem('cbt_active_event_id');
+    }
+  };
+
+  const currentActiveEvent = allEventsList.find(e => e.id === activeEventId) || null;
+
   const toggleCollapsed = () => setCollapsed(prev => {
     const next = !prev;
     localStorage.setItem('admin_sidebar', next ? 'collapsed' : 'expanded');
@@ -245,18 +278,33 @@ function AdminContent() {
 
         {/* header */}
         <header style={{ background: C.white, borderBottom: `1.5px solid ${C.border}`, padding: '0 20px', height: '57px', display: 'flex', alignItems: 'center', gap: '12px', justifyContent: 'space-between' }}>
-          {/* mobile: hamburger */}
-          <button className="lg:hidden" onClick={() => setSidebarOpen(true)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px' }}>
-            <Menu size={20} color="#6b7c6e" />
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+            {/* mobile: hamburger */}
+            <button className="lg:hidden" onClick={() => setSidebarOpen(true)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px' }}>
+              <Menu size={20} color="#6b7c6e" />
+            </button>
+
+            {/* Active Event Banner & Switcher */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: currentActiveEvent ? '#f0fdf4' : '#fffbe6', border: `1.5px solid ${currentActiveEvent ? C.greenBorder : '#ffe58f'}`, padding: '5px 12px', borderRadius: '999px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 800, color: currentActiveEvent ? C.green : '#d48806', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: currentActiveEvent ? C.green : '#faad14' }} />
+                {currentActiveEvent ? `KEGIATAN AKTIF: ${currentActiveEvent.code} · ${currentActiveEvent.name}` : 'SEMUA KEGIATAN (GLOBAL)'}
+              </span>
+              <button
+                onClick={() => setShowEventModal(true)}
+                style={{ background: 'none', border: 'none', color: '#1a5fa8', fontSize: '11px', fontWeight: 700, cursor: 'pointer', textDecoration: 'underline', textUnderlineOffset: '2px', padding: '0 2px' }}>
+                [ 🔄 Ganti Kegiatan ]
+              </button>
+            </div>
+          </div>
           <TanggalHari />
         </header>
 
         <main style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-          {page === 'exams' && <ExamsPage />}
-          {page === 'kegiatan' && <KegiatanPage />}
-          {page === 'peserta' && <PesertaPage />}
-          {page === 'rooms' && <RoomsPage />}
+          {page === 'exams' && <ExamsPage activeEventId={activeEventId} />}
+          {page === 'kegiatan' && <KegiatanPage activeEventId={activeEventId} setActiveEventId={setActiveEventId} />}
+          {page === 'peserta' && <PesertaPage activeEventId={activeEventId} />}
+          {page === 'rooms' && <RoomsPage activeEventId={activeEventId} />}
           {page === 'pelaksana' && <PelaksanaPage />}
           {page === 'settings' && <SettingsPage />}
         </main>
@@ -265,12 +313,46 @@ function AdminContent() {
           © 2026 MAN 1 Tasikmalaya — DRUDOX
         </footer>
       </div>
+
+      {/* Modal Switcher Kegiatan */}
+      <Modal open={showEventModal} onClose={() => setShowEventModal(false)} title="Pilih Kegiatan / Event" size="md">
+        <div className="space-y-3">
+          <p style={{ color: C.textMuted, fontSize: '11.5px' }}>Pilih kegiatan yang ingin Anda kelola. Seluruh menu (Ujian, Peserta, Ruangan, Token, & Monitoring) akan disesuaikan secara otomatis.</p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '10px', maxHeight: '350px', overflowY: 'auto' }}>
+            <div
+              onClick={() => { setActiveEventId(null); setShowEventModal(false); }}
+              style={{ background: !activeEventId ? C.greenLight : C.white, border: `1.5px solid ${!activeEventId ? C.green : C.borderMid}`, borderRadius: '12px', padding: '12px', cursor: 'pointer' }}>
+              <p style={{ fontSize: '12px', fontWeight: 800, color: !activeEventId ? C.green : C.text }}>🌐 Semua Kegiatan (Global)</p>
+              <p style={{ fontSize: '10.5px', color: C.textFaint, marginTop: '2px' }}>Tampilkan semua data tanpa filter kegiatan tunggal</p>
+            </div>
+            {allEventsList.map(ev => {
+              const isSel = activeEventId === ev.id;
+              return (
+                <div
+                  key={ev.id}
+                  onClick={() => { setActiveEventId(ev.id); setShowEventModal(false); }}
+                  style={{ background: isSel ? C.greenLight : C.white, border: `1.5px solid ${isSel ? C.green : C.borderMid}`, borderRadius: '12px', padding: '12px', cursor: 'pointer' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span style={{ background: '#f0fdf4', color: C.green, border: `1px solid ${C.greenBorder}`, fontSize: '9.5px', fontWeight: 800, padding: '2px 7px', borderRadius: '999px' }}>{ev.code}</span>
+                    {isSel && <span style={{ color: C.green, fontSize: '10px', fontWeight: 800 }}>✓ AKTIF</span>}
+                  </div>
+                  <p style={{ fontSize: '12.5px', fontWeight: 800, color: C.text, marginTop: '6px' }}>{ev.name}</p>
+                  <p style={{ fontSize: '10.5px', color: C.textFaint, marginTop: '2px' }}>Sumber: {(ev.participant_source || 'cbt').toUpperCase()}</p>
+                </div>
+              );
+            })}
+          </div>
+          <div className="flex justify-end pt-2">
+            <Button variant="secondary" size="sm" onClick={() => setShowEventModal(false)}>Tutup</Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
 
 // ── EXAMS PAGE ────────────────────────────────────────────────
-function ExamsPage() {
+function ExamsPage({ activeEventId }: { activeEventId?: string | null }) {
   const { toast } = useToast();
   const [exams, setExams] = useState<Exam[]>([]);
   const [events, setEvents] = useState<CbtEvent[]>([]);
@@ -281,7 +363,11 @@ function ExamsPage() {
   const [activeTab, setActiveTab] = useState<ExamTab>('soal');
   const [confirmDel, setConfirmDel] = useState<Exam | null>(null);
   const [jalurList, setJalurList] = useState<string[]>([]);
-  const [selectedEventId, setSelectedEventId] = useState<string>('ALL');
+  const [selectedEventId, setSelectedEventId] = useState<string>(() => activeEventId || 'ALL');
+
+  useEffect(() => {
+    setSelectedEventId(activeEventId || 'ALL');
+  }, [activeEventId]);
 
   const filteredExams = useMemo(() => {
     if (selectedEventId === 'ALL') return exams;
@@ -2094,12 +2180,16 @@ function AssignmentsView({ examId }: { examId: string }) {
 // ── PESERTA PAGE ──────────────────────────────────────────────
 // Hanya menampilkan peserta jalur REGULER MURNI (jalur yang membutuhkan tes)
 // ── KEGIATAN & ROSTER ─────────────────────────────────────────
-function KegiatanPage() {
+function KegiatanPage({ activeEventId, setActiveEventId }: { activeEventId?: string | null; setActiveEventId?: (id: string | null) => void }) {
   const { toast } = useToast();
   const [events, setEvents] = useState<CbtEvent[]>([]);
   const [exams, setExams] = useState<Exam[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
-  const [eventId, setEventId] = useState('');
+  const [eventId, setEventId] = useState(() => activeEventId || '');
+
+  useEffect(() => {
+    if (activeEventId) setEventId(activeEventId);
+  }, [activeEventId]);
   const [examId, setExamId] = useState('');
   const [participants, setParticipants] = useState<RosterParticipant[]>([]);
   const [roster, setRoster] = useState<RosterParticipant[]>([]);
@@ -2331,7 +2421,7 @@ function KegiatanPage() {
   );
 }
 
-function PesertaPage() {
+function PesertaPage({ activeEventId }: { activeEventId?: string | null }) {
   const { toast } = useToast();
   const [data, setData] = useState<Pendaftar[]>([]);
   const [loading, setLoading] = useState(true);
@@ -2352,9 +2442,13 @@ function PesertaPage() {
   const [savingBatchAssign, setSavingBatchAssign] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterEventId, setFilterEventId] = useState('ALL');
+  const [filterEventId, setFilterEventId] = useState(() => activeEventId || 'ALL');
   const [allEvents, setAllEvents] = useState<CbtEvent[]>([]);
   const [rosterMap, setRosterMap] = useState<{ event_id: string; source_key: string; source_id: string; nisn?: string }[]>([]);
+
+  useEffect(() => {
+    setFilterEventId(activeEventId || 'ALL');
+  }, [activeEventId]);
 
   const savePeserta = async () => {
     if (!editPeserta?.nisn || !editPeserta?.nama_lengkap) { toast('error', 'NISN dan nama wajib diisi'); return; }
@@ -2938,7 +3032,7 @@ function PesertaPage() {
 }
 
 // ── ROOMS PAGE ────────────────────────────────────────────────
-function RoomsPage() {
+function RoomsPage({ activeEventId }: { activeEventId?: string | null }) {
   const { toast } = useToast();
   const [rooms, setRooms] = useState<Room[]>([]);
   const [proctors, setProctors] = useState<Proctor[]>([]);
@@ -2955,12 +3049,18 @@ function RoomsPage() {
   const [studentCandidateSearch, setStudentCandidateSearch] = useState('');
   const [loadingStudentCandidates, setLoadingStudentCandidates] = useState(false);
   const [savingRoomStudentAssign, setSavingRoomStudentAssign] = useState(false);
+  const [roomEvents, setRoomEvents] = useState<CbtEvent[]>([]);
+  const [filterRoomEventId, setFilterRoomEventId] = useState<string>(() => activeEventId || 'ALL');
+
+  useEffect(() => {
+    setFilterRoomEventId(activeEventId || 'ALL');
+  }, [activeEventId]);
   const [filterRoomDate, setFilterRoomDate] = useState('');
   const [filterRoomSession, setFilterRoomSession] = useState('');
   const [roomDateOptions, setRoomDateOptions] = useState<string[]>([]);
   const [roomSessionOptions, setRoomSessionOptions] = useState<string[]>([]);
   const [showRoomForm, setShowRoomForm] = useState(false);
-  const [roomForm, setRoomForm] = useState({ room_name: '', capacity: 40 });
+  const [roomForm, setRoomForm] = useState({ room_name: '', capacity: 40, event_id: '' });
   const [savingRoom, setSavingRoom] = useState(false);
   const [confirmDelRoom, setConfirmDelRoom] = useState<Room | null>(null);
 
@@ -2969,14 +3069,17 @@ function RoomsPage() {
     const roomQs = new URLSearchParams();
     if (filterRoomDate) roomQs.set('tanggal_tes', filterRoomDate);
     if (filterRoomSession) roomQs.set('sesi_tes', filterRoomSession);
+    if (filterRoomEventId !== 'ALL') roomQs.set('event_id', filterRoomEventId);
     const roomUrl = roomQs.toString() ? `/api/admin/rooms?${roomQs.toString()}` : '/api/admin/rooms';
-    const [r, p, pmb] = await Promise.all([
+    const [r, p, pmb, evs] = await Promise.all([
       GET<Room[]>(roomUrl),
       GET<Proctor[]>('/api/admin/proctors'),
       GET<Pendaftar[]>('/api/admin/pendaftar'),
+      GET<CbtEvent[]>('/api/admin/events'),
     ]);
     if (r.success) setRooms(r.data || []);
     if (p.success) setProctors(p.data || []);
+    if (evs.success) setRoomEvents(evs.data || []);
     if (pmb.success) {
       const pmbData = pmb.data || [];
       setRoomDateOptions(Array.from(new Set(pmbData.map((x: any) => x.tanggal_tes).filter(Boolean))).sort() as string[]);
@@ -2986,7 +3089,7 @@ function RoomsPage() {
       if (filterRoomSession && !sessionOptions.includes(filterRoomSession)) setFilterRoomSession('');
     }
     setLoading(false);
-  }, [filterRoomDate, filterRoomSession]);
+  }, [filterRoomDate, filterRoomSession, filterRoomEventId]);
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const changeRoomDate = (value: string) => {
@@ -2994,12 +3097,20 @@ function RoomsPage() {
     setFilterRoomSession('');
   };
   const syncRooms = async () => { setSyncing(true); const r = await POST('/api/admin/rooms/sync', {}); toast(r.success ? 'success' : 'error', r.message || r.error || 'Gagal'); setSyncing(false); fetchData(); };
-  const openRoomForm = () => { setRoomForm({ room_name: '', capacity: 40 }); setShowRoomForm(true); };
+  const openRoomForm = () => {
+    const defaultEv = filterRoomEventId !== 'ALL' ? filterRoomEventId : '';
+    setRoomForm({ room_name: '', capacity: 40, event_id: defaultEv });
+    setShowRoomForm(true);
+  };
   const saveRoom = async () => {
     const roomName = roomForm.room_name.trim();
     if (!roomName) { toast('error', 'Nama ruangan wajib diisi'); return; }
     setSavingRoom(true);
-    const r = await POST('/api/admin/rooms', { room_name: roomName, capacity: roomForm.capacity });
+    const r = await POST('/api/admin/rooms', {
+      room_name: roomName,
+      capacity: roomForm.capacity,
+      event_id: roomForm.event_id || null,
+    });
     setSavingRoom(false);
     if (r.success) {
       toast('success', r.message || 'Ruangan ditambahkan');
@@ -3177,6 +3288,39 @@ function RoomsPage() {
           <Button size="sm" loading={syncing} onClick={syncRooms}><RefreshCw size={13} /> Sinkronkan</Button>
         </div>
       </div>
+      {/* ── FILTER JENIS KEGIATAN ── */}
+      <div style={{ background: '#f8faf8', borderBottom: `1.5px solid ${C.border}`, padding: '10px 20px', display: 'flex', alignItems: 'center', gap: '8px', overflowX: 'auto' }}>
+        <span style={{ fontSize: '11px', fontWeight: 800, color: C.green, textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap', marginRight: '4px' }}>
+          Kegiatan:
+        </span>
+        <button type="button" onClick={() => setFilterRoomEventId('ALL')}
+          style={{
+            padding: '5px 12px', fontSize: '11.5px', fontWeight: 700, borderRadius: '999px', cursor: 'pointer', whiteSpace: 'nowrap',
+            border: `1.5px solid ${filterRoomEventId === 'ALL' ? C.green : C.borderMid}`,
+            background: filterRoomEventId === 'ALL' ? C.greenLight : C.white,
+            color: filterRoomEventId === 'ALL' ? C.green : C.textMuted,
+            transition: 'all 0.12s',
+          }}>
+          Semua Kegiatan ({rooms.length})
+        </button>
+        {roomEvents.map(ev => {
+          const isSelected = filterRoomEventId === ev.id;
+          const count = rooms.filter((r: any) => !r.event_id || r.event_id === ev.id).length;
+          return (
+            <button key={ev.id} type="button" onClick={() => setFilterRoomEventId(ev.id)}
+              style={{
+                padding: '5px 12px', fontSize: '11.5px', fontWeight: 700, borderRadius: '999px', cursor: 'pointer', whiteSpace: 'nowrap',
+                border: `1.5px solid ${isSelected ? C.green : C.borderMid}`,
+                background: isSelected ? C.greenLight : C.white,
+                color: isSelected ? C.green : C.textMuted,
+                transition: 'all 0.12s',
+              }}>
+              {ev.code} · {ev.name} ({count})
+            </button>
+          );
+        })}
+      </div>
+
       <div style={{ flex: 1, padding: '16px 20px' }} className="space-y-3">
         <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '12px', padding: '10px 12px', display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
           <Select
@@ -3189,8 +3333,8 @@ function RoomsPage() {
             onChange={e => setFilterRoomSession(e.target.value)}
             options={[{ value: '', label: 'Semua Sesi' }, ...roomSessionOptions.map(s => ({ value: s, label: s }))]}
           />
-          {(filterRoomSession || filterRoomDate) && (
-            <Button variant="secondary" size="sm" onClick={() => { setFilterRoomSession(''); setFilterRoomDate(''); }}>
+          {(filterRoomSession || filterRoomDate || filterRoomEventId !== 'ALL') && (
+            <Button variant="secondary" size="sm" onClick={() => { setFilterRoomSession(''); setFilterRoomDate(''); setFilterRoomEventId('ALL'); }}>
               Reset Filter
             </Button>
           )}
@@ -3202,7 +3346,7 @@ function RoomsPage() {
                 {/* DESKTOP: table */}
                 <div className="hidden md:block" style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '12px', overflow: 'hidden' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                    <TableHead cols={[{ label: '#' }, { label: 'Ruangan' }, { label: 'Peserta', center: true }, { label: 'Proktor' }, { label: 'Aksi', center: true }]} />
+                    <TableHead cols={[{ label: '#' }, { label: 'Ruangan' }, { label: 'Kegiatan' }, { label: 'Peserta', center: true }, { label: 'Proktor' }, { label: 'Aksi', center: true }]} />
                     <tbody>
                       {rooms.map((r, i) => {
                         const rp = proctors.filter(p => p.room_id === r.id);
@@ -3214,6 +3358,15 @@ function RoomsPage() {
                                 style={{ color: C.green, fontWeight: 800, fontSize: '13px', background: 'none', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline', textUnderlineOffset: '3px' }}>
                                 {r.room_name}
                               </button>
+                            </td>
+                            <td style={{ padding: '10px 14px' }}>
+                              {r.event_code ? (
+                                <span style={{ background: '#f0fdf4', color: C.green, border: `1px solid ${C.greenBorder}`, fontSize: '10px', fontWeight: 800, padding: '2px 8px', borderRadius: '999px' }}>
+                                  {r.event_code}
+                                </span>
+                              ) : (
+                                <span style={{ color: C.textFaint, fontSize: '11px', fontStyle: 'italic' }}>Universal</span>
+                              )}
                             </td>
                             <td style={{ padding: '10px 14px', textAlign: 'center' }}><span style={{ background: '#e0f0ff', color: '#1a5fa8', fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '999px' }}>{r.jumlah_peserta || 0}</span></td>
                             <td style={{ padding: '10px 14px' }}>
@@ -3251,7 +3404,14 @@ function RoomsPage() {
                             style={{ color: C.green, fontSize: '13.5px', fontWeight: 800, background: 'none', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline', textUnderlineOffset: '3px' }}>
                             {r.room_name}
                           </button>
-                          <span style={{ background: '#e0f0ff', color: '#1a5fa8', fontSize: '10px', fontWeight: 700, padding: '3px 9px', borderRadius: '999px' }}>{r.jumlah_peserta || 0} peserta</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            {r.event_code && (
+                              <span style={{ background: '#f0fdf4', color: C.green, border: `1px solid ${C.greenBorder}`, fontSize: '9.5px', fontWeight: 800, padding: '2px 7px', borderRadius: '999px' }}>
+                                {r.event_code}
+                              </span>
+                            )}
+                            <span style={{ background: '#e0f0ff', color: '#1a5fa8', fontSize: '10px', fontWeight: 700, padding: '3px 9px', borderRadius: '999px' }}>{r.jumlah_peserta || 0} peserta</span>
+                          </div>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                           <div>
@@ -3293,6 +3453,15 @@ function RoomsPage() {
             min={1}
             value={roomForm.capacity}
             onChange={e => setRoomForm(prev => ({ ...prev, capacity: Number(e.target.value) || 1 }))}
+          />
+          <Select
+            label="Kegiatan / Event (Opsional)"
+            value={roomForm.event_id}
+            onChange={e => setRoomForm(prev => ({ ...prev, event_id: e.target.value }))}
+            options={[
+              { value: '', label: '— Universal / Semua Kegiatan —' },
+              ...roomEvents.map(ev => ({ value: ev.id, label: `${ev.code} · ${ev.name}` })),
+            ]}
           />
           <div className="flex gap-2 justify-end pt-1">
             <Button variant="secondary" size="sm" onClick={() => setShowRoomForm(false)}>Batal</Button>

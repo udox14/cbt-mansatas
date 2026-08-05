@@ -20,6 +20,7 @@ admin.get('/rooms', async (c) => {
   const pmbTable = getPmbTable(c.env);
   const tanggalTes = c.req.query('tanggal_tes');
   const sesiTes = c.req.query('sesi_tes');
+  const eventId = c.req.query('event_id');
 
   const pmbFilterValues: string[] = [];
   const pmbConditions = [EXCLUDE_JALUR_COND, "ruang_tes IS NOT NULL AND ruang_tes != ''"];
@@ -32,25 +33,50 @@ admin.get('/rooms', async (c) => {
     pmbFilterValues.push(sesiTes);
   }
 
-  // 1. Fetch rooms & proctors from CBT DB
-  const { results: rooms } = await c.env.DB.prepare(
-    `SELECT r.*,
-       (SELECT GROUP_CONCAT(cu.nama_lengkap, ', ') FROM cbt_users cu WHERE cu.room_id = r.id AND cu.role = 'proctor') as proctor_names
-     FROM cbt_rooms r ORDER BY r.room_name`
-  ).all();
+  // 1. Fetch rooms & proctors from CBT DB with optional event_id filter
+  let roomsSql = `SELECT r.*, e.code as event_code, e.name as event_name,
+                    (SELECT GROUP_CONCAT(cu.nama_lengkap, ', ') FROM cbt_users cu WHERE cu.room_id = r.id AND cu.role = 'proctor') as proctor_names
+                  FROM cbt_rooms r
+                  LEFT JOIN cbt_events e ON e.id = r.event_id`;
+  const roomParams: any[] = [];
+  if (eventId) {
+    roomsSql += ` WHERE r.event_id = ? OR r.event_id IS NULL`;
+    roomParams.push(eventId);
+  }
+  roomsSql += ` ORDER BY r.room_name`;
+  const { results: rooms } = await c.env.DB.prepare(roomsSql).bind(...roomParams).all();
 
-  // 2. Fetch PMB candidates from PMB DB
-  const pmbQuery = `SELECT ruang_tes, nisn FROM ${pmbTable} WHERE ${pmbConditions.join(' AND ')}`;
-  const { results: pmbRows } = await pmbDb.prepare(pmbQuery).bind(...pmbFilterValues).all();
-
+  // 2. Fetch PMB candidates from PMB DB (if no event filter or event is PMB)
+  const isPmbIncluded = !eventId || eventId === 'event-pmb';
   const pmbRoomMap = new Map<string, Set<string>>();
-  for (const row of (pmbRows as any[])) {
-    const rm = row.ruang_tes;
-    if (!pmbRoomMap.has(rm)) pmbRoomMap.set(rm, new Set());
-    if (row.nisn) pmbRoomMap.get(rm)!.add(row.nisn);
+  if (isPmbIncluded) {
+    const pmbQuery = `SELECT ruang_tes, nisn FROM ${pmbTable} WHERE ${pmbConditions.join(' AND ')}`;
+    const { results: pmbRows } = await pmbDb.prepare(pmbQuery).bind(...pmbFilterValues).all();
+    for (const row of (pmbRows as any[])) {
+      const rm = row.ruang_tes;
+      if (!pmbRoomMap.has(rm)) pmbRoomMap.set(rm, new Set());
+      if (row.nisn) pmbRoomMap.get(rm)!.add(row.nisn);
+    }
   }
 
-  // 3. Fetch cbt_users students per room from CBT DB
+  // 3. Fetch non-PMB roster & cbt_users students per room from CBT DB
+  let rosterSql = `SELECT r.room_id, r.nisn, rm.room_name
+                   FROM cbt_exam_roster r
+                   LEFT JOIN cbt_rooms rm ON rm.id = r.room_id
+                   WHERE (r.room_id IS NOT NULL OR rm.room_name IS NOT NULL)`;
+  const rosterParams: any[] = [];
+  if (eventId) {
+    rosterSql += ` AND r.event_id = ?`;
+    rosterParams.push(eventId);
+  }
+  const { results: rosterRows } = await c.env.DB.prepare(rosterSql).bind(...rosterParams).all();
+
+  const rosterRoomCountMap = new Map<string, number>();
+  for (const row of (rosterRows as any[])) {
+    const key = row.room_id || row.room_name;
+    if (key) rosterRoomCountMap.set(key, (rosterRoomCountMap.get(key) || 0) + 1);
+  }
+
   const { results: cbtStudentRows } = await c.env.DB.prepare(
     "SELECT room_id, nisn FROM cbt_users WHERE role = 'student' AND room_id IS NOT NULL"
   ).all();
@@ -67,21 +93,21 @@ admin.get('/rooms', async (c) => {
 
   const results = (rooms as any[]).map(r => {
     const pmbCount = pmbRoomMap.get(r.room_name)?.size || 0;
+    const rosterCount = rosterRoomCountMap.get(r.id) || rosterRoomCountMap.get(r.room_name) || 0;
     const cbtCount = cbtUserRoomCountMap.get(r.id) || 0;
     return {
       ...r,
-      jumlah_peserta: pmbCount + cbtCount,
+      jumlah_peserta: pmbCount + rosterCount + cbtCount,
     };
   });
 
   return c.json(ok(results));
 });
 
-// Sync ruangan dari data pendaftar — buat otomatis dari ruang_tes
+// Sync ruangan dari data pendaftar — buat otomatis dari ruang_tes untuk event-pmb
 admin.post('/rooms/sync', async (c) => {
   const pmbDb = getPmbDb(c.env);
   const pmbTable = getPmbTable(c.env);
-  // Ambil semua ruang_tes unik dari pendaftar — excludes jalur Prestasi
   const { results: rooms } = await pmbDb.prepare(
     `SELECT DISTINCT ruang_tes FROM ${pmbTable} WHERE ruang_tes IS NOT NULL AND ruang_tes != '' AND ${EXCLUDE_JALUR_COND} ORDER BY ruang_tes`
   ).all();
@@ -92,8 +118,8 @@ admin.post('/rooms/sync', async (c) => {
       'SELECT id FROM cbt_rooms WHERE room_name = ?'
     ).bind(r.ruang_tes).first();
     if (!exists) {
-      await c.env.DB.prepare('INSERT INTO cbt_rooms (id, room_name, capacity) VALUES (?,?,40)')
-        .bind(newId(), r.ruang_tes).run();
+      await c.env.DB.prepare('INSERT INTO cbt_rooms (id, room_name, capacity, event_id) VALUES (?,?,40,?)')
+        .bind(newId(), r.ruang_tes, 'event-pmb').run();
       created++;
     }
   }
@@ -101,31 +127,37 @@ admin.post('/rooms/sync', async (c) => {
 });
 
 admin.post('/rooms', async (c) => {
-  const { room_name, capacity } = await c.req.json();
+  const { room_name, capacity, event_id } = await c.req.json();
   const roomName = String(room_name || '').trim();
   const roomCapacity = Math.max(1, Number(capacity || 40) || 40);
+  const roomEventId = event_id && String(event_id).trim() !== '' ? String(event_id).trim() : null;
   if (!roomName) return c.json(err('Nama ruangan wajib diisi'), 400);
+
   const exists = await c.env.DB.prepare(
-    'SELECT id FROM cbt_rooms WHERE LOWER(room_name) = LOWER(?)'
-  ).bind(roomName).first();
-  if (exists) return c.json(err('Nama ruangan sudah ada'), 409);
+    'SELECT id FROM cbt_rooms WHERE LOWER(room_name) = LOWER(?) AND (event_id = ? OR (event_id IS NULL AND ? IS NULL))'
+  ).bind(roomName, roomEventId, roomEventId).first();
+  if (exists) return c.json(err('Nama ruangan sudah ada untuk kegiatan ini'), 409);
+
   const id = newId();
-  await c.env.DB.prepare('INSERT INTO cbt_rooms (id, room_name, capacity) VALUES (?,?,?)')
-    .bind(id, roomName, roomCapacity).run();
+  await c.env.DB.prepare('INSERT INTO cbt_rooms (id, room_name, capacity, event_id) VALUES (?,?,?,?)')
+    .bind(id, roomName, roomCapacity, roomEventId).run();
   return c.json(ok({ id }, 'Ruangan ditambahkan'), 201);
 });
 
 admin.put('/rooms/:id', async (c) => {
-  const { room_name, capacity } = await c.req.json();
+  const { room_name, capacity, event_id } = await c.req.json();
   const roomName = String(room_name || '').trim();
   const roomCapacity = Math.max(1, Number(capacity || 40) || 40);
+  const roomEventId = event_id && String(event_id).trim() !== '' ? String(event_id).trim() : null;
   if (!roomName) return c.json(err('Nama ruangan wajib diisi'), 400);
+
   const exists = await c.env.DB.prepare(
-    'SELECT id FROM cbt_rooms WHERE LOWER(room_name) = LOWER(?) AND id != ?'
-  ).bind(roomName, c.req.param('id')).first();
-  if (exists) return c.json(err('Nama ruangan sudah ada'), 409);
-  await c.env.DB.prepare('UPDATE cbt_rooms SET room_name=?, capacity=? WHERE id=?')
-    .bind(roomName, roomCapacity, c.req.param('id')).run();
+    'SELECT id FROM cbt_rooms WHERE LOWER(room_name) = LOWER(?) AND id != ? AND (event_id = ? OR (event_id IS NULL AND ? IS NULL))'
+  ).bind(roomName, c.req.param('id'), roomEventId, roomEventId).first();
+  if (exists) return c.json(err('Nama ruangan sudah ada untuk kegiatan ini'), 409);
+
+  await c.env.DB.prepare('UPDATE cbt_rooms SET room_name=?, capacity=?, event_id=? WHERE id=?')
+    .bind(roomName, roomCapacity, roomEventId, c.req.param('id')).run();
   return c.json(ok(null, 'Ruangan diperbarui'));
 });
 

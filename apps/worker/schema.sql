@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS cbt_rooms (
   id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
   room_name TEXT NOT NULL,
   capacity INTEGER DEFAULT 40,
+  event_id TEXT REFERENCES cbt_events(id),
   created_at TEXT DEFAULT (datetime('now'))
 );
 
