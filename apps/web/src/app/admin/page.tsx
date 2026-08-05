@@ -13,7 +13,7 @@ import { exportExamResults, exportExamAnalytics } from '@/lib/export';
 import { isFullArabic } from '@/lib/rtl';
 import {
   ClipboardList, Users, School, Shield, LogOut, Menu, Layers,
-  Plus, FileDown, RefreshCw, Pencil, Trash2, Upload,
+  Plus, FileDown, RefreshCw, Pencil, Trash2, Upload, Download,
   Image, Volume2, X, UserPlus, ChevronLeft, ArrowRight, Settings, Power, Sparkles, Search,
 } from 'lucide-react';
 
@@ -2537,21 +2537,31 @@ function PesertaPage({ activeEventId }: { activeEventId?: string | null }) {
   };
 
   const fetchPeserta = useCallback(async () => {
-    // Ambil dari semua sumber: semua pendaftar PMB + cbt_users (role student) + jalur list + events + roster map
-    const [pmb, manual, rooms, jalur, events, roster] = await Promise.all([
+    // Ambil dari semua sumber: semua pendaftar PMB + cbt_users (role student) + cbt_exam_roster + jalur list + events + roster map
+    const [pmb, manual, rooms, jalur, events, rosterMapResp, fullRosterResp] = await Promise.all([
       GET<Pendaftar[]>('/api/admin/pendaftar'),
       GET<any[]>('/api/admin/users?role=student'),
       GET<Room[]>('/api/admin/rooms'),
       GET<string[]>('/api/admin/pendaftar/jalur'),
       GET<CbtEvent[]>('/api/admin/events'),
       GET<any[]>('/api/admin/events/roster-map'),
+      GET<any[]>('/api/admin/roster'),
     ]);
     const pmbData: Pendaftar[] = pmb.success ? (pmb.data || []) : [];
     const roomList = rooms.success ? (rooms.data || []) : [];
     if (rooms.success) setAllRooms(roomList);
     if (jalur.success) setAllJalur(jalur.data || []);
     if (events.success) setAllEvents(events.data || []);
-    if (roster.success) setRosterMap(roster.data || []);
+    if (rosterMapResp.success) setRosterMap(rosterMapResp.data || []);
+
+    const fullRosterData: Pendaftar[] = (fullRosterResp.success ? (fullRosterResp.data || []) : []).map((r: any) => ({
+      id: r.id, nisn: r.nisn || r.username, nama_lengkap: r.full_name,
+      no_pendaftaran: '—', ruang_tes: r.room_name || r.room_id || '',
+      jalur: r.class_name ? `Kelas ${r.class_name}` : 'ROSTER', asal_sekolah: '', jenis_kelamin: r.gender || '',
+      tanggal_lahir: '', tanggal_tes: r.tanggal_tes || '', sesi_tes: r.sesi_tes || '',
+      _sumber: (r.source_key || 'roster') as any,
+    }));
+
     // Map cbt_users student ke format Pendaftar
     const manualData: Pendaftar[] = (manual.success ? (manual.data || []) : []).map((u: any) => ({
       id: u.id, nisn: u.nisn || u.username, nama_lengkap: u.full_name,
@@ -2560,12 +2570,18 @@ function PesertaPage({ activeEventId }: { activeEventId?: string | null }) {
       tanggal_lahir: '', tanggal_tes: '', sesi_tes: '',
       _sumber: 'manual' as const,
     }));
+
     // Tag PMB data with source
     const taggedPmb = pmbData.map(p => ({ ...p, _sumber: 'pmb' as const }));
+
     // Hindari duplikat berdasarkan NISN
-    const allNisn = new Set(taggedPmb.map(p => p.nisn));
-    const uniqueManual = manualData.filter(p => p.nisn && !allNisn.has(p.nisn));
-    setData([...taggedPmb, ...uniqueManual] as any);
+    const pmbNisns = new Set(taggedPmb.map(p => p.nisn).filter(Boolean));
+    const uniqueRoster = fullRosterData.filter(p => !p.nisn || !pmbNisns.has(p.nisn));
+
+    const existingNisns = new Set([...pmbNisns, ...uniqueRoster.map(p => p.nisn).filter(Boolean)]);
+    const uniqueManual = manualData.filter(p => !p.nisn || !existingNisns.has(p.nisn));
+
+    setData([...taggedPmb, ...uniqueRoster, ...uniqueManual] as any);
     setLoading(false);
   }, []);
   useEffect(() => { fetchPeserta(); }, [fetchPeserta]);
@@ -3160,10 +3176,11 @@ function RoomsPage({ activeEventId }: { activeEventId?: string | null }) {
     if (filterRoomDate) pmbQs.set('tanggal_tes', filterRoomDate);
     if (filterRoomSession) pmbQs.set('sesi_tes', filterRoomSession);
 
-    // Ambil dari dua sumber: pendaftar PMB + cbt_users manual (room_id)
-    const [pmb, manual] = await Promise.all([
+    // Ambil dari tiga sumber: pendaftar PMB + cbt_users manual + cbt_exam_roster
+    const [pmb, manual, roster] = await Promise.all([
       GET<any[]>(`/api/admin/pendaftar?${pmbQs.toString()}`),
       GET<any[]>(`/api/admin/users?role=student&room_id=${encodeURIComponent(room.id)}`),
+      GET<any[]>(`/api/admin/roster?room_id=${encodeURIComponent(room.id)}`),
     ]);
     const pmbList = (pmb.success ? pmb.data || [] : []).map((p: any) => ({
       nama: p.nama_lengkap,
@@ -3174,6 +3191,18 @@ function RoomsPage({ activeEventId }: { activeEventId?: string | null }) {
       sumber: 'PMB',
     }));
     const pmbNisn = new Set(pmbList.map((p: any) => p.nisn).filter(Boolean));
+
+    const rosterList = (roster.success ? roster.data || [] : []).map((r: any) => ({
+      nama: r.full_name,
+      nisn: r.nisn || r.username,
+      ruang_tes: r.room_name || room.room_name,
+      sesi: r.sesi_tes || '',
+      tanggal_tes: r.tanggal_tes || '',
+      sumber: (r.source_key || 'Roster').toUpperCase(),
+    })).filter((r: any) => !r.nisn || !pmbNisn.has(r.nisn));
+
+    const existingNisn = new Set([...pmbList, ...rosterList].map((x: any) => x.nisn).filter(Boolean));
+
     const manualList = (manual.success ? manual.data || [] : []).map((u: any) => ({
       nama: u.full_name,
       nisn: u.nisn || u.username,
@@ -3181,8 +3210,9 @@ function RoomsPage({ activeEventId }: { activeEventId?: string | null }) {
       sesi: '',
       tanggal_tes: '',
       sumber: 'Manual',
-    })).filter((u: any) => !u.nisn || !pmbNisn.has(u.nisn));
-    setRoomStudents([...pmbList, ...manualList]);
+    })).filter((u: any) => !u.nisn || !existingNisn.has(u.nisn));
+
+    setRoomStudents([...pmbList, ...rosterList, ...manualList]);
     setLoadingStudents(false);
   };
 
@@ -3610,6 +3640,14 @@ function PelaksanaPage() {
   const [saving, setSaving] = useState(false);
   const [confirmDel, setConfirmDel] = useState<Proctor | null>(null);
 
+  // ── GTK IMPORT STATE ──
+  const [showGtkModal, setShowGtkModal] = useState(false);
+  const [gtkUsers, setGtkUsers] = useState<any[]>([]);
+  const [loadingGtk, setLoadingGtk] = useState(false);
+  const [gtkSearch, setGtkSearch] = useState('');
+  const [selectedGtkEmails, setSelectedGtkEmails] = useState<Set<string>>(new Set());
+  const [importingGtk, setImportingGtk] = useState(false);
+
   const fetchData = useCallback(async () => {
     // Fetch proctors + admins via /users endpoint which returns role field
     const r = await GET<Proctor[]>('/api/admin/users');
@@ -3625,6 +3663,57 @@ function PelaksanaPage() {
   const TAB_TO_ROLE: Record<string, string> = { proktor: 'proctor', admin: 'admin' };
   const dbRole = TAB_TO_ROLE[tab] || tab;
   const displayed = users.filter(u => u.role === dbRole);
+
+  const openGtkModal = async () => {
+    setShowGtkModal(true);
+    setLoadingGtk(true);
+    setSelectedGtkEmails(new Set());
+    setGtkSearch('');
+    const r = await GET<any[]>('/api/admin/gtk-users');
+    if (r.success) {
+      setGtkUsers(r.data || []);
+    } else {
+      toast('error', r.error || 'Gagal mengambil data GTK');
+    }
+    setLoadingGtk(false);
+  };
+
+  const toggleGtkEmail = (email: string) => {
+    setSelectedGtkEmails(prev => {
+      const next = new Set(prev);
+      if (next.has(email)) next.delete(email);
+      else next.add(email);
+      return next;
+    });
+  };
+
+  const filteredGtk = gtkUsers.filter((u: any) => {
+    const q = gtkSearch.trim().toLowerCase();
+    if (!q) return true;
+    return `${u.nama_lengkap} ${u.email}`.toLowerCase().includes(q);
+  });
+
+  const importGtkUsers = async () => {
+    const selectedRows = gtkUsers.filter((u: any) => selectedGtkEmails.has(u.email));
+    if (selectedRows.length === 0) { toast('error', 'Pilih minimal 1 GTK'); return; }
+    setImportingGtk(true);
+    const r = await POST('/api/admin/gtk-users/import', {
+      users: selectedRows.map((u: any) => ({
+        email: u.email,
+        name: u.nama_lengkap,
+        role: tab === 'admin' ? 'admin' : 'proctor',
+        password: u.password || 'mansatas2026',
+      })),
+    });
+    setImportingGtk(false);
+    if (r.success) {
+      toast('success', r.message || 'Berhasil di-import');
+      setShowGtkModal(false);
+      fetchData();
+    } else {
+      toast('error', r.error || 'Gagal import GTK');
+    }
+  };
 
   const save = async () => {
     if (!editUser?.username || !editUser.full_name) { toast('error', 'Data tidak lengkap'); return; }
@@ -3659,10 +3748,10 @@ function PelaksanaPage() {
           <p style={{ color: C.text, fontSize: '15px', fontWeight: 800 }}>Pelaksana Tes</p>
           <p style={{ color: C.textMuted, fontSize: '11px', marginTop: '1px' }}>{displayed.length} {tab} terdaftar</p>
         </div>
-        <button onClick={() => setEditUser({ role: tab, is_active: 1 })}
-          style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: C.green, color: '#fff', fontSize: '12px', fontWeight: 700, padding: '8px 14px', borderRadius: '10px', border: 'none', cursor: 'pointer' }}>
-          <Plus size={13} strokeWidth={2.5} /> Tambah {tab === 'proktor' ? 'Proktor' : 'Admin'}
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <Button variant="secondary" size="sm" onClick={openGtkModal}><Download size={13} /> Import dari MANSATAS App (GTK)</Button>
+          <Button size="sm" onClick={() => setEditUser({ role: tab, is_active: 1 })}><Plus size={13} /> Tambah {tab === 'proktor' ? 'Proktor' : 'Admin'}</Button>
+        </div>
       </div>
 
       {/* flat tabs */}
@@ -3777,6 +3866,50 @@ function PelaksanaPage() {
       <Confirm open={!!confirmDel} onClose={() => setConfirmDel(null)} onConfirm={del}
         title={`Hapus ${tab === 'proktor' ? 'Proktor' : 'Admin'}?`}
         message={`Akun "${confirmDel?.full_name}" akan dihapus permanen.`} />
+
+      <Modal open={showGtkModal} onClose={() => setShowGtkModal(false)} title={`Import GTK dari MANSATAS App (${tab === 'admin' ? 'Admin' : 'Proktor'})`} size="lg">
+        <div className="space-y-3">
+          <p style={{ color: C.textMuted, fontSize: '11.5px' }}>Pilih akun GTK/User MANSATAS App yang ingin di-import sebagai {tab === 'admin' ? 'Admin' : 'Proktor'}. Username menggunakan email, password default adalah <code className="bg-emerald-50 px-1 py-0.5 rounded text-emerald-800 font-mono">mansatas2026</code> (atau sesuai password MANSATAS App).</p>
+          <Input
+            placeholder="Cari nama GTK atau email..."
+            value={gtkSearch}
+            onChange={e => setGtkSearch(e.target.value)}
+          />
+          {loadingGtk ? <div className="py-8 text-center"><Spinner /></div>
+            : filteredGtk.length === 0
+              ? <EmptyState title="Tidak ada GTK ditemukan" desc="Semua GTK mungkin sudah di-import atau data belum tersedia" />
+              : (
+                <div style={{ maxHeight: '340px', overflowY: 'auto', border: `1.5px solid ${C.borderMid}`, borderRadius: '12px', background: C.bg }}>
+                  {filteredGtk.map((u: any, i: number) => {
+                    const isSelected = selectedGtkEmails.has(u.email);
+                    return (
+                      <label key={u.email} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', borderBottom: i < filteredGtk.length - 1 ? `1px solid ${C.borderLight}` : 'none', background: isSelected ? C.greenLight : C.white, cursor: u.already_imported ? 'not-allowed' : 'pointer', opacity: u.already_imported ? 0.6 : 1 }}>
+                        <input
+                          type="checkbox"
+                          disabled={u.already_imported}
+                          checked={isSelected || u.already_imported}
+                          onChange={() => toggleGtkEmail(u.email)}
+                        />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <p style={{ color: C.text, fontSize: '12.5px', fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.nama_lengkap}</p>
+                          <p style={{ color: C.textMuted, fontSize: '11px', fontFamily: 'monospace' }}>{u.email}</p>
+                        </div>
+                        {u.already_imported && (
+                          <span style={{ background: C.greenLight, color: C.green, fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '999px' }}>Sudah Terdaftar</span>
+                        )}
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+          <div className="flex gap-2 justify-end pt-1">
+            <Button variant="secondary" size="sm" onClick={() => setShowGtkModal(false)}>Batal</Button>
+            <Button size="sm" loading={importingGtk} disabled={selectedGtkEmails.size === 0} onClick={importGtkUsers}>
+              Import {selectedGtkEmails.size} GTK ({tab === 'admin' ? 'Admin' : 'Proktor'})
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

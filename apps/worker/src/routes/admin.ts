@@ -15,7 +15,16 @@ admin.use('*', authMiddleware, requireRole('admin'));
 // ROOMS — auto-sync dari pendaftar.ruang_tes
 // ══════════════════════════════════════════════════════════════
 
+async function ensureRoomEventColumn(db: any) {
+  try {
+    await db.prepare('ALTER TABLE cbt_rooms ADD COLUMN event_id TEXT REFERENCES cbt_events(id)').run();
+  } catch (e) {
+    // Column already exists or table issue
+  }
+}
+
 admin.get('/rooms', async (c) => {
+  await ensureRoomEventColumn(c.env.DB);
   const pmbDb = getPmbDb(c.env);
   const pmbTable = getPmbTable(c.env);
   const tanggalTes = c.req.query('tanggal_tes');
@@ -44,54 +53,69 @@ admin.get('/rooms', async (c) => {
     roomParams.push(eventId);
   }
   roomsSql += ` ORDER BY r.room_name`;
-  const { results: rooms } = await c.env.DB.prepare(roomsSql).bind(...roomParams).all();
+
+  let rooms: any[] = [];
+  try {
+    const { results } = await c.env.DB.prepare(roomsSql).bind(...roomParams).all();
+    rooms = results || [];
+  } catch (e) {
+    // Fallback if event_id column not present
+    const { results } = await c.env.DB.prepare(
+      `SELECT r.*, (SELECT GROUP_CONCAT(cu.nama_lengkap, ', ') FROM cbt_users cu WHERE cu.room_id = r.id AND cu.role = 'proctor') as proctor_names FROM cbt_rooms r ORDER BY r.room_name`
+    ).all();
+    rooms = results || [];
+  }
 
   // 2. Fetch PMB candidates from PMB DB (if no event filter or event is PMB)
   const isPmbIncluded = !eventId || eventId === 'event-pmb';
   const pmbRoomMap = new Map<string, Set<string>>();
   if (isPmbIncluded) {
-    const pmbQuery = `SELECT ruang_tes, nisn FROM ${pmbTable} WHERE ${pmbConditions.join(' AND ')}`;
-    const { results: pmbRows } = await pmbDb.prepare(pmbQuery).bind(...pmbFilterValues).all();
-    for (const row of (pmbRows as any[])) {
-      const rm = row.ruang_tes;
-      if (!pmbRoomMap.has(rm)) pmbRoomMap.set(rm, new Set());
-      if (row.nisn) pmbRoomMap.get(rm)!.add(row.nisn);
-    }
+    try {
+      const pmbQuery = `SELECT ruang_tes, nisn FROM ${pmbTable} WHERE ${pmbConditions.join(' AND ')}`;
+      const { results: pmbRows } = await pmbDb.prepare(pmbQuery).bind(...pmbFilterValues).all();
+      for (const row of (pmbRows as any[])) {
+        const rm = row.ruang_tes;
+        if (!pmbRoomMap.has(rm)) pmbRoomMap.set(rm, new Set());
+        if (row.nisn) pmbRoomMap.get(rm)!.add(row.nisn);
+      }
+    } catch (e) {}
   }
 
   // 3. Fetch non-PMB roster & cbt_users students per room from CBT DB
-  let rosterSql = `SELECT r.room_id, r.nisn, rm.room_name
-                   FROM cbt_exam_roster r
-                   LEFT JOIN cbt_rooms rm ON rm.id = r.room_id
-                   WHERE (r.room_id IS NOT NULL OR rm.room_name IS NOT NULL)`;
-  const rosterParams: any[] = [];
-  if (eventId) {
-    rosterSql += ` AND r.event_id = ?`;
-    rosterParams.push(eventId);
-  }
-  const { results: rosterRows } = await c.env.DB.prepare(rosterSql).bind(...rosterParams).all();
-
   const rosterRoomCountMap = new Map<string, number>();
-  for (const row of (rosterRows as any[])) {
-    const key = row.room_id || row.room_name;
-    if (key) rosterRoomCountMap.set(key, (rosterRoomCountMap.get(key) || 0) + 1);
-  }
-
-  const { results: cbtStudentRows } = await c.env.DB.prepare(
-    "SELECT room_id, nisn FROM cbt_users WHERE role = 'student' AND room_id IS NOT NULL"
-  ).all();
+  try {
+    let rosterSql = `SELECT r.room_id, r.nisn, rm.room_name
+                     FROM cbt_exam_roster r
+                     LEFT JOIN cbt_rooms rm ON rm.id = r.room_id
+                     WHERE (r.room_id IS NOT NULL OR rm.room_name IS NOT NULL)`;
+    const rosterParams: any[] = [];
+    if (eventId) {
+      rosterSql += ` AND r.event_id = ?`;
+      rosterParams.push(eventId);
+    }
+    const { results: rosterRows } = await c.env.DB.prepare(rosterSql).bind(...rosterParams).all();
+    for (const row of (rosterRows as any[])) {
+      const key = row.room_id || row.room_name;
+      if (key) rosterRoomCountMap.set(key, (rosterRoomCountMap.get(key) || 0) + 1);
+    }
+  } catch (e) {}
 
   const cbtUserRoomCountMap = new Map<string, number>();
-  for (const row of (cbtStudentRows as any[])) {
-    const roomId = row.room_id;
-    const room = (rooms as any[]).find(r => r.id === roomId);
-    const pmbNisns = room ? pmbRoomMap.get(room.room_name) : null;
-    if (!row.nisn || !pmbNisns || !pmbNisns.has(row.nisn)) {
-      cbtUserRoomCountMap.set(roomId, (cbtUserRoomCountMap.get(roomId) || 0) + 1);
+  try {
+    const { results: cbtStudentRows } = await c.env.DB.prepare(
+      "SELECT room_id, nisn FROM cbt_users WHERE role = 'student' AND room_id IS NOT NULL"
+    ).all();
+    for (const row of (cbtStudentRows as any[])) {
+      const roomId = row.room_id;
+      const room = rooms.find(r => r.id === roomId);
+      const pmbNisns = room ? pmbRoomMap.get(room.room_name) : null;
+      if (!row.nisn || !pmbNisns || !pmbNisns.has(row.nisn)) {
+        cbtUserRoomCountMap.set(roomId, (cbtUserRoomCountMap.get(roomId) || 0) + 1);
+      }
     }
-  }
+  } catch (e) {}
 
-  const results = (rooms as any[]).map(r => {
+  const results = rooms.map(r => {
     const pmbCount = pmbRoomMap.get(r.room_name)?.size || 0;
     const rosterCount = rosterRoomCountMap.get(r.id) || rosterRoomCountMap.get(r.room_name) || 0;
     const cbtCount = cbtUserRoomCountMap.get(r.id) || 0;
@@ -106,6 +130,7 @@ admin.get('/rooms', async (c) => {
 
 // Sync ruangan dari data pendaftar — buat otomatis dari ruang_tes untuk event-pmb
 admin.post('/rooms/sync', async (c) => {
+  await ensureRoomEventColumn(c.env.DB);
   const pmbDb = getPmbDb(c.env);
   const pmbTable = getPmbTable(c.env);
   const { results: rooms } = await pmbDb.prepare(
@@ -118,8 +143,13 @@ admin.post('/rooms/sync', async (c) => {
       'SELECT id FROM cbt_rooms WHERE room_name = ?'
     ).bind(r.ruang_tes).first();
     if (!exists) {
-      await c.env.DB.prepare('INSERT INTO cbt_rooms (id, room_name, capacity, event_id) VALUES (?,?,40,?)')
-        .bind(newId(), r.ruang_tes, 'event-pmb').run();
+      try {
+        await c.env.DB.prepare('INSERT INTO cbt_rooms (id, room_name, capacity, event_id) VALUES (?,?,40,?)')
+          .bind(newId(), r.ruang_tes, 'event-pmb').run();
+      } catch (e) {
+        await c.env.DB.prepare('INSERT INTO cbt_rooms (id, room_name, capacity) VALUES (?,?,40)')
+          .bind(newId(), r.ruang_tes).run();
+      }
       created++;
     }
   }
@@ -127,38 +157,71 @@ admin.post('/rooms/sync', async (c) => {
 });
 
 admin.post('/rooms', async (c) => {
-  const { room_name, capacity, event_id } = await c.req.json();
-  const roomName = String(room_name || '').trim();
-  const roomCapacity = Math.max(1, Number(capacity || 40) || 40);
-  const roomEventId = event_id && String(event_id).trim() !== '' ? String(event_id).trim() : null;
-  if (!roomName) return c.json(err('Nama ruangan wajib diisi'), 400);
+  await ensureRoomEventColumn(c.env.DB);
+  try {
+    const { room_name, capacity, event_id } = await c.req.json();
+    const roomName = String(room_name || '').trim();
+    const roomCapacity = Math.max(1, Number(capacity || 40) || 40);
+    const roomEventId = event_id && String(event_id).trim() !== '' ? String(event_id).trim() : null;
+    if (!roomName) return c.json(err('Nama ruangan wajib diisi'), 400);
 
-  const exists = await c.env.DB.prepare(
-    'SELECT id FROM cbt_rooms WHERE LOWER(room_name) = LOWER(?) AND (event_id = ? OR (event_id IS NULL AND ? IS NULL))'
-  ).bind(roomName, roomEventId, roomEventId).first();
-  if (exists) return c.json(err('Nama ruangan sudah ada untuk kegiatan ini'), 409);
+    let exists = null;
+    try {
+      exists = await c.env.DB.prepare(
+        'SELECT id FROM cbt_rooms WHERE LOWER(room_name) = LOWER(?) AND (event_id = ? OR (event_id IS NULL AND ? IS NULL))'
+      ).bind(roomName, roomEventId, roomEventId).first();
+    } catch (e) {
+      exists = await c.env.DB.prepare('SELECT id FROM cbt_rooms WHERE LOWER(room_name) = LOWER(?)').bind(roomName).first();
+    }
 
-  const id = newId();
-  await c.env.DB.prepare('INSERT INTO cbt_rooms (id, room_name, capacity, event_id) VALUES (?,?,?,?)')
-    .bind(id, roomName, roomCapacity, roomEventId).run();
-  return c.json(ok({ id }, 'Ruangan ditambahkan'), 201);
+    if (exists) return c.json(err('Nama ruangan sudah ada untuk kegiatan ini'), 409);
+
+    const id = newId();
+    try {
+      await c.env.DB.prepare('INSERT INTO cbt_rooms (id, room_name, capacity, event_id) VALUES (?,?,?,?)')
+        .bind(id, roomName, roomCapacity, roomEventId).run();
+    } catch (e) {
+      await c.env.DB.prepare('INSERT INTO cbt_rooms (id, room_name, capacity) VALUES (?,?,?)')
+        .bind(id, roomName, roomCapacity).run();
+    }
+
+    return c.json(ok({ id }, 'Ruangan ditambahkan'), 201);
+  } catch (e: any) {
+    return c.json(err(e?.message || 'Gagal menambahkan ruangan'), 500);
+  }
 });
 
 admin.put('/rooms/:id', async (c) => {
-  const { room_name, capacity, event_id } = await c.req.json();
-  const roomName = String(room_name || '').trim();
-  const roomCapacity = Math.max(1, Number(capacity || 40) || 40);
-  const roomEventId = event_id && String(event_id).trim() !== '' ? String(event_id).trim() : null;
-  if (!roomName) return c.json(err('Nama ruangan wajib diisi'), 400);
+  await ensureRoomEventColumn(c.env.DB);
+  try {
+    const { room_name, capacity, event_id } = await c.req.json();
+    const roomName = String(room_name || '').trim();
+    const roomCapacity = Math.max(1, Number(capacity || 40) || 40);
+    const roomEventId = event_id && String(event_id).trim() !== '' ? String(event_id).trim() : null;
+    if (!roomName) return c.json(err('Nama ruangan wajib diisi'), 400);
 
-  const exists = await c.env.DB.prepare(
-    'SELECT id FROM cbt_rooms WHERE LOWER(room_name) = LOWER(?) AND id != ? AND (event_id = ? OR (event_id IS NULL AND ? IS NULL))'
-  ).bind(roomName, c.req.param('id'), roomEventId, roomEventId).first();
-  if (exists) return c.json(err('Nama ruangan sudah ada untuk kegiatan ini'), 409);
+    let exists = null;
+    try {
+      exists = await c.env.DB.prepare(
+        'SELECT id FROM cbt_rooms WHERE LOWER(room_name) = LOWER(?) AND id != ? AND (event_id = ? OR (event_id IS NULL AND ? IS NULL))'
+      ).bind(roomName, c.req.param('id'), roomEventId, roomEventId).first();
+    } catch (e) {
+      exists = await c.env.DB.prepare('SELECT id FROM cbt_rooms WHERE LOWER(room_name) = LOWER(?) AND id != ?')
+        .bind(roomName, c.req.param('id')).first();
+    }
+    if (exists) return c.json(err('Nama ruangan sudah ada untuk kegiatan ini'), 409);
 
-  await c.env.DB.prepare('UPDATE cbt_rooms SET room_name=?, capacity=?, event_id=? WHERE id=?')
-    .bind(roomName, roomCapacity, roomEventId, c.req.param('id')).run();
-  return c.json(ok(null, 'Ruangan diperbarui'));
+    try {
+      await c.env.DB.prepare('UPDATE cbt_rooms SET room_name=?, capacity=?, event_id=? WHERE id=?')
+        .bind(roomName, roomCapacity, roomEventId, c.req.param('id')).run();
+    } catch (e) {
+      await c.env.DB.prepare('UPDATE cbt_rooms SET room_name=?, capacity=? WHERE id=?')
+        .bind(roomName, roomCapacity, c.req.param('id')).run();
+    }
+    return c.json(ok(null, 'Ruangan diperbarui'));
+  } catch (e: any) {
+    return c.json(err(e?.message || 'Gagal memperbarui ruangan'), 500);
+  }
 });
 
 admin.delete('/rooms/:id', async (c) => {
@@ -243,6 +306,83 @@ admin.get('/users', async (c) => {
   }
 
   return c.json(ok(results));
+});
+
+admin.get('/gtk-users', async (c) => {
+  if (!c.env.MANSATAS_DB) {
+    return c.json(ok([]));
+  }
+  try {
+    const existingUsers = await c.env.DB.prepare(
+      `SELECT username FROM cbt_users UNION SELECT username FROM admins`
+    ).all();
+    const existingSet = new Set((existingUsers.results || []).map((x: any) => String(x.username || '').toLowerCase()));
+
+    let rows: any[] = [];
+    try {
+      const { results } = await c.env.MANSATAS_DB.prepare(`SELECT * FROM "user"`).all();
+      rows = results || [];
+    } catch (e) {
+      const { results } = await c.env.MANSATAS_DB.prepare(`SELECT * FROM users`).all();
+      rows = results || [];
+    }
+
+    const formatted = rows.map(u => {
+      const email = String(u.email || u.username || '').trim();
+      const name = String(u.nama || u.nama_lengkap || u.name || u.full_name || email).trim();
+      return {
+        id: u.id || email,
+        email: email,
+        nama_lengkap: name,
+        password: u.password || u.password_hash || null,
+        already_imported: existingSet.has(email.toLowerCase()),
+      };
+    }).filter(u => u.email && u.email.includes('@'));
+
+    return c.json(ok(formatted));
+  } catch (e: any) {
+    console.error('Error fetching GTK from MANSATAS_DB:', e);
+    return c.json(err(e?.message || 'Gagal mengambil data GTK dari MANSATAS App'), 500);
+  }
+});
+
+admin.post('/gtk-users/import', async (c) => {
+  const body = await c.req.json<{ users?: Array<{ email: string; name: string; role: 'proctor' | 'admin'; password?: string }> }>();
+  const users = body?.users || [];
+  if (!Array.isArray(users) || users.length === 0) {
+    return c.json(err('Pilih minimal 1 GTK untuk di-import'), 400);
+  }
+
+  let imported = 0;
+  for (const u of users) {
+    const email = String(u.email || '').trim().toLowerCase();
+    const name = String(u.name || u.email || '').trim();
+    const role = u.role === 'admin' ? 'admin' : 'proctor';
+    const pwdToHash = u.password || 'mansatas2026';
+
+    if (!email) continue;
+    const pwdHash = await hashPassword(pwdToHash);
+
+    if (role === 'admin') {
+      const exists = await c.env.DB.prepare('SELECT id FROM admins WHERE LOWER(username) = LOWER(?)').bind(email).first();
+      if (!exists) {
+        await c.env.DB.prepare(
+          'INSERT INTO admins (id, username, password, nama_lengkap) VALUES (?,?,?,?)'
+        ).bind(newId(), email, pwdHash, name).run();
+        imported++;
+      }
+    } else {
+      const exists = await c.env.DB.prepare('SELECT id FROM cbt_users WHERE LOWER(username) = LOWER(?)').bind(email).first();
+      if (!exists) {
+        await c.env.DB.prepare(
+          'INSERT INTO cbt_users (id, username, password_hash, nama_lengkap, role, is_active) VALUES (?,?,?,?,?,1)'
+        ).bind(newId(), email, pwdHash, name, 'proctor').run();
+        imported++;
+      }
+    }
+  }
+
+  return c.json(ok({ imported }, `${imported} akun GTK berhasil di-import`));
 });
 
 admin.post('/users', async (c) => {

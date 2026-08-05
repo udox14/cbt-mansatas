@@ -36,7 +36,7 @@ export interface Env {
 }
 
 export type Role = 'admin' | 'proctor' | 'student';
-export type UserSource = 'admins' | 'pendaftar' | 'cbt_user' | 'mansatas';
+export type UserSource = 'admins' | 'pendaftar' | 'cbt_user' | 'mansatas' | 'mansatas_gtk';
 
 export interface JWTPayload {
   sub: string;         // user id (TEXT)

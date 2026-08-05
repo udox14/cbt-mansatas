@@ -236,8 +236,39 @@ adminEvents.get('/events', async (c) => {
 
 adminEvents.get('/events/roster-map', async (c) => {
   const { results } = await c.env.DB.prepare(
-    `SELECT DISTINCT event_id, source_key, source_id, nisn FROM cbt_exam_roster WHERE event_id IS NOT NULL`
+    `SELECT DISTINCT r.event_id, r.source_key, r.source_id, r.username, r.nisn, r.full_name,
+                     r.class_name, r.grade, r.gender, r.room_id, rm.room_name, r.tanggal_tes, r.sesi_tes
+     FROM cbt_exam_roster r
+     LEFT JOIN cbt_rooms rm ON rm.id = r.room_id OR rm.room_name = r.room_id
+     WHERE r.event_id IS NOT NULL`
   ).all();
+  return c.json(ok(results));
+});
+
+adminEvents.get('/roster', async (c) => {
+  const roomId = c.req.query('room_id');
+  const eventId = c.req.query('event_id');
+  let sql = `SELECT DISTINCT r.id, r.event_id, r.source_key, r.source_id, r.username, r.nisn, r.full_name,
+                            r.class_name, r.grade, r.gender, r.room_id, COALESCE(rm.room_name, r.room_id) as room_name,
+                            r.tanggal_tes, r.sesi_tes, e.code as event_code, e.name as event_name
+             FROM cbt_exam_roster r
+             LEFT JOIN cbt_rooms rm ON rm.id = r.room_id OR rm.room_name = r.room_id
+             LEFT JOIN cbt_events e ON e.id = r.event_id`;
+  const conditions: string[] = [];
+  const params: any[] = [];
+  if (roomId) {
+    conditions.push(`(r.room_id = ? OR rm.room_name = ? OR rm.id = ?)`);
+    params.push(roomId, roomId, roomId);
+  }
+  if (eventId) {
+    conditions.push(`r.event_id = ?`);
+    params.push(eventId);
+  }
+  if (conditions.length > 0) {
+    sql += ` WHERE ` + conditions.join(' AND ');
+  }
+  sql += ` ORDER BY LOWER(r.full_name), r.nisn`;
+  const { results } = await c.env.DB.prepare(sql).bind(...params).all();
   return c.json(ok(results));
 });
 
