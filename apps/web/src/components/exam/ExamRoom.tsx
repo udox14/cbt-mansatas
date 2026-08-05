@@ -773,7 +773,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
       <header style={{ position: 'sticky', top: toasts.length > 0 ? 'auto' : 0, zIndex: 40, background: C.white, borderBottom: `1.5px solid ${C.border}` }}>
         <div style={{ padding: isDesktopLayout ? '14px 24px' : '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', maxWidth: isDesktopLayout ? '1400px' : '680px', margin: '0 auto' }}>
 
-          {isDesktopLayout ? (
+          {isWideLayout ? (
             <div style={{ fontSize: '15px', fontWeight: 800, color: C.text, letterSpacing: '0.02em', flex: 1 }}>
               {examName || 'Ujian Berlangsung'}
             </div>
