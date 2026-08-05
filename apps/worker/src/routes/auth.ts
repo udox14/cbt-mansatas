@@ -12,6 +12,7 @@ import { verifyPassword, ok, err } from '../utils/helpers';
 import { authMiddleware } from '../middleware/auth';
 import { checkRateLimit, resetRateLimit } from '../utils/ratelimit';
 import { findMansatasByCredentials } from '../services/participants';
+import { getPmbDb, getPmbTable } from '../utils/pmb';
 
 const auth = new Hono<{ Bindings: Env }>();
 const STAFF_SESSION_HOURS = 24 * 90; // 3 bulan untuk admin/proktor
@@ -72,11 +73,14 @@ auth.post('/login', async (c) => {
   } catch (e) {
     console.warn('mansatas-db login adapter belum siap:', e instanceof Error ? e.message : e);
   }
+  const pmbDb = getPmbDb(c.env);
+  const pmbTable = getPmbTable(c.env);
+
   const [preflightAdmin, preflightCbtUser, preflightPendaftar] = await Promise.all([
     c.env.DB.prepare('SELECT id, username, password, nama_lengkap FROM admins WHERE username = ?').bind(uname).first<any>(),
     c.env.DB.prepare('SELECT * FROM cbt_users WHERE username = ? AND is_active = 1').bind(uname).first<any>(),
-    c.env.DB.prepare(
-      'SELECT id, nisn, nama_lengkap, tanggal_lahir, ruang_tes, no_pendaftaran, jalur FROM pendaftar WHERE nisn = ?'
+    pmbDb.prepare(
+      `SELECT id, nisn, nama_lengkap, tanggal_lahir, ruang_tes, no_pendaftaran, jalur FROM ${pmbTable} WHERE nisn = ?`
     ).bind(uname).first<any>(),
   ]);
 
@@ -175,8 +179,8 @@ auth.post('/login', async (c) => {
   }
 
   // ── 3. Cek tabel pendaftar (PMB existing, login pakai NISN + tanggal lahir) ──
-  const pendaftar = await c.env.DB.prepare(
-    'SELECT id, nisn, nama_lengkap, tanggal_lahir, ruang_tes, no_pendaftaran, jalur FROM pendaftar WHERE nisn = ?'
+  const pendaftar = await pmbDb.prepare(
+    `SELECT id, nisn, nama_lengkap, tanggal_lahir, ruang_tes, no_pendaftaran, jalur FROM ${pmbTable} WHERE nisn = ?`
   ).bind(uname).first<any>();
 
   if (pendaftar) {

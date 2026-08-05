@@ -8,6 +8,7 @@ import { authMiddleware, requireRole } from '../middleware/auth';
 import { buildRandomMaps, newId, ok, err, now, parseSesiJam, cekJadwal } from '../utils/helpers';
 import { checkRateLimit } from '../utils/ratelimit';
 import { sourceToSessionUserType, sourceToRosterKey } from '../services/participants';
+import { getPmbDb, getPmbTable } from '../utils/pmb';
 
 const student = new Hono<{ Bindings: Env }>();
 student.use('*', authMiddleware, requireRole('student'));
@@ -54,8 +55,10 @@ student.get('/exams', async (c) => {
   const rosterByExam = new Map<string, { room_id: string | null; tanggal_tes: string; sesi_tes: string }>();
 
   if (userType === 'pendaftar') {
-    jadwalData = await c.env.DB.prepare(
-      'SELECT sesi_tes, tanggal_tes, jalur, ruang_tes FROM pendaftar WHERE id = ?'
+    const pmbDb = getPmbDb(c.env);
+    const pmbTable = getPmbTable(c.env);
+    jadwalData = await pmbDb.prepare(
+      `SELECT sesi_tes, tanggal_tes, jalur, ruang_tes FROM ${pmbTable} WHERE id = ?`
     ).bind(user.sub).first<any>() || null;
     studentRoom = jadwalData?.ruang_tes || null;
     studentSesi = jadwalData?.sesi_tes || null;
@@ -169,8 +172,10 @@ student.post('/exams/:examId/validate-token', async (c) => {
   let tanggalTes = '';
   let sesiTes = '';
   if (userType === 'pendaftar') {
-    const jadwal = await c.env.DB.prepare(
-      'SELECT sesi_tes, tanggal_tes FROM pendaftar WHERE id = ?'
+    const pmbDb = getPmbDb(c.env);
+    const pmbTable = getPmbTable(c.env);
+    const jadwal = await pmbDb.prepare(
+      `SELECT sesi_tes, tanggal_tes FROM ${pmbTable} WHERE id = ?`
     ).bind(user.sub).first<any>();
 
     if (jadwal?.sesi_tes && jadwal?.tanggal_tes) {
@@ -424,8 +429,10 @@ student.post('/sessions/:sessionId/heartbeat', async (c) => {
 
   // Cek jadwal untuk pendaftar — kalau waktu habis, kunci otomatis
   if (userType === 'pendaftar') {
-    const jadwal = await c.env.DB.prepare(
-      'SELECT sesi_tes, tanggal_tes FROM pendaftar WHERE id = ?'
+    const pmbDb = getPmbDb(c.env);
+    const pmbTable = getPmbTable(c.env);
+    const jadwal = await pmbDb.prepare(
+      `SELECT sesi_tes, tanggal_tes FROM ${pmbTable} WHERE id = ?`
     ).bind(user.sub).first<any>();
     if (jadwal?.sesi_tes && jadwal?.tanggal_tes) {
       const parsed = parseSesiJam(jadwal.sesi_tes);

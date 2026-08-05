@@ -6,58 +6,84 @@ import { Hono } from 'hono';
 import type { Env } from '../types';
 import { authMiddleware, requireRole } from '../middleware/auth';
 import { hashPassword, generateToken, newId, ok, err, now } from '../utils/helpers';
+import { getPmbDb, getPmbTable, EXCLUDE_JALUR_COND } from '../utils/pmb';
 
 const admin = new Hono<{ Bindings: Env }>();
 admin.use('*', authMiddleware, requireRole('admin'));
-
-// Jalur yang tidak ikut CBT — selalu dikecualikan dari semua query CBT
-const EXCLUDE_JALUR_COND = "UPPER(jalur) NOT LIKE '%PRESTASI%'";
 
 // ══════════════════════════════════════════════════════════════
 // ROOMS — auto-sync dari pendaftar.ruang_tes
 // ══════════════════════════════════════════════════════════════
 
 admin.get('/rooms', async (c) => {
+  const pmbDb = getPmbDb(c.env);
+  const pmbTable = getPmbTable(c.env);
   const tanggalTes = c.req.query('tanggal_tes');
   const sesiTes = c.req.query('sesi_tes');
+
   const pmbFilterValues: string[] = [];
-  const pmbCountConditions = [`p.ruang_tes = r.room_name`, EXCLUDE_JALUR_COND];
-  const pmbDedupConditions = [`p2.nisn = cu.nisn`, EXCLUDE_JALUR_COND];
+  const pmbConditions = [EXCLUDE_JALUR_COND, "ruang_tes IS NOT NULL AND ruang_tes != ''"];
   if (tanggalTes) {
-    pmbCountConditions.push('p.tanggal_tes = ?');
-    pmbDedupConditions.push('p2.tanggal_tes = ?');
+    pmbConditions.push('tanggal_tes = ?');
     pmbFilterValues.push(tanggalTes);
   }
   if (sesiTes) {
-    pmbCountConditions.push('p.sesi_tes = ?');
-    pmbDedupConditions.push('p2.sesi_tes = ?');
+    pmbConditions.push('sesi_tes = ?');
     pmbFilterValues.push(sesiTes);
   }
 
-  // Rooms + jumlah pendaftar non-Prestasi + proktor yang di-assign
-  const { results } = await c.env.DB.prepare(
+  // 1. Fetch rooms & proctors from CBT DB
+  const { results: rooms } = await c.env.DB.prepare(
     `SELECT r.*,
-       (
-         (SELECT COUNT(*) FROM pendaftar p WHERE ${pmbCountConditions.join(' AND ')})
-         +
-         (SELECT COUNT(*) FROM cbt_users cu
-          WHERE cu.room_id = r.id AND cu.role = 'student'
-            AND NOT EXISTS (
-              SELECT 1 FROM pendaftar p2
-              WHERE ${pmbDedupConditions.join(' AND ')}
-            ))
-       ) as jumlah_peserta,
        (SELECT GROUP_CONCAT(cu.nama_lengkap, ', ') FROM cbt_users cu WHERE cu.room_id = r.id AND cu.role = 'proctor') as proctor_names
      FROM cbt_rooms r ORDER BY r.room_name`
-  ).bind(...pmbFilterValues, ...pmbFilterValues).all();
+  ).all();
+
+  // 2. Fetch PMB candidates from PMB DB
+  const pmbQuery = `SELECT ruang_tes, nisn FROM ${pmbTable} WHERE ${pmbConditions.join(' AND ')}`;
+  const { results: pmbRows } = await pmbDb.prepare(pmbQuery).bind(...pmbFilterValues).all();
+
+  const pmbRoomMap = new Map<string, Set<string>>();
+  for (const row of (pmbRows as any[])) {
+    const rm = row.ruang_tes;
+    if (!pmbRoomMap.has(rm)) pmbRoomMap.set(rm, new Set());
+    if (row.nisn) pmbRoomMap.get(rm)!.add(row.nisn);
+  }
+
+  // 3. Fetch cbt_users students per room from CBT DB
+  const { results: cbtStudentRows } = await c.env.DB.prepare(
+    "SELECT room_id, nisn FROM cbt_users WHERE role = 'student' AND room_id IS NOT NULL"
+  ).all();
+
+  const cbtUserRoomCountMap = new Map<string, number>();
+  for (const row of (cbtStudentRows as any[])) {
+    const roomId = row.room_id;
+    const room = (rooms as any[]).find(r => r.id === roomId);
+    const pmbNisns = room ? pmbRoomMap.get(room.room_name) : null;
+    if (!row.nisn || !pmbNisns || !pmbNisns.has(row.nisn)) {
+      cbtUserRoomCountMap.set(roomId, (cbtUserRoomCountMap.get(roomId) || 0) + 1);
+    }
+  }
+
+  const results = (rooms as any[]).map(r => {
+    const pmbCount = pmbRoomMap.get(r.room_name)?.size || 0;
+    const cbtCount = cbtUserRoomCountMap.get(r.id) || 0;
+    return {
+      ...r,
+      jumlah_peserta: pmbCount + cbtCount,
+    };
+  });
+
   return c.json(ok(results));
 });
 
 // Sync ruangan dari data pendaftar — buat otomatis dari ruang_tes
 admin.post('/rooms/sync', async (c) => {
+  const pmbDb = getPmbDb(c.env);
+  const pmbTable = getPmbTable(c.env);
   // Ambil semua ruang_tes unik dari pendaftar — excludes jalur Prestasi
-  const { results: rooms } = await c.env.DB.prepare(
-    `SELECT DISTINCT ruang_tes FROM pendaftar WHERE ruang_tes IS NOT NULL AND ruang_tes != '' AND ${EXCLUDE_JALUR_COND} ORDER BY ruang_tes`
+  const { results: rooms } = await pmbDb.prepare(
+    `SELECT DISTINCT ruang_tes FROM ${pmbTable} WHERE ruang_tes IS NOT NULL AND ruang_tes != '' AND ${EXCLUDE_JALUR_COND} ORDER BY ruang_tes`
   ).all();
 
   let created = 0;
@@ -115,9 +141,12 @@ admin.delete('/rooms/:id', async (c) => {
     return c.json(err('Ruangan tidak bisa dihapus karena sudah memiliki sesi ujian'), 400);
   }
 
+  const pmbDb = getPmbDb(c.env);
+  const pmbTable = getPmbTable(c.env);
+
+  await pmbDb.prepare(`UPDATE ${pmbTable} SET ruang_tes=NULL WHERE ruang_tes=?`).bind(room.room_name).run();
   await c.env.DB.batch([
     c.env.DB.prepare('UPDATE cbt_users SET room_id=NULL, updated_at=? WHERE room_id=?').bind(now(), room.id),
-    c.env.DB.prepare('UPDATE pendaftar SET ruang_tes=NULL WHERE ruang_tes=?').bind(room.room_name),
     c.env.DB.prepare('DELETE FROM cbt_exam_tokens WHERE room_id=?').bind(room.id),
     c.env.DB.prepare("DELETE FROM cbt_exam_assignments WHERE user_type='room' AND user_id=?").bind(room.room_name),
     c.env.DB.prepare('DELETE FROM cbt_rooms WHERE id=?').bind(room.id),
@@ -158,7 +187,6 @@ admin.get('/users', async (c) => {
   const role    = c.req.query('role');
   const room_id = c.req.query('room_id');
 
-  // Kalau filter role=admin, ambil dari tabel admins
   if (role === 'admin') {
     const { results } = await c.env.DB.prepare(
       `SELECT id, username, nama_lengkap as full_name, 'admin' as role, NULL as room_id, NULL as nisn, 1 as is_active FROM admins ORDER BY nama_lengkap`
@@ -166,7 +194,6 @@ admin.get('/users', async (c) => {
     return c.json(ok(results));
   }
 
-  // Selain itu ambil dari cbt_users
   let sql = `SELECT id, username, nama_lengkap as full_name, role, room_id, nisn, is_active, 'cbt_user' as source FROM cbt_users`;
   const conditions: string[] = [];
   const params: string[] = [];
@@ -176,7 +203,6 @@ admin.get('/users', async (c) => {
   sql += ' ORDER BY nama_lengkap';
   const { results } = await c.env.DB.prepare(sql).bind(...params).all();
 
-  // Kalau tidak ada filter role, tambahkan juga admin dari tabel admins
   if (!role) {
     const { results: admins } = await c.env.DB.prepare(
       `SELECT id, username, nama_lengkap as full_name, 'admin' as role, NULL as room_id, NULL as nisn, 1 as is_active FROM admins ORDER BY nama_lengkap`
@@ -196,10 +222,8 @@ admin.post('/users', async (c) => {
   if (password.length < 6) return c.json(err('Password minimal 6 karakter'), 400);
   try {
     const id = newId();
-    // ── C2: Semua password di-hash — termasuk admin ──
     const hash = await hashPassword(password);
     if (role === 'admin') {
-      // Admin disimpan ke tabel admins (tabel PMB existing) — PBKDF2 hash
       await c.env.DB.prepare(
         'INSERT INTO admins (id, username, password, nama_lengkap) VALUES (?,?,?,?)'
       ).bind(id, username, hash, nama).run();
@@ -244,7 +268,6 @@ admin.put('/users/:id', async (c) => {
   const body = await c.req.json();
   const nama = body.full_name || body.nama_lengkap;
   const id = c.req.param('id');
-  // ── C2: Hash password pada update juga ──
   if (body.role === 'admin') {
     let sql = 'UPDATE admins SET nama_lengkap=?';
     const params: any[] = [nama];
@@ -279,10 +302,12 @@ admin.delete('/users/:id', async (c) => {
 });
 
 // ══════════════════════════════════════════════════════════════
-// PENDAFTAR PMB (read-only dari tabel existing)
+// PENDAFTAR PMB (read-only dari mansatas-db pmb_pendaftar)
 // ══════════════════════════════════════════════════════════════
 
 admin.get('/pendaftar', async (c) => {
+  const pmbDb = getPmbDb(c.env);
+  const pmbTable = getPmbTable(c.env);
   const room  = c.req.query('ruang_tes');
   const jalur = c.req.query('jalur');
   const tanggalTes = c.req.query('tanggal_tes');
@@ -290,34 +315,34 @@ admin.get('/pendaftar', async (c) => {
   let sql = `SELECT id, nisn, nama_lengkap, no_pendaftaran, ruang_tes, jalur, asal_sekolah,
             jenis_kelamin, tanggal_lahir, tanggal_tes, sesi_tes,
             status_verifikasi, status_kelulusan
-     FROM pendaftar WHERE ${EXCLUDE_JALUR_COND}`;
+     FROM ${pmbTable} WHERE ${EXCLUDE_JALUR_COND}`;
   const params: string[] = [];
   if (room)  { sql += ' AND ruang_tes = ?'; params.push(room); }
   if (jalur) { sql += ' AND LOWER(jalur) = LOWER(?)'; params.push(jalur); }
   if (tanggalTes) { sql += ' AND tanggal_tes = ?'; params.push(tanggalTes); }
   if (sesiTes) { sql += ' AND sesi_tes = ?'; params.push(sesiTes); }
   sql += ' ORDER BY ruang_tes, nama_lengkap';
-  const { results } = await c.env.DB.prepare(sql).bind(...params).all();
+  const { results } = await pmbDb.prepare(sql).bind(...params).all();
   return c.json(ok(results));
 });
 
-// ── L4: Endpoint hapus pendaftar dinonaktifkan ──
-// Berbahaya karena menghapus data dari tabel PMB utama (shared database).
-// Gunakan dashboard PMB langsung jika benar-benar diperlukan.
 admin.delete('/pendaftar/:id', async (c) => {
   return c.json(err('Penghapusan peserta dinonaktifkan dari CBT untuk melindungi data PMB. Gunakan sistem PMB utama.'), 403);
 });
 
-// Update ruang_tes peserta pendaftar PMB
 admin.put('/pendaftar/:id/ruang', async (c) => {
+  const pmbDb = getPmbDb(c.env);
+  const pmbTable = getPmbTable(c.env);
   const { ruang_tes } = await c.req.json<{ ruang_tes: string | null }>();
-  await c.env.DB.prepare(
-    'UPDATE pendaftar SET ruang_tes = ? WHERE id = ?'
+  await pmbDb.prepare(
+    `UPDATE ${pmbTable} SET ruang_tes = ? WHERE id = ?`
   ).bind(ruang_tes || null, c.req.param('id')).run();
   return c.json(ok(null, 'Ruangan berhasil diperbarui'));
 });
 
 admin.post('/participants/assign-room', async (c) => {
+  const pmbDb = getPmbDb(c.env);
+  const pmbTable = getPmbTable(c.env);
   const { participants, ruang_tes } = await c.req.json<{
     participants?: { id: string; source: 'pmb' | 'manual' }[];
     ruang_tes?: string | null;
@@ -333,52 +358,69 @@ admin.post('/participants/assign-room', async (c) => {
     roomId = room.id;
   }
 
-  const pmbStmt = c.env.DB.prepare('UPDATE pendaftar SET ruang_tes = ? WHERE id = ?');
+  const pmbStmt = pmbDb.prepare(`UPDATE ${pmbTable} SET ruang_tes = ? WHERE id = ?`);
   const manualStmt = c.env.DB.prepare('UPDATE cbt_users SET room_id = ?, updated_at = ? WHERE id = ? AND role = ?');
-  const batch = participants.map(p => {
-    if (p.source === 'manual') return manualStmt.bind(roomId, now(), p.id, 'student');
-    return pmbStmt.bind(roomName, p.id);
-  });
-  for (let i = 0; i < batch.length; i += 100) await c.env.DB.batch(batch.slice(i, i + 100));
+
+  const pmbBatch: any[] = [];
+  const manualBatch: any[] = [];
+  for (const p of participants) {
+    if (p.source === 'manual') {
+      manualBatch.push(manualStmt.bind(roomId, now(), p.id, 'student'));
+    } else {
+      pmbBatch.push(pmbStmt.bind(roomName, p.id));
+    }
+  }
+
+  if (pmbBatch.length) {
+    for (let i = 0; i < pmbBatch.length; i += 100) await pmbDb.batch(pmbBatch.slice(i, i + 100));
+  }
+  if (manualBatch.length) {
+    for (let i = 0; i < manualBatch.length; i += 100) await c.env.DB.batch(manualBatch.slice(i, i + 100));
+  }
+
   return c.json(ok({ updated: participants.length }, `${participants.length} peserta berhasil di-assign`));
 });
 
-// Statistik pendaftar (exclude Prestasi)
 admin.get('/pendaftar/stats', async (c) => {
-  const { results } = await c.env.DB.prepare(
+  const pmbDb = getPmbDb(c.env);
+  const pmbTable = getPmbTable(c.env);
+  const { results } = await pmbDb.prepare(
     `SELECT
        COUNT(*) as total,
        COUNT(ruang_tes) as assigned_room,
        COUNT(DISTINCT ruang_tes) as total_rooms,
        COUNT(tanggal_tes) as has_schedule
-     FROM pendaftar WHERE ${EXCLUDE_JALUR_COND}`
+     FROM ${pmbTable} WHERE ${EXCLUDE_JALUR_COND}`
   ).first<any>();
   return c.json(ok(results));
 });
 
-// Daftar jalur unik dari pendaftar (exclude Prestasi)
 admin.get('/pendaftar/jalur', async (c) => {
-  const { results } = await c.env.DB.prepare(
-    `SELECT DISTINCT jalur FROM pendaftar WHERE jalur IS NOT NULL AND jalur != '' AND ${EXCLUDE_JALUR_COND} ORDER BY jalur`
+  const pmbDb = getPmbDb(c.env);
+  const pmbTable = getPmbTable(c.env);
+  const { results } = await pmbDb.prepare(
+    `SELECT DISTINCT jalur FROM ${pmbTable} WHERE jalur IS NOT NULL AND jalur != '' AND ${EXCLUDE_JALUR_COND} ORDER BY jalur`
   ).all();
   return c.json(ok(results.map((r: any) => r.jalur)));
 });
 
-// Daftar sesi unik dari pendaftar
 admin.get('/pendaftar/sesi', async (c) => {
-  const { results } = await c.env.DB.prepare(
-    `SELECT DISTINCT sesi_tes FROM pendaftar WHERE sesi_tes IS NOT NULL AND sesi_tes != '' ORDER BY sesi_tes`
+  const pmbDb = getPmbDb(c.env);
+  const pmbTable = getPmbTable(c.env);
+  const { results } = await pmbDb.prepare(
+    `SELECT DISTINCT sesi_tes FROM ${pmbTable} WHERE sesi_tes IS NOT NULL AND sesi_tes != '' ORDER BY sesi_tes`
   ).all();
   return c.json(ok(results.map((r: any) => r.sesi_tes)));
 });
 
-// Daftar kelompok tes unik (tanggal × sesi) dengan jumlah peserta — untuk bulk assign
 admin.get('/pendaftar/groups', async (c) => {
-  const { results } = await c.env.DB.prepare(
+  const pmbDb = getPmbDb(c.env);
+  const pmbTable = getPmbTable(c.env);
+  const { results } = await pmbDb.prepare(
     `SELECT tanggal_tes, sesi_tes,
        COUNT(*) as jumlah_peserta,
        GROUP_CONCAT(DISTINCT ruang_tes ORDER BY ruang_tes) as ruangan
-     FROM pendaftar
+     FROM ${pmbTable}
      WHERE tanggal_tes IS NOT NULL AND sesi_tes IS NOT NULL AND ${EXCLUDE_JALUR_COND}
      GROUP BY tanggal_tes, sesi_tes
      ORDER BY tanggal_tes, sesi_tes`
@@ -595,7 +637,10 @@ admin.delete('/questions/:id', async (c) => {
 // EXAM TOKENS
 // ══════════════════════════════════════════════════════════════
 
-async function getAssignedTokenTargets(db: D1Database, examId: string) {
+async function getAssignedTokenTargets(env: Env, examId: string) {
+  const db = env.DB;
+  const pmbDb = getPmbDb(env);
+  const pmbTable = getPmbTable(env);
   const targets = new Map<string, { room_id: string; tanggal_tes: string; sesi_tes: string }>();
   const add = (roomId?: string | null, tanggalTes?: string | null, sesiTes?: string | null) => {
     if (!roomId) return;
@@ -606,6 +651,10 @@ async function getAssignedTokenTargets(db: D1Database, examId: string) {
     };
     targets.set(`${target.room_id}|${target.tanggal_tes}|${target.sesi_tes}`, target);
   };
+
+  const { results: roomRows } = await db.prepare('SELECT id, room_name FROM cbt_rooms').all();
+  const roomNameToIdMap = new Map<string, string>();
+  for (const r of roomRows as any[]) roomNameToIdMap.set(r.room_name, r.id);
 
   const { results: rosterTargets } = await db.prepare(
     `SELECT DISTINCT room_id, tanggal_tes, sesi_tes
@@ -619,13 +668,13 @@ async function getAssignedTokenTargets(db: D1Database, examId: string) {
 
   for (const a of assignments as any[]) {
     if (a.user_type === 'pendaftar') {
-      const p = await db.prepare(
-        `SELECT p.ruang_tes, p.tanggal_tes, p.sesi_tes, r.id as room_id
-         FROM pendaftar p
-         LEFT JOIN cbt_rooms r ON r.room_name = p.ruang_tes
-         WHERE p.id=? AND ${EXCLUDE_JALUR_COND}`
+      const p = await pmbDb.prepare(
+        `SELECT ruang_tes, tanggal_tes, sesi_tes
+         FROM ${pmbTable}
+         WHERE id=? AND ${EXCLUDE_JALUR_COND}`
       ).bind(a.user_id).first<any>();
-      add(p?.room_id, p?.tanggal_tes, p?.sesi_tes);
+      const roomId = p?.ruang_tes ? roomNameToIdMap.get(p.ruang_tes) : null;
+      add(roomId, p?.tanggal_tes, p?.sesi_tes);
       continue;
     }
 
@@ -638,46 +687,49 @@ async function getAssignedTokenTargets(db: D1Database, examId: string) {
     }
 
     if (a.user_type === 'room') {
-      const room = await db.prepare('SELECT id, room_name FROM cbt_rooms WHERE room_name=?')
-        .bind(a.user_id).first<any>();
-      if (!room) continue;
-      const { results: groups } = await db.prepare(
+      const roomId = roomNameToIdMap.get(a.user_id);
+      if (!roomId) continue;
+      const { results: groups } = await pmbDb.prepare(
         `SELECT DISTINCT tanggal_tes, sesi_tes
-         FROM pendaftar
+         FROM ${pmbTable}
          WHERE ruang_tes=? AND tanggal_tes IS NOT NULL AND tanggal_tes != ''
            AND sesi_tes IS NOT NULL AND sesi_tes != ''
            AND ${EXCLUDE_JALUR_COND}`
-      ).bind(room.room_name).all();
-      for (const g of groups as any[]) add(room.id, g.tanggal_tes, g.sesi_tes);
+      ).bind(a.user_id).all();
+      for (const g of groups as any[]) add(roomId, g.tanggal_tes, g.sesi_tes);
       const manual = await db.prepare(
         "SELECT COUNT(*) as cnt FROM cbt_users WHERE room_id=? AND role='student' AND is_active=1"
-      ).bind(room.id).first<any>();
-      if ((manual?.cnt || 0) > 0) add(room.id, '', '');
+      ).bind(roomId).first<any>();
+      if ((manual?.cnt || 0) > 0) add(roomId, '', '');
       continue;
     }
 
     if (a.user_type === 'sesi') {
-      const { results: rows } = await db.prepare(
-        `SELECT DISTINCT r.id as room_id, p.tanggal_tes, p.sesi_tes
-         FROM pendaftar p
-         JOIN cbt_rooms r ON r.room_name = p.ruang_tes
-         WHERE p.sesi_tes=? AND p.tanggal_tes IS NOT NULL AND p.tanggal_tes != ''
+      const { results: rows } = await pmbDb.prepare(
+        `SELECT DISTINCT ruang_tes, tanggal_tes, sesi_tes
+         FROM ${pmbTable}
+         WHERE sesi_tes=? AND tanggal_tes IS NOT NULL AND tanggal_tes != ''
            AND ${EXCLUDE_JALUR_COND}`
       ).bind(a.user_id).all();
-      for (const row of rows as any[]) add(row.room_id, row.tanggal_tes, row.sesi_tes);
+      for (const row of rows as any[]) {
+        const rId = row.ruang_tes ? roomNameToIdMap.get(row.ruang_tes) : null;
+        add(rId, row.tanggal_tes, row.sesi_tes);
+      }
       continue;
     }
 
     if (a.user_type === 'tanggal_sesi') {
       const [tanggalTes, ...rest] = String(a.user_id).split('|');
       const sesiTes = rest.join('|');
-      const { results: rows } = await db.prepare(
-        `SELECT DISTINCT r.id as room_id, p.tanggal_tes, p.sesi_tes
-         FROM pendaftar p
-         JOIN cbt_rooms r ON r.room_name = p.ruang_tes
-         WHERE p.tanggal_tes=? AND p.sesi_tes=? AND ${EXCLUDE_JALUR_COND}`
+      const { results: rows } = await pmbDb.prepare(
+        `SELECT DISTINCT ruang_tes, tanggal_tes, sesi_tes
+         FROM ${pmbTable}
+         WHERE tanggal_tes=? AND sesi_tes=? AND ${EXCLUDE_JALUR_COND}`
       ).bind(tanggalTes, sesiTes).all();
-      for (const row of rows as any[]) add(row.room_id, row.tanggal_tes, row.sesi_tes);
+      for (const row of rows as any[]) {
+        const rId = row.ruang_tes ? roomNameToIdMap.get(row.ruang_tes) : null;
+        add(rId, row.tanggal_tes, row.sesi_tes);
+      }
     }
   }
 
@@ -686,7 +738,15 @@ async function getAssignedTokenTargets(db: D1Database, examId: string) {
   );
 }
 
-async function getAssignedResultParticipants(db: D1Database, examId: string) {
+async function getAssignedResultParticipants(env: Env, examId: string) {
+  const db = env.DB;
+  const pmbDb = getPmbDb(env);
+  const pmbTable = getPmbTable(env);
+
+  const { results: roomRows } = await db.prepare('SELECT id, room_name FROM cbt_rooms').all();
+  const roomNameToIdMap = new Map<string, string>();
+  for (const r of roomRows as any[]) roomNameToIdMap.set(r.room_name, r.id);
+
   const participants = new Map<string, any>();
   const add = (row?: any) => {
     if (!row?.user_id || !row?.user_type) return;
@@ -698,7 +758,7 @@ async function getAssignedResultParticipants(db: D1Database, examId: string) {
       username: row.username || row.nisn || '',
       asal_sekolah: row.asal_sekolah || '',
       pilihan_pesantren: row.pilihan_pesantren || '',
-      room_id: row.room_id || '',
+      room_id: row.room_id || (row.room_name ? roomNameToIdMap.get(row.room_name) || '' : ''),
       room_name: row.room_name || '',
       tanggal_tes: row.tanggal_tes || '',
       sesi_tes: row.sesi_tes || '',
@@ -706,9 +766,6 @@ async function getAssignedResultParticipants(db: D1Database, examId: string) {
   };
   const addAll = (rows: any[] = []) => rows.forEach(add);
 
-  // Roster snapshot is the authoritative participant list for new events.
-  // Legacy assignments are still expanded below so PMB history remains
-  // exportable without rewriting old rows.
   const { results: rosterRows } = await db.prepare(
     `SELECT r.source_id as user_id,
             CASE WHEN r.source_key = 'pmb' THEN 'pendaftar' ELSE r.source_key END as user_type,
@@ -721,13 +778,12 @@ async function getAssignedResultParticipants(db: D1Database, examId: string) {
   ).bind(examId).all();
   addAll(rosterRows as any[]);
 
-  const pendaftarSelect = `
+  const pendaftarSelectSql = `
     SELECT p.id as user_id, 'pendaftar' as user_type,
            p.nama_lengkap as full_name, p.nisn, p.nisn as username,
            p.asal_sekolah, p.pilihan_pesantren, p.tanggal_tes, p.sesi_tes,
-           r.id as room_id, COALESCE(p.ruang_tes, '') as room_name
-    FROM pendaftar p
-    LEFT JOIN cbt_rooms r ON r.room_name = p.ruang_tes
+           p.ruang_tes as room_name
+    FROM ${pmbTable} p
   `;
 
   const manualStudentSelect = `
@@ -745,8 +801,8 @@ async function getAssignedResultParticipants(db: D1Database, examId: string) {
 
   for (const assignment of assignments as any[]) {
     if (assignment.user_type === 'pendaftar') {
-      const row = await db.prepare(
-        `${pendaftarSelect}
+      const row = await pmbDb.prepare(
+        `${pendaftarSelectSql}
          WHERE p.id=? AND ${EXCLUDE_JALUR_COND}`
       ).bind(assignment.user_id).first<any>();
       add(row);
@@ -763,34 +819,30 @@ async function getAssignedResultParticipants(db: D1Database, examId: string) {
     }
 
     if (assignment.user_type === 'room') {
-      const { results: pendaftarRows } = await db.prepare(
-        `${pendaftarSelect}
+      const { results: pendaftarRows } = await pmbDb.prepare(
+        `${pendaftarSelectSql}
          WHERE p.ruang_tes=? AND ${EXCLUDE_JALUR_COND}
          ORDER BY p.nama_lengkap`
       ).bind(assignment.user_id).all();
       addAll(pendaftarRows as any[]);
 
-      const room = await db.prepare('SELECT id, room_name FROM cbt_rooms WHERE room_name=?')
-        .bind(assignment.user_id).first<any>();
+      const room = roomNameToIdMap.get(assignment.user_id);
       if (!room) continue;
 
+      const pmbNisnsInRoom = new Set((pendaftarRows as any[]).map(p => p.nisn).filter(Boolean));
       const { results: manualRows } = await db.prepare(
         `${manualStudentSelect}
          WHERE cu.room_id=? AND cu.role='student' AND cu.is_active=1
-           AND NOT EXISTS (
-             SELECT 1 FROM pendaftar p2
-             WHERE p2.nisn = cu.nisn AND p2.ruang_tes = r.room_name
-               AND UPPER(p2.jalur) NOT LIKE '%PRESTASI%'
-           )
          ORDER BY cu.nama_lengkap`
-      ).bind(room.id).all();
-      addAll(manualRows as any[]);
+      ).bind(room).all();
+      const filteredManual = (manualRows as any[]).filter(m => !m.nisn || !pmbNisnsInRoom.has(m.nisn));
+      addAll(filteredManual);
       continue;
     }
 
     if (assignment.user_type === 'sesi') {
-      const { results: rows } = await db.prepare(
-        `${pendaftarSelect}
+      const { results: rows } = await pmbDb.prepare(
+        `${pendaftarSelectSql}
          WHERE p.sesi_tes=? AND ${EXCLUDE_JALUR_COND}
          ORDER BY p.tanggal_tes, p.ruang_tes, p.nama_lengkap`
       ).bind(assignment.user_id).all();
@@ -801,8 +853,8 @@ async function getAssignedResultParticipants(db: D1Database, examId: string) {
     if (assignment.user_type === 'tanggal_sesi') {
       const [tanggalTes, ...rest] = String(assignment.user_id).split('|');
       const sesiTes = rest.join('|');
-      const { results: rows } = await db.prepare(
-        `${pendaftarSelect}
+      const { results: rows } = await pmbDb.prepare(
+        `${pendaftarSelectSql}
          WHERE p.tanggal_tes=? AND p.sesi_tes=? AND ${EXCLUDE_JALUR_COND}
          ORDER BY p.ruang_tes, p.nama_lengkap`
       ).bind(tanggalTes, sesiTes).all();
@@ -918,7 +970,7 @@ admin.post('/exams/:examId/tokens/generate', async (c) => {
     return c.json(ok({ generated: 1 }, 'Token berhasil digenerate ulang'));
   }
 
-  let targetRows = await getAssignedTokenTargets(c.env.DB, examId);
+  let targetRows = await getAssignedTokenTargets(c.env, examId);
   if (body.room_ids?.length) targetRows = targetRows.filter(t => body.room_ids!.includes(t.room_id));
   if (body.groups?.length) {
     const allowedGroups = new Set(body.groups.map(g => `${g.tanggal_tes || ''}|${g.sesi_tes || ''}`));
@@ -961,7 +1013,7 @@ admin.post('/exams/:examId/tokens/set-code', async (c) => {
     return c.json(err('Token manual harus 4-20 karakter, hanya huruf dan angka'), 400);
   }
 
-  const targetRows = await getAssignedTokenTargets(c.env.DB, examId);
+  const targetRows = await getAssignedTokenTargets(c.env, examId);
   if (!targetRows.length) {
     await c.env.DB.prepare('DELETE FROM cbt_exam_tokens WHERE exam_id=?').bind(examId).run();
     return c.json(err('Belum ada peserta/ruangan/sesi yang di-assign ke ujian ini'), 400);
@@ -1015,18 +1067,17 @@ admin.post('/upload', async (c) => {
 admin.get('/exams/:examId/results', async (c) => {
   const { results } = await c.env.DB.prepare(
     `SELECT er.*,
-       COALESCE(rr.full_name, p.nama_lengkap, cu.nama_lengkap) as full_name,
-       COALESCE(rr.nisn, p.nisn, cu.nisn) as nisn,
-       COALESCE(rr.username, p.nisn, cu.username) as username,
-       COALESCE(p.asal_sekolah, '') as asal_sekolah,
-       COALESCE(p.pilihan_pesantren, '') as pilihan_pesantren,
-       COALESCE(rr.sesi_tes, p.sesi_tes, '') as sesi_tes,
-       COALESCE(rr.tanggal_tes, p.tanggal_tes, '') as tanggal_tes,
+       COALESCE(rr.full_name, cu.nama_lengkap) as full_name,
+       COALESCE(rr.nisn, cu.nisn) as nisn,
+       COALESCE(rr.username, cu.username) as username,
+       '' as asal_sekolah,
+       '' as pilihan_pesantren,
+       COALESCE(rr.sesi_tes, '') as sesi_tes,
+       COALESCE(rr.tanggal_tes, '') as tanggal_tes,
        r.room_name
      FROM cbt_exam_results er
      JOIN cbt_exam_sessions es ON es.id = er.session_id
      JOIN cbt_rooms r ON r.id = es.room_id
-     LEFT JOIN pendaftar p ON er.user_id = p.id AND er.user_type = 'pendaftar'
      LEFT JOIN cbt_users cu ON er.user_id = cu.id AND er.user_type = 'cbt_user'
      LEFT JOIN cbt_exam_roster rr ON rr.exam_id = er.exam_id AND rr.source_id = er.user_id
        AND rr.source_key = CASE WHEN er.user_type = 'pendaftar' THEN 'pmb' ELSE er.user_type END
@@ -1038,7 +1089,7 @@ admin.get('/exams/:examId/results', async (c) => {
 
 admin.get('/exams/:examId/results-export', async (c) => {
   const examId = c.req.param('examId');
-  const participants = await getAssignedResultParticipants(c.env.DB, examId);
+  const participants = await getAssignedResultParticipants(c.env, examId);
 
   const { results: progressRows } = await c.env.DB.prepare(
     `SELECT es.id as session_id, es.user_id, es.user_type, es.status, es.is_time_locked,
@@ -1087,16 +1138,15 @@ admin.post('/exams/:examId/results/recompute-missing', async (c) => {
 admin.get('/exams/:examId/sessions', async (c) => {
   const { results } = await c.env.DB.prepare(
     `SELECT es.*,
-       COALESCE(rr.full_name, p.nama_lengkap, cu.nama_lengkap) as full_name,
-       COALESCE(rr.nisn, p.nisn, cu.nisn) as nisn,
-       COALESCE(rr.username, p.nisn, cu.username) as username,
-       COALESCE(rr.sesi_tes, p.sesi_tes, '') as sesi_tes,
-       COALESCE(rr.tanggal_tes, p.tanggal_tes, '') as tanggal_tes,
+       COALESCE(rr.full_name, cu.nama_lengkap) as full_name,
+       COALESCE(rr.nisn, cu.nisn) as nisn,
+       COALESCE(rr.username, cu.username) as username,
+       COALESCE(rr.sesi_tes, '') as sesi_tes,
+       COALESCE(rr.tanggal_tes, '') as tanggal_tes,
        r.room_name,
        COALESCE(cl.cheat_log_count, 0) as cheat_log_count
      FROM cbt_exam_sessions es
      JOIN cbt_rooms r ON r.id = es.room_id
-     LEFT JOIN pendaftar p ON es.user_id = p.id AND es.user_type = 'pendaftar'
      LEFT JOIN cbt_users cu ON es.user_id = cu.id AND es.user_type = 'cbt_user'
      LEFT JOIN cbt_exam_roster rr ON rr.exam_id = es.exam_id AND rr.source_id = es.user_id
        AND rr.source_key = CASE WHEN es.user_type = 'pendaftar' THEN 'pmb' ELSE es.user_type END
@@ -1140,12 +1190,11 @@ admin.get('/exams/:examId/question-analytics', async (c) => {
             es.started_at,
             COALESCE(es.finished_at, es.last_heartbeat) as ended_at,
             r.room_name,
-            COALESCE(rr.tanggal_tes, p.tanggal_tes, '') as tanggal_tes,
-            COALESCE(rr.sesi_tes, p.sesi_tes, '') as sesi_tes
+            COALESCE(rr.tanggal_tes, '') as tanggal_tes,
+            COALESCE(rr.sesi_tes, '') as sesi_tes
      FROM cbt_questions q
      JOIN cbt_exam_sessions es ON es.exam_id = q.exam_id
      JOIN cbt_rooms r ON r.id = es.room_id
-     LEFT JOIN pendaftar p ON es.user_id = p.id AND es.user_type = 'pendaftar'
      LEFT JOIN cbt_exam_roster rr ON rr.exam_id = es.exam_id AND rr.source_id = es.user_id
        AND rr.source_key = CASE WHEN es.user_type = 'pendaftar' THEN 'pmb' ELSE es.user_type END
      LEFT JOIN cbt_student_answers a ON a.session_id = es.id AND a.question_id = q.id
@@ -1159,8 +1208,10 @@ admin.get('/exams/:examId/question-analytics', async (c) => {
 
 // Update jalur peserta pendaftar
 admin.put('/pendaftar/:id/jalur', async (c) => {
+  const pmbDb = getPmbDb(c.env);
+  const pmbTable = getPmbTable(c.env);
   const { jalur } = await c.req.json<{ jalur: string }>();
-  await c.env.DB.prepare('UPDATE pendaftar SET jalur = ? WHERE id = ?').bind(jalur, c.req.param('id')).run();
+  await pmbDb.prepare(`UPDATE ${pmbTable} SET jalur = ? WHERE id = ?`).bind(jalur, c.req.param('id')).run();
   return c.json(ok(null, 'Jalur berhasil diperbarui'));
 });
 
@@ -1187,7 +1238,6 @@ admin.put('/settings', async (c) => {
 // ══════════════════════════════════════════════════════════════
 // EXAM ASSIGNMENTS — assign ujian ke peserta, ruangan, atau sesi
 // ══════════════════════════════════════════════════════════════
-
 admin.get('/exams/:examId/assignments', async (c) => {
   const { results } = await c.env.DB.prepare(
     `SELECT ea.*,

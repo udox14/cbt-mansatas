@@ -13,6 +13,7 @@ import {
   type ParticipantSourceKey,
   MansatasConfigError,
 } from '../services/participants';
+import { getPmbDb, getPmbTable } from '../utils/pmb';
 
 const adminEvents = new Hono<{ Bindings: Env }>();
 adminEvents.use('*', authMiddleware, requireRole('admin'));
@@ -106,6 +107,7 @@ function normalizeCbtUser(row: any): NormalizedParticipant {
 
 async function listPmbParticipants(
   db: D1Database,
+  tableName: string,
   filters: ExtendedFilters,
   ids?: string[],
 ): Promise<{ items: NormalizedParticipant[]; total: number }> {
@@ -141,11 +143,11 @@ async function listPmbParticipants(
       `SELECT id AS source_id, nisn AS username, nisn, nama_lengkap AS full_name,
               jenis_kelamin AS gender, ruang_tes AS room_name, tanggal_tes, sesi_tes,
               no_pendaftaran, jalur, asal_sekolah
-       FROM pendaftar${whereSql}
+       FROM ${tableName}${whereSql}
        ORDER BY LOWER(COALESCE(nama_lengkap, '')), nisn
        LIMIT ? OFFSET ?`
     ).bind(...params, pageSize, (page - 1) * pageSize).all(),
-    db.prepare(`SELECT COUNT(*) AS total FROM pendaftar${whereSql}`).bind(...params).first<any>(),
+    db.prepare(`SELECT COUNT(*) AS total FROM ${tableName}${whereSql}`).bind(...params).first<any>(),
   ]);
   return {
     items: (rows.results as any[]).map(normalizePmb),
@@ -198,7 +200,7 @@ async function listSourceParticipants(
   if (source === 'mansatas') {
     return listMansatasParticipants(c.env, filters, { ids, max: 5000 });
   }
-  if (source === 'pmb') return listPmbParticipants(c.env.DB, filters, ids);
+  if (source === 'pmb') return listPmbParticipants(getPmbDb(c.env), getPmbTable(c.env), filters, ids);
   return listCbtUsers(c.env.DB, filters, ids);
 }
 
@@ -231,6 +233,14 @@ adminEvents.get('/events', async (c) => {
   ).all();
   return c.json(ok(results));
 });
+
+adminEvents.get('/events/roster-map', async (c) => {
+  const { results } = await c.env.DB.prepare(
+    `SELECT DISTINCT event_id, source_key, source_id, nisn FROM cbt_exam_roster WHERE event_id IS NOT NULL`
+  ).all();
+  return c.json(ok(results));
+});
+
 
 adminEvents.post('/events', async (c) => {
   const body = await c.req.json<any>();

@@ -2354,6 +2354,7 @@ function PesertaPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterEventId, setFilterEventId] = useState('ALL');
   const [allEvents, setAllEvents] = useState<CbtEvent[]>([]);
+  const [rosterMap, setRosterMap] = useState<{ event_id: string; source_key: string; source_id: string; nisn?: string }[]>([]);
 
   const savePeserta = async () => {
     if (!editPeserta?.nisn || !editPeserta?.nama_lengkap) { toast('error', 'NISN dan nama wajib diisi'); return; }
@@ -2442,19 +2443,21 @@ function PesertaPage() {
   };
 
   const fetchPeserta = useCallback(async () => {
-    // Ambil dari semua sumber: semua pendaftar PMB + cbt_users (role student) + jalur list + events
-    const [pmb, manual, rooms, jalur, events] = await Promise.all([
+    // Ambil dari semua sumber: semua pendaftar PMB + cbt_users (role student) + jalur list + events + roster map
+    const [pmb, manual, rooms, jalur, events, roster] = await Promise.all([
       GET<Pendaftar[]>('/api/admin/pendaftar'),
       GET<any[]>('/api/admin/users?role=student'),
       GET<Room[]>('/api/admin/rooms'),
       GET<string[]>('/api/admin/pendaftar/jalur'),
       GET<CbtEvent[]>('/api/admin/events'),
+      GET<any[]>('/api/admin/events/roster-map'),
     ]);
     const pmbData: Pendaftar[] = pmb.success ? (pmb.data || []) : [];
     const roomList = rooms.success ? (rooms.data || []) : [];
     if (rooms.success) setAllRooms(roomList);
     if (jalur.success) setAllJalur(jalur.data || []);
     if (events.success) setAllEvents(events.data || []);
+    if (roster.success) setRosterMap(roster.data || []);
     // Map cbt_users student ke format Pendaftar
     const manualData: Pendaftar[] = (manual.success ? (manual.data || []) : []).map((u: any) => ({
       id: u.id, nisn: u.nisn || u.username, nama_lengkap: u.full_name,
@@ -2472,6 +2475,20 @@ function PesertaPage() {
     setLoading(false);
   }, []);
   useEffect(() => { fetchPeserta(); }, [fetchPeserta]);
+
+  const isParticipantInEvent = useCallback((p: any, ev: CbtEvent) => {
+    // Check if participant is explicitly in event roster
+    const inRoster = rosterMap.some(r => r.event_id === ev.id && (
+      (r.source_id && r.source_id === p.id) ||
+      (r.nisn && p.nisn && r.nisn === p.nisn)
+    ));
+    if (inRoster) return true;
+    // Fallback: If it's the primary PMB event, include PMB source participants
+    if (ev.id === 'event-pmb' || ev.code === 'PMB') {
+      return p._sumber === 'pmb';
+    }
+    return false;
+  }, [rosterMap]);
 
   // derive filter options from data
   const roomOpts = Array.from(new Set(data.map((p: any) => p.ruang_tes).filter(Boolean))).sort() as string[];
@@ -2499,10 +2516,7 @@ function PesertaPage() {
     // Event filter
     if (filterEventId !== 'ALL') {
       const ev = allEvents.find(e => e.id === filterEventId);
-      if (ev) {
-        if (ev.participant_source === 'pmb' && p._sumber !== 'pmb') return false;
-        if (ev.participant_source === 'cbt_user' && p._sumber !== 'manual') return false;
-      }
+      if (ev && !isParticipantInEvent(p, ev)) return false;
     }
     // Room filter (supports '__NONE__' for participants without room)
     if (filterRoom === '__NONE__') {
@@ -2605,11 +2619,7 @@ function PesertaPage() {
         </button>
         {allEvents.map(ev => {
           const isSelected = filterEventId === ev.id;
-          const count = data.filter((p: any) => {
-            if (ev.participant_source === 'pmb') return p._sumber === 'pmb';
-            if (ev.participant_source === 'cbt_user') return p._sumber === 'manual';
-            return true;
-          }).length;
+          const count = data.filter((p: any) => isParticipantInEvent(p, ev)).length;
           return (
             <button key={ev.id} type="button" onClick={() => setFilterEventId(ev.id)}
               style={{
