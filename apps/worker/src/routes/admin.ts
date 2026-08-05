@@ -1307,6 +1307,60 @@ admin.post('/exams/:examId/results/recompute-missing', async (c) => {
     : 'Tidak ada hasil hilang yang perlu dipulihkan'));
 });
 
+// Hapus hasil ujian per-sesi (dapat digunakan untuk reset hasil ujian peserta / dummy)
+admin.delete('/exams/:examId/results/:sessionId', async (c) => {
+  const examId = c.req.param('examId');
+  const sessionId = c.req.param('sessionId');
+  
+  await c.env.DB.prepare('DELETE FROM cbt_student_answers WHERE session_id = ?').bind(sessionId).run();
+  await c.env.DB.prepare('DELETE FROM cbt_exam_results WHERE session_id = ?').bind(sessionId).run();
+  await c.env.DB.prepare('DELETE FROM cbt_cheat_logs WHERE session_id = ?').bind(sessionId).run();
+  await c.env.DB.prepare('DELETE FROM cbt_exam_sessions WHERE id = ? AND exam_id = ?').bind(sessionId, examId).run();
+
+  return c.json(ok(null, 'Hasil pengerjaan peserta berhasil dihapus'));
+});
+
+// Kelola Akun Dummy Peserta
+admin.post('/dummy-user/setup', async (c) => {
+  const body = (await c.req.json<any>().catch(() => ({}))) || {};
+  const username = String(body.username || 'percobaan').trim().toLowerCase();
+  const password = String(body.password || 'percobaan1234').trim();
+  const fullName = String(body.full_name || 'EL PERCOBAAN').trim();
+
+  const pwdHash = await hashPassword(password);
+  const existing = await c.env.DB.prepare('SELECT id FROM cbt_users WHERE LOWER(username) = LOWER(?)').bind(username).first<any>();
+
+  if (existing) {
+    await c.env.DB.prepare(
+      'UPDATE cbt_users SET password_hash=?, nama_lengkap=?, is_active=1, updated_at=? WHERE id=?'
+    ).bind(pwdHash, fullName, now(), existing.id).run();
+  } else {
+    await c.env.DB.prepare(
+      'INSERT INTO cbt_users (id, username, password_hash, nama_lengkap, role, is_active) VALUES (?,?,?,?,?,1)'
+    ).bind(newId(), username, pwdHash, fullName, 'student').run();
+  }
+
+  return c.json(ok({ username, password, full_name: fullName }, `Akun percobaan "${username}" berhasil disiapkan`));
+});
+
+admin.post('/dummy-user/reset-all', async (c) => {
+  const dummyUsers = await c.env.DB.prepare("SELECT id FROM cbt_users WHERE LOWER(username) LIKE 'percobaan%' OR LOWER(username) LIKE 'dummy%'").all();
+  const ids = (dummyUsers.results || []).map((u: any) => u.id);
+  if (!ids.length) return c.json(ok({ reset: 0 }, 'Tidak ada akun dummy'));
+
+  for (const id of ids) {
+    const sessions = await c.env.DB.prepare("SELECT id FROM cbt_exam_sessions WHERE user_id = ?").bind(id).all();
+    for (const s of (sessions.results || [])) {
+      await c.env.DB.prepare('DELETE FROM cbt_student_answers WHERE session_id = ?').bind(s.id).run();
+      await c.env.DB.prepare('DELETE FROM cbt_exam_results WHERE session_id = ?').bind(s.id).run();
+      await c.env.DB.prepare('DELETE FROM cbt_cheat_logs WHERE session_id = ?').bind(s.id).run();
+    }
+    await c.env.DB.prepare('DELETE FROM cbt_exam_sessions WHERE user_id = ?').bind(id).run();
+  }
+
+  return c.json(ok(null, 'Seluruh data percobaan akun dummy berhasil dibersihkan'));
+});
+
 admin.get('/exams/:examId/sessions', async (c) => {
   const { results } = await c.env.DB.prepare(
     `SELECT es.*,

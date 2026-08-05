@@ -1215,6 +1215,18 @@ function ResultsView({ examId }: { examId: string }) {
   useEffect(() => {
     return fetchResults();
   }, [fetchResults]);
+
+  const deleteResultSession = async (sessionId: string, studentName: string) => {
+    if (!confirm(`Hapus hasil pengerjaan "${studentName}"? Data nilai dan jawaban akan dibersihkan.`)) return;
+    const res = await DEL(`/api/admin/exams/${examId}/results/${sessionId}`);
+    if (res.success) {
+      toast('success', res.message || 'Hasil berhasil dihapus');
+      fetchResults();
+    } else {
+      toast('error', res.error || 'Gagal menghapus hasil');
+    }
+  };
+
   const filterSource = exportRows.length ? exportRows : results;
   const rooms = Array.from(new Set(filterSource.map((r: any) => r.room_name).filter(Boolean))).sort();
   const sessionOptions = buildSessionFilters(filterSource);
@@ -1236,6 +1248,7 @@ function ResultsView({ examId }: { examId: string }) {
     { key: 'total_correct', label: 'Benar', center: true },
     { key: 'total_wrong', label: 'Salah', center: true },
     { key: 'score', label: 'Nilai', center: true },
+    { key: 'actions', label: 'Aksi', center: true },
   ];
   const getSortValue = (row: any, key: string) => {
     if (key === 'session') return sessionFilterLabel(row);
@@ -1343,6 +1356,13 @@ function ResultsView({ examId }: { examId: string }) {
                       <td style={{ padding: '10px 14px', textAlign: 'center', color: C.green, fontWeight: 700 }}>{r.total_correct}</td>
                       <td style={{ padding: '10px 14px', textAlign: 'center', color: '#dc2626', fontWeight: 700 }}>{r.total_wrong}</td>
                       <td style={{ padding: '10px 14px', textAlign: 'center', color: C.text, fontWeight: 900 }}>{r.score}</td>
+                      <td style={{ padding: '10px 14px', textAlign: 'center' }}>
+                        <button onClick={() => deleteResultSession(r.session_id, r.full_name)}
+                          title="Hapus Hasil Ujian"
+                          style={{ width: '26px', height: '26px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: '7px', background: '#fef2f2', border: '1.5px solid #fecaca', cursor: 'pointer', color: '#dc2626' }}>
+                          <Trash2 size={12} />
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -3727,6 +3747,22 @@ function PelaksanaPage() {
     if (r.success) { toast('success', 'Berhasil'); setEditUser(null); fetchData(); } else toast('error', r.error || 'Gagal');
   };
 
+  const setupDummy = async () => {
+    const inputName = prompt('Masukkan nama tampilan akun percobaan:', 'EL PERCOBAAN');
+    if (inputName === null) return;
+    const name = inputName.trim() || 'EL PERCOBAAN';
+    const r = await POST('/api/admin/dummy-user/setup', { username: 'percobaan', password: 'percobaan1234', full_name: name });
+    if (r.success) toast('success', r.message || `Akun percobaan "${name}" berhasil disiapkan (Username: percobaan / Password: percobaan1234)`);
+    else toast('error', r.error || 'Gagal menyiapkan akun percobaan');
+  };
+
+  const resetDummyAll = async () => {
+    if (!confirm('Bersihkan seluruh hasil pengerjaan akun percobaan?')) return;
+    const r = await POST('/api/admin/dummy-user/reset-all', {});
+    if (r.success) toast('success', r.message || 'Data percobaan berhasil dibersihkan');
+    else toast('error', r.error || 'Gagal membersihkan data percobaan');
+  };
+
   const del = async () => {
     if (!confirmDel) return;
     await DEL(`/api/admin/users/${confirmDel.id}`);
@@ -3749,6 +3785,8 @@ function PelaksanaPage() {
           <p style={{ color: C.textMuted, fontSize: '11px', marginTop: '1px' }}>{displayed.length} {tab} terdaftar</p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <Button variant="secondary" size="sm" onClick={setupDummy}>Setup Akun Percobaan</Button>
+          <Button variant="secondary" size="sm" onClick={resetDummyAll}>Reset Hasil Percobaan</Button>
           <Button variant="secondary" size="sm" onClick={openGtkModal}><Download size={13} /> Import dari MANSATAS App (GTK)</Button>
           <Button size="sm" onClick={() => setEditUser({ role: tab, is_active: 1 })}><Plus size={13} /> Tambah {tab === 'proktor' ? 'Proktor' : 'Admin'}</Button>
         </div>
