@@ -51,7 +51,7 @@ function WatermarkOverlay({ name, isDesktopLayout }: { name: string; isDesktopLa
         }}>
           <span style={{
             fontSize: isDesktopLayout ? '18px' : '11px',
-            fontWeight: 800,
+            fontWeight: 500,
             color: '#1a2e1a',
             letterSpacing: '0.08em',
             lineHeight: 1.6,
@@ -780,17 +780,19 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
           )}
 
           {/* timer pill */}
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0,
-            background: urgent ? '#fef2f2' : C.greenLight,
-            border: `1.5px solid ${urgent ? '#fecaca' : C.greenBorder}`,
-            padding: '6px 12px', borderRadius: '10px',
-          }}>
-            <Clock size={13} strokeWidth={2.5} color={urgent ? '#dc2626' : C.green} />
-            <span style={{ fontFamily: 'monospace', fontSize: '14px', fontWeight: 900, color: urgent ? '#dc2626' : C.text, letterSpacing: '0.05em' }}>
-              {String(mm).padStart(2, '0')}:{String(ss).padStart(2, '0')}
-            </span>
-          </div>
+          {!isDesktopLayout && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0,
+              background: urgent ? '#fef2f2' : C.greenLight,
+              border: `1.5px solid ${urgent ? '#fecaca' : C.greenBorder}`,
+              padding: '6px 12px', borderRadius: '10px',
+            }}>
+              <Clock size={13} strokeWidth={2.5} color={urgent ? '#dc2626' : C.green} />
+              <span style={{ fontFamily: 'monospace', fontSize: '14px', fontWeight: 900, color: urgent ? '#dc2626' : C.text, letterSpacing: '0.05em' }}>
+                {String(mm).padStart(2, '0')}:{String(ss).padStart(2, '0')}
+              </span>
+            </div>
+          )}
 
           {/* progress */}
           <div style={{ flex: 1, minWidth: 0, maxWidth: isDesktopLayout ? '400px' : 'none' }}>
@@ -836,9 +838,9 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
         {viewport === 'tablet' && navigatorOpen && <div className="exam-room-navigator-overlay" onClick={() => setNavigatorOpen(false)} />}
         {isDesktopLayout && (
           <aside className={`exam-room-navigator ${viewport === 'tablet' && navigatorOpen ? 'is-open' : ''}`} data-collapsed={leftCollapsed}>
-            <div className="exam-room-side-header" style={{ fontSize: '13px', padding: '12px 16px' }}>
-              <span>{viewport === 'tablet' ? 'Navigasi soal' : leftCollapsed ? 'Soal' : 'Navigasi soal'}</span>
-              <button onClick={() => viewport === 'tablet' ? setNavigatorOpen(false) : toggleLeftCollapsed()} aria-label={viewport === 'tablet' ? 'Tutup navigator' : 'Lipat navigator'} style={{ width: '32px', height: '32px', fontSize: '18px' }}>{viewport === 'tablet' ? '×' : leftCollapsed ? '›' : '‹'}</button>
+            <div className="exam-room-side-header" style={{ fontSize: '13px', padding: leftCollapsed ? '12px 0' : '12px 16px', justifyContent: leftCollapsed ? 'center' : 'space-between' }}>
+              {!leftCollapsed && <span>{viewport === 'tablet' ? 'Navigasi soal' : 'Navigasi soal'}</span>}
+              <button onClick={() => viewport === 'tablet' ? setNavigatorOpen(false) : toggleLeftCollapsed()} aria-label={viewport === 'tablet' ? 'Tutup navigator' : 'Lipat navigator'} style={{ width: '32px', height: '32px', fontSize: '18px', flexShrink: 0 }}>{viewport === 'tablet' ? '×' : leftCollapsed ? '›' : '‹'}</button>
             </div>
             <div className="exam-nav-content">
               <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', padding: '12px 16px', borderBottom: `1px solid ${C.borderLight}` }}>
@@ -943,14 +945,22 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
             </div>
           )}
         </div>
+
+        {/* NAVIGATION BUTTONS ON DESKTOP */}
+        {isWideLayout && (
+          <div style={{ display: 'flex', gap: '12px', marginTop: '24px' }}>
+            <button onClick={() => goTo(Math.max(0, current - 1))} disabled={current === 0 || isCheatLocked} style={{ flex: 1, padding: '16px', borderRadius: '16px', border: `1.5px solid ${C.borderMid}`, background: C.white, color: C.textMid, fontSize: '15px', fontWeight: 800, cursor: 'pointer', opacity: current === 0 || isCheatLocked ? 0.4 : 1, transition: 'all 0.2s', boxShadow: '0 4px 12px rgba(0,0,0,0.02)' }}>‹ Sebelumnya</button>
+            {isLast ? <button onClick={openSubmitConfirm} disabled={isCheatLocked} style={{ flex: 1, padding: '16px', borderRadius: '16px', border: 'none', background: '#1a5fa8', color: '#fff', fontSize: '15px', fontWeight: 900, cursor: 'pointer', opacity: isCheatLocked ? 0.45 : 1, transition: 'all 0.2s', boxShadow: '0 4px 12px rgba(26,95,168,0.2)' }}>Kirim ujian <Send size={15} style={{ display: 'inline', marginLeft: '6px' }} /></button> : <button onClick={() => goTo(current + 1)} disabled={isCheatLocked} style={{ flex: 1, padding: '16px', borderRadius: '16px', border: 'none', background: C.green, color: '#fff', fontSize: '15px', fontWeight: 900, cursor: 'pointer', opacity: isCheatLocked ? 0.45 : 1, transition: 'all 0.2s', boxShadow: '0 4px 12px rgba(45,122,79,0.2)' }}>Selanjutnya ›</button>}
+          </div>
+        )}
       </main>
 
       {/* ── FLOATING GRID BUTTON ── */}
         {isWideLayout && (
           <aside className="exam-room-status" data-collapsed={rightCollapsed}>
-            <div className="exam-room-side-header" style={{ fontSize: '13px', padding: '12px 16px' }}>
-              <span>{rightCollapsed ? 'Status' : 'Status ujian'}</span>
-              <button onClick={toggleRightCollapsed} aria-label="Lipat panel status" style={{ width: '32px', height: '32px', fontSize: '18px' }}>{rightCollapsed ? '‹' : '›'}</button>
+            <div className="exam-room-side-header" style={{ fontSize: '13px', padding: rightCollapsed ? '12px 0' : '12px 16px', justifyContent: rightCollapsed ? 'center' : 'space-between' }}>
+              {!rightCollapsed && <span>Status ujian</span>}
+              <button onClick={toggleRightCollapsed} aria-label="Lipat panel status" style={{ width: '32px', height: '32px', fontSize: '18px', flexShrink: 0 }}>{rightCollapsed ? '‹' : '›'}</button>
             </div>
             <div className="exam-status-content" style={{ padding: '20px' }}>
               <div style={{ background: urgent ? '#fef2f2' : C.greenLight, border: `1.5px solid ${urgent ? '#fecaca' : C.greenBorder}`, borderRadius: '16px', padding: '18px', textAlign: 'center', marginBottom: '16px' }}>
@@ -964,14 +974,10 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
                 <p style={{ color: C.textMuted, fontSize: '12px', marginTop: '12px' }}>{questions.length - answeredCount} soal belum dijawab · {doubtCount} ragu</p>
               </div>
               {cheatCount > 0 && <div style={{ background: '#fef2f2', border: '1.5px solid #fecaca', borderRadius: '12px', padding: '12px', color: '#dc2626', fontSize: '13px', fontWeight: 800, marginBottom: '16px' }}>⚠ Pelanggaran {cheatCount}/{cheatLimit}</div>}
-              <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+              <div style={{ display: 'flex', gap: '8px' }}>
                 <button onClick={() => changeFontSize(-2)} style={{ flex: 1, padding: '12px', borderRadius: '12px', border: `1.5px solid ${C.borderMid}`, background: C.bg, cursor: 'pointer', color: C.textMid, fontWeight: 800 }}><Minus size={16} /></button>
                 <button onClick={() => changeFontSize(2)} style={{ flex: 1, padding: '12px', borderRadius: '12px', border: `1.5px solid ${C.borderMid}`, background: C.bg, cursor: 'pointer', color: C.textMid, fontWeight: 800 }}><Plus size={16} /></button>
                 {enforceFullscreen && fullscreenSupported && !isFullscreen && <button onClick={enterFullscreen} title="Masuk fullscreen" style={{ flex: 1, padding: '12px', borderRadius: '12px', border: '1.5px solid #fde68a', background: '#fffbeb', cursor: 'pointer', display: 'flex', justifyContent: 'center' }}><Maximize size={16} color="#b45309" /></button>}
-              </div>
-              <div style={{ borderTop: `1.5px solid ${C.borderLight}`, paddingTop: '16px' }}>
-                <button onClick={() => goTo(Math.max(0, current - 1))} disabled={current === 0 || isCheatLocked} style={{ width: '100%', padding: '12px', marginBottom: '10px', borderRadius: '12px', border: `1.5px solid ${C.borderMid}`, background: C.bg, color: C.textMid, fontSize: '13px', fontWeight: 800, cursor: 'pointer', opacity: current === 0 || isCheatLocked ? 0.4 : 1 }}>‹ Sebelumnya</button>
-                {isLast ? <button onClick={openSubmitConfirm} disabled={isCheatLocked} style={{ width: '100%', padding: '14px', borderRadius: '12px', border: 'none', background: '#1a5fa8', color: '#fff', fontSize: '14px', fontWeight: 900, cursor: 'pointer', opacity: isCheatLocked ? 0.45 : 1 }}>Kirim ujian <Send size={15} style={{ display: 'inline', marginLeft: '6px' }} /></button> : <button onClick={() => goTo(current + 1)} disabled={isCheatLocked} style={{ width: '100%', padding: '14px', borderRadius: '12px', border: 'none', background: C.green, color: '#fff', fontSize: '14px', fontWeight: 900, cursor: 'pointer', opacity: isCheatLocked ? 0.45 : 1 }}>Selanjutnya ›</button>}
               </div>
             </div>
           </aside>
