@@ -14,8 +14,25 @@ import { isFullArabic } from '@/lib/rtl';
 import {
   ClipboardList, Users, School, Shield, LogOut, Menu, Layers,
   Plus, FileDown, RefreshCw, Pencil, Trash2, Upload,
-  Image, Volume2, X, UserPlus, ChevronLeft, ArrowRight, Settings, Power,
+  Image, Volume2, X, UserPlus, ChevronLeft, ArrowRight, Settings, Power, Sparkles, Search,
 } from 'lucide-react';
+
+const DEFAULT_RULES_TEMPLATE = `<ol>
+  <li>Berdoa sebelum memulai pengerjaan soal.</li>
+  <li>Kerjakan soal secara mandiri, jujur, dan tidak bekerja sama dengan peserta lain.</li>
+  <li>Dilarang membuka tab lain, berpindah aplikasi, atau mematikan mode layar penuh (fullscreen).</li>
+  <li>Perhatikan sisa waktu pengerjaan yang tertera pada layar.</li>
+  <li>Jika terjadi kendala teknis, segera hubungi pengawas atau proktor ujian.</li>
+</ol>`;
+
+const DEFAULT_COMPLETION_MESSAGE = `Terima kasih telah menyelesaikan ujian ini dengan jujur dan tertib.
+
+• Jawaban Anda telah tersimpan secara otomatis di sistem.
+• Harap tetap tenang dan duduk di tempat Anda.
+• Tunggu instruksi lebih lanjut dari pengawas sebelum meninggalkan ruangan.
+
+Semoga mendapatkan hasil yang terbaik!`;
+
 
 // ── TYPES ────────────────────────────────────────────────────
 interface Room { id: string; room_name: string; capacity: number; jumlah_peserta?: number }
@@ -264,6 +281,13 @@ function ExamsPage() {
   const [activeTab, setActiveTab] = useState<ExamTab>('soal');
   const [confirmDel, setConfirmDel] = useState<Exam | null>(null);
   const [jalurList, setJalurList] = useState<string[]>([]);
+  const [selectedEventId, setSelectedEventId] = useState<string>('ALL');
+
+  const filteredExams = useMemo(() => {
+    if (selectedEventId === 'ALL') return exams;
+    if (selectedEventId === 'NO_EVENT') return exams.filter(e => !e.event_id);
+    return exams.filter(e => e.event_id === selectedEventId);
+  }, [exams, selectedEventId]);
 
   const fetchExams = useCallback(async () => {
     const [r, j, e] = await Promise.all([
@@ -302,13 +326,21 @@ function ExamsPage() {
     fetchExams();
   };
   const openDetail = (exam: Exam) => { setSelectedExam(exam); setActiveTab('soal'); };
-  const openNewExam = () => setEditExam({
-    duration_minutes: 60,
-    active_status: 'draft',
-    event_id: events.find(e => e.id === 'event-pmb')?.id || events[0]?.id || '',
-    subject_name: '',
-    sequence_order: 1,
-  });
+  const openNewExam = () => {
+    const defaultEvId = (selectedEventId !== 'ALL' && selectedEventId !== 'NO_EVENT')
+      ? selectedEventId
+      : (events.find(e => e.id === 'event-pmb')?.id || events[0]?.id || '');
+
+    setEditExam({
+      duration_minutes: 60,
+      active_status: 'draft',
+      event_id: defaultEvId,
+      subject_name: '',
+      sequence_order: 1,
+      rules_text: DEFAULT_RULES_TEMPLATE,
+      completion_message: DEFAULT_COMPLETION_MESSAGE,
+    });
+  };
 
   if (selectedExam) return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
@@ -420,15 +452,39 @@ function ExamsPage() {
               </div>
               {editExam.target_jalur && <p style={{ color: C.textMuted, fontSize: '10.5px', marginTop: '4px' }}>Hanya peserta dengan jalur terpilih yang bisa melihat ujian ini.</p>}
             </div>
-            <div><label className="block text-xs font-medium text-gray-500 mb-1">Tata Tertib</label>
-              <RichEditor value={editExam.rules_text || ''} onChange={v => setEditExam({ ...editExam, rules_text: v })} minHeight={80} /></div>
-            <Textarea
-              label="Pesan Selesai"
-              value={editExam.completion_message || ''}
-              rows={5}
-              placeholder={'Contoh:\nTerima kasih sudah mengikuti ujian.\n- Tetap duduk di tempat\n- Tunggu instruksi proktor'}
-              onChange={e => setEditExam({ ...editExam, completion_message: e.target.value })}
-            />
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-medium text-gray-500">Tata Tertib</label>
+                <button
+                  type="button"
+                  onClick={() => setEditExam({ ...editExam, rules_text: DEFAULT_RULES_TEMPLATE })}
+                  className="text-[11px] font-semibold text-primary-600 hover:text-primary-700 hover:underline flex items-center gap-1 cursor-pointer"
+                  title="Gunakan template tata tertib bawaan"
+                >
+                  <Sparkles size={12} /> Isi Template Bawaan
+                </button>
+              </div>
+              <RichEditor value={editExam.rules_text || ''} onChange={v => setEditExam({ ...editExam, rules_text: v })} minHeight={80} />
+            </div>
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-medium text-gray-500">Pesan Selesai</label>
+                <button
+                  type="button"
+                  onClick={() => setEditExam({ ...editExam, completion_message: DEFAULT_COMPLETION_MESSAGE })}
+                  className="text-[11px] font-semibold text-primary-600 hover:text-primary-700 hover:underline flex items-center gap-1 cursor-pointer"
+                  title="Gunakan template pesan selesai bawaan"
+                >
+                  <Sparkles size={12} /> Isi Template Bawaan
+                </button>
+              </div>
+              <Textarea
+                value={editExam.completion_message || ''}
+                rows={5}
+                placeholder={'Contoh:\nTerima kasih sudah mengikuti ujian.\n- Tetap duduk di tempat\n- Tunggu instruksi proktor'}
+                onChange={e => setEditExam({ ...editExam, completion_message: e.target.value })}
+              />
+            </div>
             <div className="flex flex-wrap gap-4 text-xs text-gray-600">
               {[{ k: 'randomize_questions', l: 'Acak Soal' }, { k: 'randomize_options', l: 'Acak Opsi' }, { k: 'is_score_visible', l: 'Tampilkan Skor' }, { k: 'enforce_fullscreen', l: 'Wajib Fullscreen' }].map(c => (
                 <label key={c.k} className="flex items-center gap-1.5 cursor-pointer">
@@ -482,52 +538,107 @@ function ExamsPage() {
       <div style={{ background: C.white, borderBottom: `1.5px solid ${C.border}`, padding: '14px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
           <p style={{ color: C.text, fontSize: '15px', fontWeight: 800, letterSpacing: '-0.3px' }}>Daftar Ujian</p>
-          <p style={{ color: C.textMuted, fontSize: '11px', marginTop: '1px' }}>{exams.length} ujian terdaftar</p>
+          <p style={{ color: C.textMuted, fontSize: '11px', marginTop: '1px' }}>
+            {filteredExams.length} dari {exams.length} ujian terdaftar
+          </p>
         </div>
         <button onClick={openNewExam}
           style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: C.green, color: '#fff', fontSize: '12px', fontWeight: 700, padding: '8px 14px', borderRadius: '10px', border: 'none', cursor: 'pointer' }}>
           <Plus size={13} strokeWidth={2.5} /> Buat Ujian
         </button>
       </div>
+
+      {/* ── FILTER JENIS KEGIATAN ── */}
+      <div style={{ background: '#f8faf8', borderBottom: `1.5px solid ${C.border}`, padding: '10px 20px', display: 'flex', alignItems: 'center', gap: '8px', overflowX: 'auto' }}>
+        <span style={{ fontSize: '11px', fontWeight: 800, color: C.green, textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap', marginRight: '4px' }}>
+          Kegiatan:
+        </span>
+        <button type="button" onClick={() => setSelectedEventId('ALL')}
+          style={{
+            padding: '5px 12px', fontSize: '11.5px', fontWeight: 700, borderRadius: '999px', cursor: 'pointer', whiteSpace: 'nowrap',
+            border: `1.5px solid ${selectedEventId === 'ALL' ? C.green : C.borderMid}`,
+            background: selectedEventId === 'ALL' ? C.greenLight : C.white,
+            color: selectedEventId === 'ALL' ? C.green : C.textMuted,
+            transition: 'all 0.12s',
+          }}>
+          Semua Kegiatan ({exams.length})
+        </button>
+        {events.map(ev => {
+          const count = exams.filter(x => x.event_id === ev.id).length;
+          const isSelected = selectedEventId === ev.id;
+          return (
+            <button key={ev.id} type="button" onClick={() => setSelectedEventId(ev.id)}
+              style={{
+                padding: '5px 12px', fontSize: '11.5px', fontWeight: 700, borderRadius: '999px', cursor: 'pointer', whiteSpace: 'nowrap',
+                border: `1.5px solid ${isSelected ? C.green : C.borderMid}`,
+                background: isSelected ? C.greenLight : C.white,
+                color: isSelected ? C.green : C.textMuted,
+                transition: 'all 0.12s',
+              }}>
+              {ev.code} · {ev.name} ({count})
+            </button>
+          );
+        })}
+        {exams.some(x => !x.event_id) && (
+          <button type="button" onClick={() => setSelectedEventId('NO_EVENT')}
+            style={{
+              padding: '5px 12px', fontSize: '11.5px', fontWeight: 700, borderRadius: '999px', cursor: 'pointer', whiteSpace: 'nowrap',
+              border: `1.5px solid ${selectedEventId === 'NO_EVENT' ? C.green : C.borderMid}`,
+              background: selectedEventId === 'NO_EVENT' ? C.greenLight : C.white,
+              color: selectedEventId === 'NO_EVENT' ? C.green : C.textMuted,
+              transition: 'all 0.12s',
+            }}>
+            Tanpa Kegiatan ({exams.filter(x => !x.event_id).length})
+          </button>
+        )}
+      </div>
+
       <div style={{ flex: 1, padding: '16px 20px' }}>
         {loading ? <div className="py-12 text-center"><Spinner /></div>
-          : exams.length === 0 ? <EmptyState title="Belum ada ujian" />
-            : (
-              <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '16px', overflow: 'hidden' }}>
-                {exams.map((exam, i) => (
-                  <div key={exam.id} onClick={() => openDetail(exam)}
-                    style={{
-                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                      padding: '13px 18px',
-                      borderBottom: i < exams.length - 1 ? `1px solid ${C.borderLight}` : 'none',
-                      cursor: 'pointer', opacity: exam.active_status === 'finished' ? 0.65 : 1,
-                      transition: 'background 0.1s',
-                    }}
-                    onMouseEnter={e => (e.currentTarget.style.background = '#f9fbf9')}
-                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '3px' }}>
-                        <span style={{ color: exam.active_status === 'finished' ? '#6b7c6e' : C.text, fontSize: '13.5px', fontWeight: 800 }}>{exam.title}</span>
-                        <StatusBadge status={exam.active_status} />
-                      </div>
-                      <p style={{ color: C.green, fontSize: '10.5px', fontWeight: 800, marginBottom: '3px' }}>
-                        {exam.event_code || 'KEGIATAN'} · {exam.event_name || 'Belum terhubung'}
-                        {exam.subject_name ? ` · Mapel: ${exam.subject_name}` : ''}
-                        {exam.sequence_order ? ` · #${exam.sequence_order}` : ''}
-                      </p>
-                      <p style={{ color: exam.active_status === 'finished' ? C.textFaint : C.textMuted, fontSize: '11.5px' }}>
-                        {exam.duration_minutes} menit · {exam.question_count} soal
-                        {exam.randomize_questions ? ' · Acak soal' : ''}
-                        {exam.randomize_options ? ' · Acak opsi' : ''}
-                        {exam.is_score_visible ? ' · Skor tampil' : ''}
-                        {exam.target_jalur ? ` · ${exam.target_jalur}` : ''}
-                      </p>
+          : filteredExams.length === 0 ? (
+            <div className="py-10 text-center space-y-3 bg-white rounded-2xl border border-gray-200 p-6">
+              <EmptyState title="Belum ada ujian pada kegiatan ini" desc="Klik tombol di bawah untuk membuat ujian baru." />
+              <button onClick={openNewExam}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: C.green, color: '#fff', fontSize: '12px', fontWeight: 700, padding: '8px 14px', borderRadius: '10px', border: 'none', cursor: 'pointer' }}>
+                <Plus size={13} strokeWidth={2.5} /> Buat Ujian Baru
+              </button>
+            </div>
+          ) : (
+            <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '16px', overflow: 'hidden' }}>
+              {filteredExams.map((exam, i) => (
+                <div key={exam.id} onClick={() => openDetail(exam)}
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '13px 18px',
+                    borderBottom: i < filteredExams.length - 1 ? `1px solid ${C.borderLight}` : 'none',
+                    cursor: 'pointer', opacity: exam.active_status === 'finished' ? 0.65 : 1,
+                    transition: 'background 0.1s',
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.background = '#f9fbf9')}
+                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '3px' }}>
+                      <span style={{ color: exam.active_status === 'finished' ? '#6b7c6e' : C.text, fontSize: '13.5px', fontWeight: 800 }}>{exam.title}</span>
+                      <StatusBadge status={exam.active_status} />
                     </div>
-                    <ArrowRight size={15} strokeWidth={2} color={C.borderMid} />
+                    <p style={{ color: C.green, fontSize: '10.5px', fontWeight: 800, marginBottom: '3px' }}>
+                      {exam.event_code || 'KEGIATAN'} · {exam.event_name || 'Belum terhubung'}
+                      {exam.subject_name ? ` · Mapel: ${exam.subject_name}` : ''}
+                      {exam.sequence_order ? ` · #${exam.sequence_order}` : ''}
+                    </p>
+                    <p style={{ color: exam.active_status === 'finished' ? C.textFaint : C.textMuted, fontSize: '11.5px' }}>
+                      {exam.duration_minutes} menit · {exam.question_count} soal
+                      {exam.randomize_questions ? ' · Acak soal' : ''}
+                      {exam.randomize_options ? ' · Acak opsi' : ''}
+                      {exam.is_score_visible ? ' · Skor tampil' : ''}
+                      {exam.target_jalur ? ` · ${exam.target_jalur}` : ''}
+                    </p>
                   </div>
-                ))}
-              </div>
-            )}
+                  <ArrowRight size={15} strokeWidth={2} color={C.borderMid} />
+                </div>
+              ))}
+            </div>
+          )}
       </div>
       <Modal open={!!editExam} onClose={() => setEditExam(null)} title="Buat Ujian" size="lg">
         {editExam && (
@@ -2240,6 +2351,10 @@ function PesertaPage() {
   const [batchRoom, setBatchRoom] = useState('');
   const [savingBatchAssign, setSavingBatchAssign] = useState(false);
 
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterEventId, setFilterEventId] = useState('ALL');
+  const [allEvents, setAllEvents] = useState<CbtEvent[]>([]);
+
   const savePeserta = async () => {
     if (!editPeserta?.nisn || !editPeserta?.nama_lengkap) { toast('error', 'NISN dan nama wajib diisi'); return; }
     setSavingPeserta(true);
@@ -2327,17 +2442,19 @@ function PesertaPage() {
   };
 
   const fetchPeserta = useCallback(async () => {
-    // Ambil dari semua sumber: semua pendaftar PMB + cbt_users (role student) + jalur list
-    const [pmb, manual, rooms, jalur] = await Promise.all([
+    // Ambil dari semua sumber: semua pendaftar PMB + cbt_users (role student) + jalur list + events
+    const [pmb, manual, rooms, jalur, events] = await Promise.all([
       GET<Pendaftar[]>('/api/admin/pendaftar'),
       GET<any[]>('/api/admin/users?role=student'),
       GET<Room[]>('/api/admin/rooms'),
       GET<string[]>('/api/admin/pendaftar/jalur'),
+      GET<CbtEvent[]>('/api/admin/events'),
     ]);
     const pmbData: Pendaftar[] = pmb.success ? (pmb.data || []) : [];
     const roomList = rooms.success ? (rooms.data || []) : [];
     if (rooms.success) setAllRooms(roomList);
     if (jalur.success) setAllJalur(jalur.data || []);
+    if (events.success) setAllEvents(events.data || []);
     // Map cbt_users student ke format Pendaftar
     const manualData: Pendaftar[] = (manual.success ? (manual.data || []) : []).map((u: any) => ({
       id: u.id, nisn: u.nisn || u.username, nama_lengkap: u.full_name,
@@ -2370,7 +2487,29 @@ function PesertaPage() {
   const jalurOpts = Array.from(new Set(data.map((p: any) => p.jalur).filter(Boolean))).sort() as string[];
 
   const filtered = data.filter((p: any) => {
-    if (filterRoom && p.ruang_tes !== filterRoom) return false;
+    // Search query filter (nama, NISN, no pendaftaran, asal sekolah)
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      const matchName = (p.nama_lengkap || '').toLowerCase().includes(q);
+      const matchNisn = (p.nisn || '').toLowerCase().includes(q);
+      const matchNo = (p.no_pendaftaran || '').toLowerCase().includes(q);
+      const matchAsal = (p.asal_sekolah || '').toLowerCase().includes(q);
+      if (!matchName && !matchNisn && !matchNo && !matchAsal) return false;
+    }
+    // Event filter
+    if (filterEventId !== 'ALL') {
+      const ev = allEvents.find(e => e.id === filterEventId);
+      if (ev) {
+        if (ev.participant_source === 'pmb' && p._sumber !== 'pmb') return false;
+        if (ev.participant_source === 'cbt_user' && p._sumber !== 'manual') return false;
+      }
+    }
+    // Room filter (supports '__NONE__' for participants without room)
+    if (filterRoom === '__NONE__') {
+      if (p.ruang_tes) return false;
+    } else if (filterRoom && p.ruang_tes !== filterRoom) {
+      return false;
+    }
     if (filterSesi && p.sesi_tes !== filterSesi) return false;
     if (filterSumber && p._sumber !== filterSumber) return false;
     if (filterTgl && p.tanggal_tes !== filterTgl) return false;
@@ -2406,11 +2545,22 @@ function PesertaPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [filterRoom, filterSesi, filterTgl, filterSumber, filterJk, filterJalur, pageSize]);
+  }, [filterRoom, filterSesi, filterTgl, filterSumber, filterJk, filterJalur, searchQuery, filterEventId, pageSize]);
   useEffect(() => {
     const valid = new Set(data.map((p: any) => participantKey(p)));
     setSelectedParticipants(prev => new Set(Array.from(prev).filter(k => valid.has(k))));
   }, [data, participantKey]);
+
+  const resetAllFilters = () => {
+    setFilterRoom('');
+    setFilterSesi('');
+    setFilterTgl('');
+    setFilterSumber('');
+    setFilterJk('');
+    setFilterJalur('');
+    setSearchQuery('');
+    setFilterEventId('ALL');
+  };
 
   const selStyle = (val: string): React.CSSProperties => ({
     padding: '7px 11px', fontSize: '12px', fontWeight: 600,
@@ -2438,11 +2588,70 @@ function PesertaPage() {
         </div>
       </div>
 
+      {/* ── FILTER JENIS KEGIATAN ── */}
+      <div style={{ background: '#f8faf8', borderBottom: `1.5px solid ${C.border}`, padding: '10px 20px', display: 'flex', alignItems: 'center', gap: '8px', overflowX: 'auto' }}>
+        <span style={{ fontSize: '11px', fontWeight: 800, color: C.green, textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap', marginRight: '4px' }}>
+          Kegiatan:
+        </span>
+        <button type="button" onClick={() => setFilterEventId('ALL')}
+          style={{
+            padding: '5px 12px', fontSize: '11.5px', fontWeight: 700, borderRadius: '999px', cursor: 'pointer', whiteSpace: 'nowrap',
+            border: `1.5px solid ${filterEventId === 'ALL' ? C.green : C.borderMid}`,
+            background: filterEventId === 'ALL' ? C.greenLight : C.white,
+            color: filterEventId === 'ALL' ? C.green : C.textMuted,
+            transition: 'all 0.12s',
+          }}>
+          Semua Kegiatan ({data.length})
+        </button>
+        {allEvents.map(ev => {
+          const isSelected = filterEventId === ev.id;
+          const count = data.filter((p: any) => {
+            if (ev.participant_source === 'pmb') return p._sumber === 'pmb';
+            if (ev.participant_source === 'cbt_user') return p._sumber === 'manual';
+            return true;
+          }).length;
+          return (
+            <button key={ev.id} type="button" onClick={() => setFilterEventId(ev.id)}
+              style={{
+                padding: '5px 12px', fontSize: '11.5px', fontWeight: 700, borderRadius: '999px', cursor: 'pointer', whiteSpace: 'nowrap',
+                border: `1.5px solid ${isSelected ? C.green : C.borderMid}`,
+                background: isSelected ? C.greenLight : C.white,
+                color: isSelected ? C.green : C.textMuted,
+                transition: 'all 0.12s',
+              }}>
+              {ev.code} · {ev.name} ({count})
+            </button>
+          );
+        })}
+      </div>
+
       <div style={{ flex: 1, padding: '16px 20px' }} className="space-y-3">
-        {/* FILTER BAR */}
+        {/* FILTER BAR & SEARCH */}
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+          {/* Search Field */}
+          <div style={{ position: 'relative', minWidth: '220px', flex: '1 1 200px' }}>
+            <Search size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: C.textMuted, pointerEvents: 'none' }} />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder="Cari Nama, NISN, No. Daftar..."
+              style={{
+                width: '100%', padding: '7px 11px 7px 30px', fontSize: '12px', fontWeight: 600,
+                background: C.white, border: `1.5px solid ${searchQuery ? C.green : C.borderMid}`,
+                borderRadius: '10px', outline: 'none', color: C.text, fontFamily: 'inherit',
+              }}
+            />
+            {searchQuery && (
+              <button onClick={() => setSearchQuery('')} style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: C.textMuted, cursor: 'pointer', padding: 0 }}>
+                <X size={13} />
+              </button>
+            )}
+          </div>
+
           <select value={filterRoom} onChange={e => setFilterRoom(e.target.value)} style={selStyle(filterRoom)}>
             <option value="">Semua Ruangan</option>
+            <option value="__NONE__">⚠️ Belum Ada Ruangan</option>
             {roomOpts.map(r => <option key={r} value={r}>{r}</option>)}
           </select>
           <select value={filterSesi} onChange={e => setFilterSesi(e.target.value)} style={selStyle(filterSesi)}>
@@ -2473,8 +2682,8 @@ function PesertaPage() {
             <option value="100">100 / halaman</option>
             <option value="all">Semua</option>
           </select>
-          {(filterRoom || filterSesi || filterTgl || filterSumber || filterJk || filterJalur) && (
-            <button onClick={() => { setFilterRoom(''); setFilterSesi(''); setFilterTgl(''); setFilterSumber(''); setFilterJk(''); setFilterJalur(''); }}
+          {(filterRoom || filterSesi || filterTgl || filterSumber || filterJk || filterJalur || searchQuery || filterEventId !== 'ALL') && (
+            <button onClick={resetAllFilters}
               style={{ fontSize: '11.5px', fontWeight: 700, color: '#dc2626', background: '#fef2f2', border: '1.5px solid #fecaca', borderRadius: '10px', padding: '7px 12px', cursor: 'pointer' }}>
               Reset
             </button>
