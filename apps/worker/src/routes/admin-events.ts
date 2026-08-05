@@ -198,7 +198,11 @@ async function listSourceParticipants(
   ids?: string[],
 ): Promise<{ items: NormalizedParticipant[]; total: number }> {
   if (source === 'mansatas') {
-    return listMansatasParticipants(c.env, filters, { ids, max: 5000 });
+    const effectiveFilters = { ...filters };
+    if (effectiveFilters.is_active === undefined) {
+      effectiveFilters.is_active = true;
+    }
+    return listMansatasParticipants(c.env, effectiveFilters, { ids, max: 5000 });
   }
   if (source === 'pmb') return listPmbParticipants(getPmbDb(c.env), getPmbTable(c.env), filters, ids);
   return listCbtUsers(c.env.DB, filters, ids);

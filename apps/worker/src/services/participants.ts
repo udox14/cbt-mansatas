@@ -289,10 +289,15 @@ export async function listMansatasParticipants(
   const config = readConfig(env);
   if (!config || !env.MANSATAS_DB) throw new MansatasConfigError();
 
+  const effectiveFilters: ParticipantFilters = {
+    is_active: filters.is_active === undefined ? true : filters.is_active,
+    ...filters,
+  };
+
   const max = Math.min(Math.max(options.max ?? 100, 1), 5000);
   const page = Math.max(Number(filters.page ?? 1) || 1, 1);
   const pageSize = Math.min(Math.max(Number(filters.page_size ?? 50) || 50, 1), max);
-  const { where, params } = buildFilters(config, filters, options.ids);
+  const { where, params } = buildFilters(config, effectiveFilters, options.ids);
   const whereSql = where.length ? ` WHERE ${where.join(' AND ')}` : '';
   const fromSql = sourceFrom(config);
   const columns = selectColumns(config);

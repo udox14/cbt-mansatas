@@ -29,7 +29,7 @@ const C = {
 
 // ── Komponen Watermark Nama Peserta ──────────────────────────
 // Fixed overlay diagonal, muncul di screenshot sebagai deterrent
-function WatermarkOverlay({ name }: { name: string }) {
+function WatermarkOverlay({ name, isDesktopLayout }: { name: string; isDesktopLayout?: boolean }) {
   const text = name.toUpperCase();
   // Buat grid 6x10 teks watermark yang mengisi seluruh layar
   const items = Array.from({ length: 60 });
@@ -50,7 +50,7 @@ function WatermarkOverlay({ name }: { name: string }) {
           textAlign: 'center',
         }}>
           <span style={{
-            fontSize: '11px',
+            fontSize: isDesktopLayout ? '18px' : '11px',
             fontWeight: 800,
             color: '#1a2e1a',
             letterSpacing: '0.08em',
@@ -636,7 +636,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
     <div className="no-select exam-room-shell" style={{ minHeight: '100vh', height: isDesktopLayout ? '100dvh' : undefined, background: C.bg, display: 'flex', flexDirection: 'column', fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}>
 
       {/* ── WATERMARK NAMA PESERTA (fixed overlay, muncul di screenshot) ── */}
-      <WatermarkOverlay name={studentName} />
+      <WatermarkOverlay name={studentName} isDesktopLayout={isDesktopLayout} />
 
       {/* ── TOAST PERINGATAN (sticky top, full width, di atas header) ── */}
       {toasts.map(t => (
@@ -771,10 +771,10 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
       )}
 
       <header style={{ position: 'sticky', top: toasts.length > 0 ? 'auto' : 0, zIndex: 40, background: C.white, borderBottom: `1.5px solid ${C.border}` }}>
-        <div style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', maxWidth: isDesktopLayout ? 'none' : '680px', margin: '0 auto' }}>
+        <div style={{ padding: isDesktopLayout ? '14px 24px' : '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', maxWidth: isDesktopLayout ? '1400px' : '680px', margin: '0 auto' }}>
 
           {viewport === 'tablet' && (
-            <button onClick={() => setNavigatorOpen(true)} style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '6px 9px', borderRadius: '8px', border: `1.5px solid ${C.borderMid}`, background: C.bg, color: C.textMid, fontSize: '11px', fontWeight: 800, cursor: 'pointer' }}>
+            <button onClick={() => setNavigatorOpen(true)} style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '6px 9px', borderRadius: '8px', border: `1.5px solid ${C.borderMid}`, background: C.bg, color: C.textMid, fontSize: '13px', fontWeight: 800, cursor: 'pointer' }}>
               Soal
             </button>
           )}
@@ -793,20 +793,20 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
           </div>
 
           {/* progress */}
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '3px' }}>
-              <span style={{ fontSize: '10px', fontWeight: 700, color: C.textMid }}>{answeredCount} / {questions.length}</span>
-              <span style={{ fontSize: '10px', color: C.textFaint }}>dijawab</span>
+          <div style={{ flex: 1, minWidth: 0, maxWidth: isDesktopLayout ? '400px' : 'none' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+              <span style={{ fontSize: '12px', fontWeight: 700, color: C.textMid }}>{answeredCount} / {questions.length}</span>
+              <span style={{ fontSize: '12px', color: C.textFaint }}>dijawab</span>
             </div>
-            <div style={{ height: '5px', background: '#e0e5e0', borderRadius: '999px', overflow: 'hidden' }}>
+            <div style={{ height: '6px', background: '#e0e5e0', borderRadius: '999px', overflow: 'hidden' }}>
               <div style={{ height: '100%', background: C.green, borderRadius: '999px', width: `${(answeredCount / questions.length) * 100}%`, transition: 'width 0.3s' }} />
             </div>
           </div>
 
           {/* pelanggaran counter + fullscreen button */}
-          <div style={{ display: 'flex', gap: '5px', flexShrink: 0, alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: '8px', flexShrink: 0, alignItems: 'center' }}>
             {cheatCount > 0 && (
-              <span style={{ fontSize: '10px', fontWeight: 700, color: '#dc2626', background: '#fef2f2', border: '1.5px solid #fecaca', padding: '4px 8px', borderRadius: '8px', whiteSpace: 'nowrap' }}>
+              <span style={{ fontSize: '12px', fontWeight: 700, color: '#dc2626', background: '#fef2f2', border: '1.5px solid #fecaca', padding: '4px 10px', borderRadius: '8px', whiteSpace: 'nowrap' }}>
                 ⚠ {cheatCount}/{cheatLimit}
               </span>
             )}
@@ -832,53 +832,53 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
       </header>
 
       {/* ── QUESTION ── */}
-      <div className="exam-room-workspace" style={{ '--exam-left-width': leftCollapsed ? '58px' : '250px', '--exam-right-width': rightCollapsed ? '58px' : '280px' } as React.CSSProperties}>
+      <div className="exam-room-workspace" style={{ '--exam-left-width': leftCollapsed ? '64px' : '280px', '--exam-right-width': rightCollapsed ? '64px' : '320px' } as React.CSSProperties}>
         {viewport === 'tablet' && navigatorOpen && <div className="exam-room-navigator-overlay" onClick={() => setNavigatorOpen(false)} />}
         {isDesktopLayout && (
           <aside className={`exam-room-navigator ${viewport === 'tablet' && navigatorOpen ? 'is-open' : ''}`} data-collapsed={leftCollapsed}>
-            <div className="exam-room-side-header">
+            <div className="exam-room-side-header" style={{ fontSize: '13px', padding: '12px 16px' }}>
               <span>{viewport === 'tablet' ? 'Navigasi soal' : leftCollapsed ? 'Soal' : 'Navigasi soal'}</span>
-              <button onClick={() => viewport === 'tablet' ? setNavigatorOpen(false) : toggleLeftCollapsed()} aria-label={viewport === 'tablet' ? 'Tutup navigator' : 'Lipat navigator'}>{viewport === 'tablet' ? '×' : leftCollapsed ? '›' : '‹'}</button>
+              <button onClick={() => viewport === 'tablet' ? setNavigatorOpen(false) : toggleLeftCollapsed()} aria-label={viewport === 'tablet' ? 'Tutup navigator' : 'Lipat navigator'} style={{ width: '32px', height: '32px', fontSize: '18px' }}>{viewport === 'tablet' ? '×' : leftCollapsed ? '›' : '‹'}</button>
             </div>
             <div className="exam-nav-content">
-              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', padding: '8px 10px', borderBottom: `1px solid ${C.borderLight}` }}>
-                {[{ color: C.green, label: 'Dijawab' }, { color: '#f59e0b', label: 'Ragu' }, { color: '#e8eae8', label: 'Belum' }].map(item => <span key={item.label} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: C.textMuted, fontSize: '9px', fontWeight: 700 }}><span style={{ width: '8px', height: '8px', borderRadius: '3px', background: item.color }} />{item.label}</span>)}
+              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', padding: '12px 16px', borderBottom: `1px solid ${C.borderLight}` }}>
+                {[{ color: C.green, label: 'Dijawab' }, { color: '#f59e0b', label: 'Ragu' }, { color: '#e8eae8', label: 'Belum' }].map(item => <span key={item.label} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: C.textMuted, fontSize: '12px', fontWeight: 700 }}><span style={{ width: '10px', height: '10px', borderRadius: '3px', background: item.color }} />{item.label}</span>)}
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '6px', padding: '12px 10px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '8px', padding: '16px' }}>
                 {questions.map((qq, i) => {
                   const a = answers.get(qq.id);
                   const answered = !!(a?.selected_option_id || a?.essay_answer?.trim());
                   const doubt = !!a?.is_doubtful;
                   const isMissing = missingQuestionIds.has(qq.id) && !answered;
                   const bg = isMissing ? '#dc2626' : doubt ? '#f59e0b' : answered ? C.green : '#e8eae8';
-                  return <button key={qq.id} onClick={() => { goTo(i); if (viewport === 'tablet') setNavigatorOpen(false); }} disabled={isCheatLocked} style={{ aspectRatio: '1', border: isMissing ? '2px solid #fecaca' : i === current ? `2px solid ${C.green}` : 'none', borderRadius: '8px', background: i === current && !isMissing ? C.greenLight : bg, color: i === current && !isMissing ? C.green : answered || doubt || isMissing ? '#fff' : C.textMuted, fontSize: '11px', fontWeight: 800, cursor: isCheatLocked ? 'not-allowed' : 'pointer', opacity: isCheatLocked ? 0.55 : 1 }}>{i + 1}</button>;
+                  return <button key={qq.id} onClick={() => { goTo(i); if (viewport === 'tablet') setNavigatorOpen(false); }} disabled={isCheatLocked} style={{ aspectRatio: '1', border: isMissing ? '2px solid #fecaca' : i === current ? `2px solid ${C.green}` : 'none', borderRadius: '10px', background: i === current && !isMissing ? C.greenLight : bg, color: i === current && !isMissing ? C.green : answered || doubt || isMissing ? '#fff' : C.textMuted, fontSize: '13px', fontWeight: 800, cursor: isCheatLocked ? 'not-allowed' : 'pointer', opacity: isCheatLocked ? 0.55 : 1 }}>{i + 1}</button>;
                 })}
               </div>
             </div>
           </aside>
         )}
 
-      <main ref={mainScrollRef} className="exam-room-main-scroll" style={{ flex: 1, padding: '12px', maxWidth: isDesktopLayout ? 'none' : '680px', width: '100%', margin: '0 auto', paddingBottom: isDesktopLayout ? '24px' : 'calc(128px + env(safe-area-inset-bottom, 0px))' }}>
-        <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: '18px', overflow: 'hidden' }}>
+      <main ref={mainScrollRef} className="exam-room-main-scroll" style={{ flex: 1, padding: isDesktopLayout ? '40px 32px' : '12px', maxWidth: isDesktopLayout ? '920px' : '680px', width: '100%', margin: '0 auto', paddingBottom: isDesktopLayout ? '40px' : 'calc(128px + env(safe-area-inset-bottom, 0px))' }}>
+        <div style={{ background: C.white, border: `1.5px solid ${C.borderMid}`, borderRadius: isDesktopLayout ? '24px' : '18px', overflow: 'hidden', boxShadow: isDesktopLayout ? '0 10px 30px rgba(0,0,0,0.03)' : 'none' }}>
 
           {/* soal header */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderBottom: `1.5px solid ${C.borderLight}`, background: '#f9fbf9' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
-              <span style={{ background: C.greenLight, color: '#2d6644', fontSize: '10px', fontWeight: 700, padding: '3px 9px', borderRadius: '999px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: isDesktopLayout ? '16px 24px' : '10px 14px', borderBottom: `1.5px solid ${C.borderLight}`, background: '#f9fbf9' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span style={{ background: C.greenLight, color: '#2d6644', fontSize: '13px', fontWeight: 800, padding: '5px 12px', borderRadius: '999px' }}>
                 Soal {current + 1}
               </span>
-              <span style={{ color: C.textFaint, fontSize: '10px' }}>
+              <span style={{ color: C.textFaint, fontSize: '13px', fontWeight: 500 }}>
                 {q.question_type === 'multiple_choice' ? 'Pilihan Ganda' : 'Esai'}
               </span>
             </div>
 
             {/* ragu-ragu toggle */}
-            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: isCheatLocked ? 'not-allowed' : 'pointer', opacity: isCheatLocked ? 0.55 : 1 }}>
-              <div style={{ position: 'relative', width: '32px', height: '18px', borderRadius: '999px', background: ans?.is_doubtful ? '#f59e0b' : '#e0e5e0', transition: 'background 0.2s', flexShrink: 0 }}
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: isCheatLocked ? 'not-allowed' : 'pointer', opacity: isCheatLocked ? 0.55 : 1 }}>
+              <div style={{ position: 'relative', width: '38px', height: '22px', borderRadius: '999px', background: ans?.is_doubtful ? '#f59e0b' : '#e0e5e0', transition: 'background 0.2s', flexShrink: 0 }}
                 onClick={() => setAnswer(q.id, { is_doubtful: !ans?.is_doubtful })}>
-                <div style={{ position: 'absolute', top: '2px', left: ans?.is_doubtful ? '16px' : '2px', width: '14px', height: '14px', borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.15)', transition: 'left 0.2s' }} />
+                <div style={{ position: 'absolute', top: '3px', left: ans?.is_doubtful ? '19px' : '3px', width: '16px', height: '16px', borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.15)', transition: 'left 0.2s' }} />
               </div>
-              <span style={{ fontSize: '11px', fontWeight: 600, color: ans?.is_doubtful ? '#b45309' : C.textFaint }}>Ragu</span>
+              <span style={{ fontSize: '13px', fontWeight: 700, color: ans?.is_doubtful ? '#b45309' : C.textFaint }}>Ragu</span>
             </label>
           </div>
 
@@ -886,7 +886,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
           <MathContent
             html={q.question_text}
             className="exam-text"
-            style={{ padding: '16px 14px 12px', color: C.text, lineHeight: 1.75, '--exam-font-size': `${fontSize}px` } as any}
+            style={{ padding: isDesktopLayout ? '24px' : '16px 14px 12px', color: C.text, lineHeight: 1.75, '--exam-font-size': `${fontSize}px` } as any}
           />
 
           {/* media */}
@@ -905,29 +905,22 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
 
           {/* options */}
           {q.question_type === 'multiple_choice' ? (
-            <div style={{ padding: '0 14px 16px', display: 'flex', flexDirection: 'column', gap: '7px' }}>
+            <div style={{ padding: isDesktopLayout ? '0 24px 24px' : '0 14px 16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {q.options.map(o => {
                 const sel = ans?.selected_option_id === o.id;
                 const optRtl = isFullArabic(o.option_text);
                 return (
                   <button key={o.id} onClick={() => setAnswer(q.id, { selected_option_id: o.id })} disabled={isCheatLocked}
+                    className="exam-option-btn"
                     style={{
-                      width: '100%', textAlign: optRtl ? 'right' : 'left', display: 'flex', alignItems: 'flex-start', gap: '10px',
+                      width: '100%', textAlign: optRtl ? 'right' : 'left', display: 'flex', alignItems: 'flex-start', gap: '14px',
                       flexDirection: optRtl ? 'row-reverse' : 'row',
-                      padding: '11px 12px', borderRadius: '12px', cursor: isCheatLocked ? 'not-allowed' : 'pointer',
+                      padding: '14px 16px', borderRadius: '16px', cursor: isCheatLocked ? 'not-allowed' : 'pointer',
                       opacity: isCheatLocked ? 0.62 : 1,
                       border: `1.5px solid ${sel ? C.green : C.borderMid}`,
                       background: sel ? C.greenLight : C.white,
-                      transition: 'all 0.12s',
+                      transition: 'all 0.2s ease',
                     }}>
-                    <span style={{
-                      width: '26px', height: '26px', borderRadius: '50%', flexShrink: 0,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: '11px', fontWeight: 800, marginTop: '1px',
-                      background: sel ? C.green : C.bg,
-                      border: `2px solid ${sel ? C.green : C.borderMid}`,
-                      color: sel ? '#fff' : C.textMuted,
-                    }}>{o.option_label}</span>
                     <span style={{ flex: 1, fontSize: `${fontSize}px`, color: C.text, fontWeight: 500, paddingTop: '2px', textAlign: optRtl ? 'right' : 'left' }}>
                       {o.image_url
                         ? <img src={`${API_BASE_URL}${o.image_url}`} alt={o.option_label} style={{ maxWidth: '100%', borderRadius: '8px' }} />
@@ -938,7 +931,7 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
               })}
             </div>
           ) : (
-            <div style={{ padding: '0 14px 16px' }}>
+            <div style={{ padding: isDesktopLayout ? '0 24px 24px' : '0 14px 16px' }}>
               <textarea value={ans?.essay_answer || ''} onChange={e => setAnswer(q.id, { essay_answer: e.target.value })}
                 disabled={isCheatLocked}
                 placeholder="Tulis jawaban..." rows={5}
@@ -955,30 +948,30 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
       {/* ── FLOATING GRID BUTTON ── */}
         {isWideLayout && (
           <aside className="exam-room-status" data-collapsed={rightCollapsed}>
-            <div className="exam-room-side-header">
+            <div className="exam-room-side-header" style={{ fontSize: '13px', padding: '12px 16px' }}>
               <span>{rightCollapsed ? 'Status' : 'Status ujian'}</span>
-              <button onClick={toggleRightCollapsed} aria-label="Lipat panel status">{rightCollapsed ? '‹' : '›'}</button>
+              <button onClick={toggleRightCollapsed} aria-label="Lipat panel status" style={{ width: '32px', height: '32px', fontSize: '18px' }}>{rightCollapsed ? '‹' : '›'}</button>
             </div>
-            <div className="exam-status-content">
-              <div style={{ background: urgent ? '#fef2f2' : C.greenLight, border: `1.5px solid ${urgent ? '#fecaca' : C.greenBorder}`, borderRadius: '12px', padding: '14px', textAlign: 'center', marginBottom: '12px' }}>
-                <Clock size={18} color={urgent ? '#dc2626' : C.green} style={{ margin: '0 auto 5px' }} />
-                <p style={{ fontFamily: 'monospace', fontSize: '27px', fontWeight: 900, color: urgent ? '#dc2626' : C.text, letterSpacing: '0.04em' }}>{String(mm).padStart(2, '0')}:{String(ss).padStart(2, '0')}</p>
-                <p style={{ color: C.textMuted, fontSize: '10px', fontWeight: 700, marginTop: '3px' }}>Sisa waktu</p>
+            <div className="exam-status-content" style={{ padding: '20px' }}>
+              <div style={{ background: urgent ? '#fef2f2' : C.greenLight, border: `1.5px solid ${urgent ? '#fecaca' : C.greenBorder}`, borderRadius: '16px', padding: '18px', textAlign: 'center', marginBottom: '16px' }}>
+                <Clock size={22} color={urgent ? '#dc2626' : C.green} style={{ margin: '0 auto 8px' }} />
+                <p style={{ fontFamily: 'monospace', fontSize: '32px', fontWeight: 900, color: urgent ? '#dc2626' : C.text, letterSpacing: '0.04em' }}>{String(mm).padStart(2, '0')}:{String(ss).padStart(2, '0')}</p>
+                <p style={{ color: C.textMuted, fontSize: '12px', fontWeight: 800, marginTop: '4px' }}>Sisa waktu</p>
               </div>
-              <div style={{ border: `1.5px solid ${C.borderLight}`, borderRadius: '12px', padding: '12px', marginBottom: '12px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', color: C.textMid, fontSize: '11px', fontWeight: 800 }}><span>Progress</span><span>{answeredCount}/{questions.length}</span></div>
-                <div style={{ height: '7px', background: C.bg, borderRadius: '999px', overflow: 'hidden', marginTop: '7px' }}><div style={{ width: `${(answeredCount / questions.length) * 100}%`, height: '100%', background: C.green, borderRadius: '999px' }} /></div>
-                <p style={{ color: C.textMuted, fontSize: '10px', marginTop: '8px' }}>{questions.length - answeredCount} soal belum dijawab · {doubtCount} ragu</p>
+              <div style={{ border: `1.5px solid ${C.borderLight}`, borderRadius: '16px', padding: '16px', marginBottom: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: C.textMid, fontSize: '13px', fontWeight: 800 }}><span>Progress</span><span>{answeredCount}/{questions.length}</span></div>
+                <div style={{ height: '8px', background: C.bg, borderRadius: '999px', overflow: 'hidden', marginTop: '10px' }}><div style={{ width: `${(answeredCount / questions.length) * 100}%`, height: '100%', background: C.green, borderRadius: '999px' }} /></div>
+                <p style={{ color: C.textMuted, fontSize: '12px', marginTop: '12px' }}>{questions.length - answeredCount} soal belum dijawab · {doubtCount} ragu</p>
               </div>
-              {cheatCount > 0 && <div style={{ background: '#fef2f2', border: '1.5px solid #fecaca', borderRadius: '10px', padding: '9px 10px', color: '#dc2626', fontSize: '11px', fontWeight: 800, marginBottom: '12px' }}>⚠ Pelanggaran {cheatCount}/{cheatLimit}</div>}
-              <div style={{ display: 'flex', gap: '7px', marginBottom: '12px' }}>
-                <button onClick={() => changeFontSize(-2)} style={{ flex: 1, padding: '9px', borderRadius: '9px', border: `1.5px solid ${C.borderMid}`, background: C.bg, cursor: 'pointer', color: C.textMid, fontWeight: 800 }}><Minus size={13} /></button>
-                <button onClick={() => changeFontSize(2)} style={{ flex: 1, padding: '9px', borderRadius: '9px', border: `1.5px solid ${C.borderMid}`, background: C.bg, cursor: 'pointer', color: C.textMid, fontWeight: 800 }}><Plus size={13} /></button>
-                {enforceFullscreen && fullscreenSupported && !isFullscreen && <button onClick={enterFullscreen} title="Masuk fullscreen" style={{ flex: 1, padding: '9px', borderRadius: '9px', border: '1.5px solid #fde68a', background: '#fffbeb', cursor: 'pointer' }}><Maximize size={13} color="#b45309" /></button>}
+              {cheatCount > 0 && <div style={{ background: '#fef2f2', border: '1.5px solid #fecaca', borderRadius: '12px', padding: '12px', color: '#dc2626', fontSize: '13px', fontWeight: 800, marginBottom: '16px' }}>⚠ Pelanggaran {cheatCount}/{cheatLimit}</div>}
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+                <button onClick={() => changeFontSize(-2)} style={{ flex: 1, padding: '12px', borderRadius: '12px', border: `1.5px solid ${C.borderMid}`, background: C.bg, cursor: 'pointer', color: C.textMid, fontWeight: 800 }}><Minus size={16} /></button>
+                <button onClick={() => changeFontSize(2)} style={{ flex: 1, padding: '12px', borderRadius: '12px', border: `1.5px solid ${C.borderMid}`, background: C.bg, cursor: 'pointer', color: C.textMid, fontWeight: 800 }}><Plus size={16} /></button>
+                {enforceFullscreen && fullscreenSupported && !isFullscreen && <button onClick={enterFullscreen} title="Masuk fullscreen" style={{ flex: 1, padding: '12px', borderRadius: '12px', border: '1.5px solid #fde68a', background: '#fffbeb', cursor: 'pointer', display: 'flex', justifyContent: 'center' }}><Maximize size={16} color="#b45309" /></button>}
               </div>
-              <div style={{ borderTop: `1.5px solid ${C.borderLight}`, paddingTop: '12px' }}>
-                <button onClick={() => goTo(Math.max(0, current - 1))} disabled={current === 0 || isCheatLocked} style={{ width: '100%', padding: '9px', marginBottom: '7px', borderRadius: '9px', border: `1.5px solid ${C.borderMid}`, background: C.bg, color: C.textMid, fontSize: '11px', fontWeight: 800, cursor: 'pointer', opacity: current === 0 || isCheatLocked ? 0.4 : 1 }}>‹ Sebelumnya</button>
-                {isLast ? <button onClick={openSubmitConfirm} disabled={isCheatLocked} style={{ width: '100%', padding: '10px', borderRadius: '9px', border: 'none', background: '#1a5fa8', color: '#fff', fontSize: '11px', fontWeight: 900, cursor: 'pointer', opacity: isCheatLocked ? 0.45 : 1 }}>Kirim ujian <Send size={12} style={{ display: 'inline', marginLeft: '4px' }} /></button> : <button onClick={() => goTo(current + 1)} disabled={isCheatLocked} style={{ width: '100%', padding: '10px', borderRadius: '9px', border: 'none', background: C.green, color: '#fff', fontSize: '11px', fontWeight: 900, cursor: 'pointer', opacity: isCheatLocked ? 0.45 : 1 }}>Selanjutnya ›</button>}
+              <div style={{ borderTop: `1.5px solid ${C.borderLight}`, paddingTop: '16px' }}>
+                <button onClick={() => goTo(Math.max(0, current - 1))} disabled={current === 0 || isCheatLocked} style={{ width: '100%', padding: '12px', marginBottom: '10px', borderRadius: '12px', border: `1.5px solid ${C.borderMid}`, background: C.bg, color: C.textMid, fontSize: '13px', fontWeight: 800, cursor: 'pointer', opacity: current === 0 || isCheatLocked ? 0.4 : 1 }}>‹ Sebelumnya</button>
+                {isLast ? <button onClick={openSubmitConfirm} disabled={isCheatLocked} style={{ width: '100%', padding: '14px', borderRadius: '12px', border: 'none', background: '#1a5fa8', color: '#fff', fontSize: '14px', fontWeight: 900, cursor: 'pointer', opacity: isCheatLocked ? 0.45 : 1 }}>Kirim ujian <Send size={15} style={{ display: 'inline', marginLeft: '6px' }} /></button> : <button onClick={() => goTo(current + 1)} disabled={isCheatLocked} style={{ width: '100%', padding: '14px', borderRadius: '12px', border: 'none', background: C.green, color: '#fff', fontSize: '14px', fontWeight: 900, cursor: 'pointer', opacity: isCheatLocked ? 0.45 : 1 }}>Selanjutnya ›</button>}
               </div>
             </div>
           </aside>
