@@ -151,7 +151,7 @@ function StudentContent() {
   const [tokenInput, setTokenInput] = useState('');
   const [tokenError, setTokenError] = useState('');
   const [tokenLoading, setTokenLoading] = useState(false);
-  const [activeSession, setActiveSession] = useState<{ sessionId: string; startedAt: string; durationMinutes: number } | null>(null);
+  const [activeSession, setActiveSession] = useState<{ sessionId: string; startedAt: string; durationMinutes: number; examName?: string } | null>(null);
   const [postExam, setPostExam] = useState<any>(null);
 
   useEffect(() => {
@@ -166,6 +166,7 @@ function StudentContent() {
     <ExamRoom sessionId={activeSession.sessionId} startedAt={activeSession.startedAt}
       durationMinutes={activeSession.durationMinutes}
       studentName={user.full_name}
+      examName={activeSession.examName}
       onFinish={r => { setActiveSession(null); setPostExam(r); }} />
   );
 
@@ -215,7 +216,7 @@ function StudentContent() {
     setTokenLoading(false);
     if (!r.success) { setTokenError(r.error || 'Token tidak valid'); return; }
     setShowToken(false);
-    setActiveSession({ sessionId: r.data.session_id, startedAt: r.data.started_at, durationMinutes: r.data.duration_minutes });
+    setActiveSession({ sessionId: r.data.session_id, startedAt: r.data.started_at, durationMinutes: r.data.duration_minutes, examName: selected.subject_name || selected.title });
   };
 
   const eventGroups = Array.from(exams.reduce<Map<string, { key: string; label: string; code: string; exams: Exam[] }>>((groups, exam) => {

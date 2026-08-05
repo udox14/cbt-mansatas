@@ -13,7 +13,7 @@ interface Question {
   options: { id: string; option_label: string; option_text: string; image_url: string | null }[];
 }
 interface Answer { question_id: string; selected_option_id?: string; essay_answer?: string; is_doubtful?: boolean }
-interface ExamRoomProps { sessionId: string; startedAt: string; durationMinutes: number; studentName: string; onFinish: (result: any) => void }
+interface ExamRoomProps { sessionId: string; startedAt: string; durationMinutes: number; studentName: string; onFinish: (result: any) => void; examName?: string }
 
 const parseServerTime = (value: string) => {
   const normalized = value.includes('T') ? value : `${value.replace(' ', 'T')}Z`;
@@ -126,7 +126,7 @@ function CheatToast({ msg, onDismiss }: CheatToastProps) {
   );
 }
 
-export default function ExamRoom({ sessionId, startedAt, durationMinutes, studentName, onFinish }: ExamRoomProps) {
+export default function ExamRoom({ sessionId, startedAt, durationMinutes, studentName, onFinish, examName }: ExamRoomProps) {
   const { playAlarm } = useAntiCheatAlarm();
   const [questions, setQuestions] = useState<Question[]>([]);
   const [answers, setAnswers] = useState<Map<string, Answer>>(new Map());
@@ -773,63 +773,67 @@ export default function ExamRoom({ sessionId, startedAt, durationMinutes, studen
       <header style={{ position: 'sticky', top: toasts.length > 0 ? 'auto' : 0, zIndex: 40, background: C.white, borderBottom: `1.5px solid ${C.border}` }}>
         <div style={{ padding: isDesktopLayout ? '14px 24px' : '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', maxWidth: isDesktopLayout ? '1400px' : '680px', margin: '0 auto' }}>
 
-          {viewport === 'tablet' && (
-            <button onClick={() => setNavigatorOpen(true)} style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '6px 9px', borderRadius: '8px', border: `1.5px solid ${C.borderMid}`, background: C.bg, color: C.textMid, fontSize: '13px', fontWeight: 800, cursor: 'pointer' }}>
-              Soal
-            </button>
+          {isDesktopLayout ? (
+            <div style={{ fontSize: '15px', fontWeight: 800, color: C.text, letterSpacing: '0.02em', flex: 1 }}>
+              {examName || 'Ujian Berlangsung'}
+            </div>
+          ) : (
+            <>
+              {viewport === 'tablet' && (
+                <button onClick={() => setNavigatorOpen(true)} style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '6px 9px', borderRadius: '8px', border: `1.5px solid ${C.borderMid}`, background: C.bg, color: C.textMid, fontSize: '13px', fontWeight: 800, cursor: 'pointer' }}>
+                  Soal
+                </button>
+              )}
+
+              {/* timer pill */}
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0,
+                background: urgent ? '#fef2f2' : C.greenLight,
+                border: `1.5px solid ${urgent ? '#fecaca' : C.greenBorder}`,
+                padding: '6px 12px', borderRadius: '10px',
+              }}>
+                <Clock size={13} strokeWidth={2.5} color={urgent ? '#dc2626' : C.green} />
+                <span style={{ fontFamily: 'monospace', fontSize: '14px', fontWeight: 900, color: urgent ? '#dc2626' : C.text, letterSpacing: '0.05em' }}>
+                  {String(mm).padStart(2, '0')}:{String(ss).padStart(2, '0')}
+                </span>
+              </div>
+
+              {/* progress */}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 700, color: C.textMid }}>{answeredCount} / {questions.length}</span>
+                  <span style={{ fontSize: '12px', color: C.textFaint }}>dijawab</span>
+                </div>
+                <div style={{ height: '6px', background: '#e0e5e0', borderRadius: '999px', overflow: 'hidden' }}>
+                  <div style={{ height: '100%', background: C.green, borderRadius: '999px', width: `${(answeredCount / questions.length) * 100}%`, transition: 'width 0.3s' }} />
+                </div>
+              </div>
+
+              {/* pelanggaran counter + fullscreen button */}
+              <div style={{ display: 'flex', gap: '8px', flexShrink: 0, alignItems: 'center' }}>
+                {cheatCount > 0 && (
+                  <span style={{ fontSize: '12px', fontWeight: 700, color: '#dc2626', background: '#fef2f2', border: '1.5px solid #fecaca', padding: '4px 10px', borderRadius: '8px', whiteSpace: 'nowrap' }}>
+                    ⚠ {cheatCount}/{cheatLimit}
+                  </span>
+                )}
+                {enforceFullscreen && fullscreenSupported && !isFullscreen && (
+                  <button
+                    onClick={enterFullscreen}
+                    style={{ width: '28px', height: '28px', borderRadius: '8px', background: '#fffbeb', border: '1.5px solid #fde68a', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                    title="Masuk fullscreen"
+                  >
+                    <Maximize size={12} strokeWidth={2.5} color="#b45309" />
+                  </button>
+                )}
+                <button onClick={() => changeFontSize(-2)} style={{ width: '28px', height: '28px', borderRadius: '8px', background: C.bg, border: `1.5px solid ${C.borderMid}`, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+                  <Minus size={11} strokeWidth={2.5} color="#6b7c6e" />
+                </button>
+                <button onClick={() => changeFontSize(2)} style={{ width: '28px', height: '28px', borderRadius: '8px', background: C.bg, border: `1.5px solid ${C.borderMid}`, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+                  <Plus size={11} strokeWidth={2.5} color="#6b7c6e" />
+                </button>
+              </div>
+            </>
           )}
-
-          {/* timer pill */}
-          {!isDesktopLayout && (
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0,
-              background: urgent ? '#fef2f2' : C.greenLight,
-              border: `1.5px solid ${urgent ? '#fecaca' : C.greenBorder}`,
-              padding: '6px 12px', borderRadius: '10px',
-            }}>
-              <Clock size={13} strokeWidth={2.5} color={urgent ? '#dc2626' : C.green} />
-              <span style={{ fontFamily: 'monospace', fontSize: '14px', fontWeight: 900, color: urgent ? '#dc2626' : C.text, letterSpacing: '0.05em' }}>
-                {String(mm).padStart(2, '0')}:{String(ss).padStart(2, '0')}
-              </span>
-            </div>
-          )}
-
-          {/* progress */}
-          <div style={{ flex: 1, minWidth: 0, maxWidth: isDesktopLayout ? '400px' : 'none' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-              <span style={{ fontSize: '12px', fontWeight: 700, color: C.textMid }}>{answeredCount} / {questions.length}</span>
-              <span style={{ fontSize: '12px', color: C.textFaint }}>dijawab</span>
-            </div>
-            <div style={{ height: '6px', background: '#e0e5e0', borderRadius: '999px', overflow: 'hidden' }}>
-              <div style={{ height: '100%', background: C.green, borderRadius: '999px', width: `${(answeredCount / questions.length) * 100}%`, transition: 'width 0.3s' }} />
-            </div>
-          </div>
-
-          {/* pelanggaran counter + fullscreen button */}
-          <div style={{ display: 'flex', gap: '8px', flexShrink: 0, alignItems: 'center' }}>
-            {cheatCount > 0 && (
-              <span style={{ fontSize: '12px', fontWeight: 700, color: '#dc2626', background: '#fef2f2', border: '1.5px solid #fecaca', padding: '4px 10px', borderRadius: '8px', whiteSpace: 'nowrap' }}>
-                ⚠ {cheatCount}/{cheatLimit}
-              </span>
-            )}
-            {/* Bug-1 fix: gunakan isFullscreen state (reaktif), bukan document.fullscreenElement langsung */}
-            {enforceFullscreen && fullscreenSupported && !isFullscreen && (
-              <button
-                onClick={enterFullscreen}
-                style={{ width: '28px', height: '28px', borderRadius: '8px', background: '#fffbeb', border: '1.5px solid #fde68a', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
-                title="Masuk fullscreen"
-              >
-                <Maximize size={12} strokeWidth={2.5} color="#b45309" />
-              </button>
-            )}
-            {/* font controls */}
-            <button onClick={() => changeFontSize(-2)} style={{ width: '28px', height: '28px', borderRadius: '8px', background: C.bg, border: `1.5px solid ${C.borderMid}`, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
-              <Minus size={11} strokeWidth={2.5} color="#6b7c6e" />
-            </button>
-            <button onClick={() => changeFontSize(2)} style={{ width: '28px', height: '28px', borderRadius: '8px', background: C.bg, border: `1.5px solid ${C.borderMid}`, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
-              <Plus size={11} strokeWidth={2.5} color="#6b7c6e" />
-            </button>
-          </div>
         </div>
       </header>
 
