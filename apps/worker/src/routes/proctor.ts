@@ -187,6 +187,20 @@ proctor.post('/sessions/:id/reset', async (c) => {
   return c.json(ok(null, 'Sesi berhasil direset'));
 });
 
+// Unlock massal — buka kembali seluruh sesi yang dikunci di ruangan ini
+proctor.post('/sessions/unlock-all', async (c) => {
+  const user = c.get('user');
+  if (!user.room_id) return c.json(err('Anda belum di-assign ke ruangan'), 400);
+
+  await c.env.DB.prepare(
+    `UPDATE cbt_exam_sessions
+     SET is_time_locked = 0, cheat_warnings = 0, locked_at = NULL, last_heartbeat = ?
+     WHERE room_id = ? AND status = 'active'`
+  ).bind(now(), user.room_id).run();
+
+  return c.json(ok(null, 'Seluruh peserta di ruangan berhasil dibuka kuncinya'));
+});
+
 // Unlock time lock — buka kembali sesi yang dikunci karena waktu habis
 proctor.post('/sessions/:id/unlock', async (c) => {
   const user = c.get('user');

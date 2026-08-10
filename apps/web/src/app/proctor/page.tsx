@@ -163,6 +163,8 @@ function ProctorContent() {
   const [searchTerm, setSearchTerm] = useState('');
   const [resetTarget, setResetTarget] = useState<any>(null);
   const [unlockTarget, setUnlockTarget] = useState<any>(null);
+  const [confirmUnlockAll, setConfirmUnlockAll] = useState(false);
+  const [unlockAllLoading, setUnlockAllLoading] = useState(false);
   const [forceTarget, setForceTarget] = useState<any>(null);
   const [logTarget, setLogTarget] = useState<any>(null);
   const [cheatLogs, setCheatLogs] = useState<any[]>([]);
@@ -246,6 +248,15 @@ function ProctorContent() {
     await POST(`/api/proctor/sessions/${unlockTarget.id}/unlock`);
     toast('success', `Sesi ${unlockTarget.full_name} berhasil dibuka`);
     setUnlockTarget(null); fetchData();
+  };
+
+  const handleUnlockAll = async () => {
+    setUnlockAllLoading(true);
+    const r = await POST('/api/proctor/sessions/unlock-all');
+    setUnlockAllLoading(false);
+    setConfirmUnlockAll(false);
+    toast(r.success ? 'success' : 'error', r.success ? 'Seluruh peserta di ruangan berhasil dibuka kuncinya' : r.error || 'Gagal');
+    fetchData();
   };
 
   const handleForce = async () => {
@@ -421,6 +432,25 @@ function ProctorContent() {
                 <option value="hide_finished">Sembunyikan Selesai</option>
                 <option value="finished_only">Hanya Selesai</option>
               </select>
+              <button
+                onClick={() => setConfirmUnlockAll(true)}
+                disabled={unlockAllLoading}
+                style={{
+                  fontSize: '11.5px',
+                  fontWeight: 700,
+                  padding: '5px 12px',
+                  borderRadius: '8px',
+                  background: '#fef3c7',
+                  border: '1.5px solid #fde68a',
+                  color: '#92400e',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                }}
+              >
+                🔓 {unlockAllLoading ? 'Proses...' : 'Buka Kunci Semua'}
+              </button>
               {sessionOptions.length > 0 && (
                 <select
                   value={effectiveFilterSession}
@@ -565,6 +595,11 @@ function ProctorContent() {
       <Confirm open={!!unlockTarget} onClose={() => setUnlockTarget(null)} onConfirm={handleUnlock}
         title="Buka Kunci Sesi?" danger={false} confirmText="Ya, Buka"
         message={`Buka kunci sesi ${unlockTarget?.full_name}? (${unlockTarget?.cheat_log_count || unlockTarget?.cheat_warnings || 0}x total pelanggaran) — Counter kunci aktif direset ke 0.`} />
+
+      {/* Confirm Buka Kunci Massal */}
+      <Confirm open={confirmUnlockAll} onClose={() => setConfirmUnlockAll(false)} onConfirm={handleUnlockAll}
+        title="Buka Kunci Seluruh Peserta?" danger={false} confirmText="Ya, Buka Semua"
+        message="Buka kunci seluruh peserta di ruangan ini secara massal? Sesi peserta yang aktif akan langsung dapat melanjutkan pengerjaan." />
 
       {/* #10: Confirm Force Submit */}
       <Confirm open={!!forceTarget} onClose={() => setForceTarget(null)} onConfirm={handleForce}
