@@ -165,23 +165,30 @@ student.post('/exams/:examId/validate-token', async (c) => {
   }
 
   const { token_code, device_id } = body;
+  const cleanToken = (token_code || '').trim().toUpperCase();
   const userType = sourceToSessionUserType(user.source);
   const isDummy = ['percobaan', 'dummy'].some(k => String(user.username || '').toLowerCase().startsWith(k));
   let roomId = user.room_id || (isDummy ? 'dummy_room' : null);
 
-  if (userType === 'mansatas') {
-    const roster = await c.env.DB.prepare(
-      `SELECT room_id, tanggal_tes, sesi_tes
-       FROM cbt_exam_roster
-       WHERE exam_id = ? AND source_key = ? AND source_id = ?`
-    ).bind(examId, sourceToRosterKey(user.source), user.sub).first<any>();
-    if (!roster && !isDummy) return c.json(err('Anda belum di-assign ke roster ujian ini'), 403);
-    if (roster) roomId = roster.room_id || roomId;
-    if (!roomId && !isDummy) return c.json(err('Anda belum di-assign ke ruangan'), 400);
+  let tanggalTes = '';
+  let sesiTes = '';
+
+  const roster = await c.env.DB.prepare(
+    `SELECT room_id, tanggal_tes, sesi_tes
+     FROM cbt_exam_roster
+     WHERE exam_id = ? AND source_key = ? AND source_id = ?`
+  ).bind(examId, sourceToRosterKey(user.source), user.sub).first<any>();
+
+  if (roster) {
+    if (roster.room_id) roomId = roster.room_id || roomId;
+    if (roster.tanggal_tes) tanggalTes = roster.tanggal_tes;
+    if (roster.sesi_tes) sesiTes = roster.sesi_tes;
+  } else if (userType === 'mansatas' && !isDummy) {
+    return c.json(err('Anda belum di-assign ke roster ujian ini'), 403);
   }
 
   if (!roomId && !isDummy) return c.json(err('Anda belum di-assign ke ruangan'), 400);
-  if (!token_code)   return c.json(err('Token wajib diisi'), 400);
+  if (!cleanToken)   return c.json(err('Token wajib diisi'), 400);
   if (!device_id)    return c.json(err('Device ID diperlukan'), 400);
 
   // ── Rate limit ──
@@ -192,10 +199,8 @@ student.post('/exams/:examId/validate-token', async (c) => {
     }
   }
 
-  // ── Validasi jadwal untuk pendaftar PMB ──
-  let tanggalTes = '';
-  let sesiTes = '';
-  if (userType === 'pendaftar' && !isDummy) {
+  // ── Validasi jadwal untuk pendaftar PMB jika belum ada di roster ──
+  if (userType === 'pendaftar' && !isDummy && (!tanggalTes || !sesiTes)) {
     const pmbDb = getPmbDb(c.env);
     const pmbTable = getPmbTable(c.env);
     const jadwal = await pmbDb.prepare(
@@ -215,32 +220,44 @@ student.post('/exams/:examId/validate-token', async (c) => {
   }
 
   // ── Validasi token + cek expires_at ──
+  // Step 1: Cari token aktif berdasarkan exam_id, room_id, dan UPPER(token_code)
   let tokenRow = await c.env.DB.prepare(
     `SELECT * FROM cbt_exam_tokens
-     WHERE exam_id=? AND room_id=? AND tanggal_tes=? AND sesi_tes=? AND token_code=? AND is_active=1
-       AND (expires_at IS NULL OR expires_at > datetime('now'))`
-  ).bind(examId, roomId, tanggalTes, sesiTes, token_code).first();
+     WHERE exam_id=? AND room_id=? AND UPPER(token_code)=? AND is_active=1
+       AND (expires_at IS NULL OR expires_at > datetime('now'))
+     ORDER BY created_at DESC LIMIT 1`
+  ).bind(examId, roomId, cleanToken).first();
 
-  if (!tokenRow && (userType === 'cbt_user' || isDummy)) {
+  // Step 2: Fallback ke token tingkat exam jika token di-set global / tanpa filter ruangan khusus
+  if (!tokenRow) {
     tokenRow = await c.env.DB.prepare(
       `SELECT * FROM cbt_exam_tokens
-       WHERE exam_id=? AND token_code=? AND is_active=1
+       WHERE exam_id=? AND UPPER(token_code)=? AND is_active=1
          AND (expires_at IS NULL OR expires_at > datetime('now'))
        ORDER BY created_at DESC LIMIT 1`
-    ).bind(examId, token_code).first();
+    ).bind(examId, cleanToken).first();
   }
 
-  // Akun dummy diperbolehkan pakai token 'DUMMY' atau '1234' atau token ujian aktif apa saja
+  // Step 3: Akun dummy diperbolehkan pakai token 'DUMMY' atau '1234' atau token ujian aktif apa saja
   if (!tokenRow && isDummy) {
     const anyToken = await c.env.DB.prepare(
       `SELECT * FROM cbt_exam_tokens WHERE exam_id=? AND is_active=1 LIMIT 1`
     ).bind(examId).first();
-    if (anyToken || ['PERCOBAAN', 'DUMMY', '1234'].includes(token_code.trim().toUpperCase())) {
-      tokenRow = { token_code: token_code.trim().toUpperCase() };
+    if (anyToken || ['PERCOBAAN', 'DUMMY', '1234'].includes(cleanToken)) {
+      tokenRow = { token_code: cleanToken };
     }
   }
 
-  if (!tokenRow) return c.json(err('Token tidak valid atau sudah kedaluwarsa'), 401);
+  // Step 4: Jika token tetap tidak ketemu, periksa apakah token ada tapi non-aktif (is_active = 0)
+  if (!tokenRow) {
+    const inactiveToken = await c.env.DB.prepare(
+      `SELECT * FROM cbt_exam_tokens WHERE exam_id=? AND UPPER(token_code)=? LIMIT 1`
+    ).bind(examId, cleanToken).first();
+    if (inactiveToken) {
+      return c.json(err('Token belum diaktifkan oleh proktor atau panitia'), 401);
+    }
+    return c.json(err('Token tidak valid atau salah'), 401);
+  }
 
   // ── Jika akun dummy, reset percobaan sebelumnya secara otomatis agar bisa diulang sesuka hati ──
   if (isDummy) {
