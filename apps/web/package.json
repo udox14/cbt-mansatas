@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@types/dompurify": "^3.0.5",
+    "docx": "^9.7.1",
     "dompurify": "^3.4.2",
     "flowbite-react": "^0.10.2",
     "katex": "^0.16.11",
