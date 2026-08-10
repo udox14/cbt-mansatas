@@ -472,39 +472,6 @@ student.post('/sessions/:sessionId/heartbeat', async (c) => {
     'UPDATE cbt_exam_sessions SET last_heartbeat=? WHERE id=? AND user_id=? AND user_type=?'
   ).bind(now(), sessionId, user.sub, userType).run();
 
-  // Cek jadwal untuk pendaftar — kalau waktu habis, kunci otomatis
-  if (userType === 'pendaftar') {
-    const pmbDb = getPmbDb(c.env);
-    const pmbTable = getPmbTable(c.env);
-    const jadwal = await pmbDb.prepare(
-      `SELECT sesi_tes, tanggal_tes FROM ${pmbTable} WHERE id = ?`
-    ).bind(user.sub).first<any>();
-    if (jadwal?.sesi_tes && jadwal?.tanggal_tes) {
-      const parsed = parseSesiJam(jadwal.sesi_tes);
-      if (parsed && cekJadwal(jadwal.tanggal_tes, parsed.jamMulai, parsed.jamSelesai) === 'selesai') {
-        await c.env.DB.prepare(
-          'UPDATE cbt_exam_sessions SET is_time_locked=1, locked_at=COALESCE(locked_at, ?), last_heartbeat=? WHERE id=? AND user_id=? AND user_type=?'
-        ).bind(now(), now(), sessionId, user.sub, userType).run();
-        return c.json(ok({ time_locked: true, auto_submitted: false, started_at: session.started_at }, 'Waktu ujian berakhir dan sesi dikunci'));
-      }
-    }
-  } else if (userType === 'mansatas') {
-    const jadwal = await c.env.DB.prepare(
-      `SELECT tanggal_tes, sesi_tes
-       FROM cbt_exam_roster
-       WHERE exam_id = ? AND source_key = ? AND source_id = ?`
-    ).bind(session.exam_id, sourceToRosterKey(user.source), user.sub).first<any>();
-    if (jadwal?.sesi_tes && jadwal?.tanggal_tes) {
-      const parsed = parseSesiJam(jadwal.sesi_tes);
-      if (parsed && cekJadwal(jadwal.tanggal_tes, parsed.jamMulai, parsed.jamSelesai) === 'selesai') {
-        await c.env.DB.prepare(
-          'UPDATE cbt_exam_sessions SET is_time_locked=1, locked_at=COALESCE(locked_at, ?), last_heartbeat=? WHERE id=? AND user_id=? AND user_type=?'
-        ).bind(now(), now(), sessionId, user.sub, userType).run();
-        return c.json(ok({ time_locked: true, auto_submitted: false, started_at: session.started_at }, 'Waktu ujian berakhir dan sesi dikunci'));
-      }
-    }
-  }
-
   if (session.status === 'submitted') {
     return c.json(ok({ time_locked: false, auto_submitted: true, started_at: session.started_at }));
   }
@@ -527,6 +494,14 @@ student.post('/sessions/:sessionId/heartbeat', async (c) => {
       'UPDATE cbt_exam_sessions SET is_time_locked=1, locked_at=COALESCE(locked_at, ?), last_heartbeat=? WHERE id=? AND user_id=? AND user_type=?'
     ).bind(now(), now(), sessionId, user.sub, userType).run();
     return c.json(ok({ time_locked: true, auto_submitted: false, started_at: session.started_at }, 'Waktu ujian berakhir dan sesi dikunci'));
+  }
+
+  // Auto-heal sesi yang sempat terkunci karena bug jam nominal sesi padahal durasi pengerjaan 2 jamnya belum habis
+  if (session.is_time_locked && !isCheatLock) {
+    await c.env.DB.prepare(
+      'UPDATE cbt_exam_sessions SET is_time_locked=0, locked_at=NULL, last_heartbeat=? WHERE id=? AND user_id=? AND user_type=?'
+    ).bind(now(), sessionId, user.sub, userType).run();
+    session.is_time_locked = 0;
   }
 
   if (session.is_time_locked) {

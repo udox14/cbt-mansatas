@@ -177,7 +177,7 @@ function ProctorContent() {
     const activeTokens = t.success ? (t.data || []) : null;
     if (t.success) setTokens(activeTokens || []);
     if (s.success) {
-      const activeExamIds = activeTokens ? new Set(activeTokens.map((token: any) => token.exam_id)) : null;
+      const activeExamIds = (activeTokens && activeTokens.length > 0) ? new Set(activeTokens.map((token: any) => token.exam_id)) : null;
       const data: any[] = (s.data || []).filter((row: any) => !activeExamIds || activeExamIds.has(row.exam_id));
       setSessions(data);
       // #12: alert saat ada peserta baru dikunci

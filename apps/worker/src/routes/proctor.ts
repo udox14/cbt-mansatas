@@ -43,13 +43,21 @@ proctor.get('/token', async (c) => {
       ? cekJadwal(t.tanggal_tes, parsed.jamMulai, parsed.jamSelesai)
       : 'no_schedule';
     return { ...t, jadwal_status };
-  }).filter(t => t.jadwal_status !== 'selesai');
+  });
   return c.json(ok(enriched));
 });
 
 proctor.get('/sessions', async (c) => {
   const user = c.get('user');
   if (!user.room_id) return c.json(err('Anda belum di-assign ke ruangan'), 400);
+
+  // Auto-heal: buka kunci sesi di ruangan ini yang bukan locked-by-cheat
+  await c.env.DB.prepare(
+    `UPDATE cbt_exam_sessions
+     SET is_time_locked = 0, locked_at = NULL, last_heartbeat = ?
+     WHERE room_id = ? AND status = 'active' AND is_time_locked = 1 AND (cheat_warnings IS NULL OR cheat_warnings < 3)`
+  ).bind(now(), user.room_id).run();
+
   const examId = c.req.query('exam_id');
   let sql = `
     WITH active_tokens AS (
@@ -67,8 +75,8 @@ proctor.get('/sessions', async (c) => {
              COALESCE(p.tanggal_tes, '') as tanggal_tes
       FROM active_tokens t
       JOIN pendaftar p ON p.ruang_tes = t.room_name
-       AND (t.tanggal_tes = '' OR p.tanggal_tes = t.tanggal_tes)
-       AND (t.sesi_tes = '' OR p.sesi_tes = t.sesi_tes)
+       AND (t.tanggal_tes = '' OR p.tanggal_tes = '' OR p.tanggal_tes = t.tanggal_tes)
+       AND (t.sesi_tes = '' OR p.sesi_tes = '' OR p.sesi_tes = t.sesi_tes)
        WHERE UPPER(COALESCE(p.jalur, '')) NOT LIKE '%PRESTASI%'
          AND NOT EXISTS (
            SELECT 1 FROM cbt_exam_roster rr
@@ -84,8 +92,6 @@ proctor.get('/sessions', async (c) => {
       JOIN cbt_users cu ON cu.room_id = t.room_id
        AND cu.role = 'student'
        AND cu.is_active = 1
-       AND t.tanggal_tes = ''
-       AND t.sesi_tes = ''
        AND NOT EXISTS (
          SELECT 1 FROM cbt_exam_roster rr
          WHERE rr.exam_id = t.exam_id AND rr.source_key = 'cbt_user' AND rr.source_id = cu.id
@@ -101,13 +107,20 @@ proctor.get('/sessions', async (c) => {
       FROM active_tokens t
       JOIN cbt_exam_roster rr ON rr.exam_id = t.exam_id AND rr.room_id = t.room_id
        AND rr.source_key IN ('pmb', 'mansatas', 'cbt_user')
-       AND (t.tanggal_tes = '' OR rr.tanggal_tes = t.tanggal_tes)
-       AND (t.sesi_tes = '' OR rr.sesi_tes = t.sesi_tes)
+       AND (t.tanggal_tes = '' OR rr.tanggal_tes = '' OR rr.tanggal_tes = t.tanggal_tes)
+       AND (t.sesi_tes = '' OR rr.sesi_tes = '' OR rr.sesi_tes = t.sesi_tes)
     )
     SELECT es.id, p.exam_id, p.user_id, p.user_type,
            COALESCE(es.status, 'not_started') as status,
            COALESCE(es.cheat_warnings, 0) as cheat_warnings,
            es.started_at, es.finished_at, es.last_heartbeat, es.device_id, es.user_agent,
+           COALESCE(es.is_time_locked, 0) as is_time_locked,
+           p.full_name, p.nisn, p.sesi_tes, p.tanggal_tes,
+           p.exam_title, p.duration_minutes,
+           COALESCE(ac.answered_count, 0) as answered_count,
+           COALESCE(qc.total_questions, 0) as total_questions,
+           COALESCE(cl.cheat_log_count, 0) as cheat_log_count
+    FROM participants p
            COALESCE(es.is_time_locked, 0) as is_time_locked,
            p.full_name, p.nisn, p.sesi_tes, p.tanggal_tes,
            p.exam_title, p.duration_minutes,
