@@ -121,13 +121,6 @@ proctor.get('/sessions', async (c) => {
            COALESCE(qc.total_questions, 0) as total_questions,
            COALESCE(cl.cheat_log_count, 0) as cheat_log_count
     FROM participants p
-           COALESCE(es.is_time_locked, 0) as is_time_locked,
-           p.full_name, p.nisn, p.sesi_tes, p.tanggal_tes,
-           p.exam_title, p.duration_minutes,
-           COALESCE(ac.answered_count, 0) as answered_count,
-           COALESCE(qc.total_questions, 0) as total_questions,
-           COALESCE(cl.cheat_log_count, 0) as cheat_log_count
-    FROM participants p
     LEFT JOIN cbt_exam_sessions es ON es.exam_id = p.exam_id AND es.user_id = p.user_id AND es.user_type = p.user_type
     LEFT JOIN (
       SELECT session_id, COUNT(*) as answered_count
