@@ -12,6 +12,7 @@ import {
   BorderStyle,
   PageOrientation,
   VerticalMergeType,
+  TableLayoutType,
 } from 'docx';
 
 export interface ParticipantDocxData {
@@ -44,6 +45,20 @@ export interface AttendanceDocxOptions {
 const DEFAULT_INSTITUTION = 'MADRASAH ALIYAH NEGERI 1 TASIKMALAYA';
 const DEFAULT_SUBTITLE = 'PANITIA PELAKSANA UJIAN & CBT';
 
+// Total printable width on A4 Portrait (210mm = 11906 twips) with 2cm margins (1134 twips each side):
+// 11906 - (1134 * 2) = 9638 twips
+const TOTAL_TABLE_WIDTH = 9638;
+
+// Column width distribution for 7 columns (in twips):
+// Col 0: NO (500 twips ~5.2%)
+// Col 1: NISN (1200 twips ~12.5%)
+// Col 2: NAMA PESERTA (3838 twips ~39.8%) - Super wide for long names!
+// Col 3: JK (450 twips ~4.7%)
+// Col 4: MAPEL (1250 twips ~13.0%)
+// Col 5: GANJIL (1200 twips ~12.4%)
+// Col 6: GENAP (1200 twips ~12.4%)
+const COLUMN_WIDTHS = [500, 1200, 3838, 450, 1250, 1200, 1200];
+
 export async function generateAttendanceDocx(options: AttendanceDocxOptions): Promise<Blob> {
   const institution = options.institution_name || DEFAULT_INSTITUTION;
   const subTitle = options.sub_title || DEFAULT_SUBTITLE;
@@ -65,7 +80,7 @@ export async function generateAttendanceDocx(options: AttendanceDocxOptions): Pr
             text: subTitle.toUpperCase(),
             bold: true,
             size: 18, // 9pt
-            font: 'Calibri',
+            font: 'Arial',
             color: '4B5563',
           }),
         ],
@@ -77,7 +92,7 @@ export async function generateAttendanceDocx(options: AttendanceDocxOptions): Pr
             text: institution.toUpperCase(),
             bold: true,
             size: 24, // 12pt
-            font: 'Calibri',
+            font: 'Arial',
             color: '111827',
           }),
         ],
@@ -90,7 +105,7 @@ export async function generateAttendanceDocx(options: AttendanceDocxOptions): Pr
             text: 'DAFTAR HADIR PESERTA UJIAN',
             bold: true,
             size: 28, // 14pt
-            font: 'Calibri',
+            font: 'Arial',
             color: '1E3A8A',
             underline: {},
           }),
@@ -104,7 +119,7 @@ export async function generateAttendanceDocx(options: AttendanceDocxOptions): Pr
             text: `KEGIATAN: ${eventName.toUpperCase()}`,
             bold: true,
             size: 22, // 11pt
-            font: 'Calibri',
+            font: 'Arial',
             color: '374151',
           }),
         ],
@@ -113,7 +128,9 @@ export async function generateAttendanceDocx(options: AttendanceDocxOptions): Pr
 
     // Metadata Grid Table (Borderless)
     const metaTable = new Table({
-      width: { size: 100, type: WidthType.PERCENTAGE },
+      columnWidths: [4819, 4819],
+      layout: TableLayoutType.FIXED,
+      width: { size: TOTAL_TABLE_WIDTH, type: WidthType.DXA },
       borders: {
         top: { style: BorderStyle.NONE },
         bottom: { style: BorderStyle.SINGLE, size: 6, color: '9CA3AF' },
@@ -126,38 +143,38 @@ export async function generateAttendanceDocx(options: AttendanceDocxOptions): Pr
         new TableRow({
           children: [
             new TableCell({
-              width: { size: 50, type: WidthType.PERCENTAGE },
+              width: { size: 4819, type: WidthType.DXA },
               children: [
                 new Paragraph({
                   children: [
-                    new TextRun({ text: 'Mata Pelajaran : ', bold: true, size: 20, font: 'Calibri' }),
-                    new TextRun({ text: subjectTitle, bold: true, color: '1E40AF', size: 20, font: 'Calibri' }),
+                    new TextRun({ text: 'Mata Pelajaran : ', bold: true, size: 20, font: 'Arial' }),
+                    new TextRun({ text: subjectTitle, bold: true, color: '1E40AF', size: 20, font: 'Arial' }),
                   ],
                 }),
                 new Paragraph({
                   children: [
-                    new TextRun({ text: 'Ruangan          : ', bold: true, size: 20, font: 'Calibri' }),
-                    new TextRun({ text: roomName, size: 20, font: 'Calibri' }),
+                    new TextRun({ text: 'Ruangan          : ', bold: true, size: 20, font: 'Arial' }),
+                    new TextRun({ text: roomName, size: 20, font: 'Arial' }),
                   ],
                 }),
               ],
             }),
             new TableCell({
-              width: { size: 50, type: WidthType.PERCENTAGE },
+              width: { size: 4819, type: WidthType.DXA },
               children: [
                 new Paragraph({
                   alignment: AlignmentType.RIGHT,
                   children: [
-                    new TextRun({ text: 'Hari / Tanggal : ', bold: true, size: 20, font: 'Calibri' }),
-                    new TextRun({ text: tanggal, size: 20, font: 'Calibri' }),
+                    new TextRun({ text: 'Hari / Tanggal : ', bold: true, size: 20, font: 'Arial' }),
+                    new TextRun({ text: tanggal, size: 20, font: 'Arial' }),
                   ],
                 }),
                 new Paragraph({
                   alignment: AlignmentType.RIGHT,
                   children: [
-                    new TextRun({ text: 'Sesi / Waktu    : ', bold: true, size: 20, font: 'Calibri' }),
-                    new TextRun({ text: sesi, size: 20, font: 'Calibri' }),
-                    new TextRun({ text: `  (${participants.length} Peserta)`, bold: true, color: '4B5563', size: 20, font: 'Calibri' }),
+                    new TextRun({ text: 'Sesi / Waktu    : ', bold: true, size: 20, font: 'Arial' }),
+                    new TextRun({ text: sesi, size: 20, font: 'Arial' }),
+                    new TextRun({ text: `  (${participants.length} Peserta)`, bold: true, color: '4B5563', size: 20, font: 'Arial' }),
                   ],
                 }),
               ],
@@ -175,46 +192,46 @@ export async function generateAttendanceDocx(options: AttendanceDocxOptions): Pr
       tableHeader: true,
       children: [
         new TableCell({
-          width: { size: 600, type: WidthType.DXA }, // ~6%
+          width: { size: COLUMN_WIDTHS[0], type: WidthType.DXA },
           verticalMerge: VerticalMergeType.RESTART,
           verticalAlign: VerticalAlignTable.CENTER,
           shading: { fill: 'F3F4F6' },
-          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'NO', bold: true, size: 19, font: 'Calibri' })] })],
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'NO', bold: true, size: 19, font: 'Arial' })] })],
         }),
         new TableCell({
-          width: { size: 1400, type: WidthType.DXA }, // ~14%
+          width: { size: COLUMN_WIDTHS[1], type: WidthType.DXA },
           verticalMerge: VerticalMergeType.RESTART,
           verticalAlign: VerticalAlignTable.CENTER,
           shading: { fill: 'F3F4F6' },
-          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'NISN', bold: true, size: 19, font: 'Calibri' })] })],
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'NISN', bold: true, size: 19, font: 'Arial' })] })],
         }),
         new TableCell({
-          width: { size: 3000, type: WidthType.DXA }, // ~30%
+          width: { size: COLUMN_WIDTHS[2], type: WidthType.DXA },
           verticalMerge: VerticalMergeType.RESTART,
           verticalAlign: VerticalAlignTable.CENTER,
           shading: { fill: 'F3F4F6' },
-          children: [new Paragraph({ alignment: AlignmentType.LEFT, children: [new TextRun({ text: 'NAMA PESERTA', bold: true, size: 19, font: 'Calibri' })] })],
+          children: [new Paragraph({ alignment: AlignmentType.LEFT, children: [new TextRun({ text: 'NAMA PESERTA', bold: true, size: 19, font: 'Arial' })] })],
         }),
         new TableCell({
-          width: { size: 600, type: WidthType.DXA }, // ~6%
+          width: { size: COLUMN_WIDTHS[3], type: WidthType.DXA },
           verticalMerge: VerticalMergeType.RESTART,
           verticalAlign: VerticalAlignTable.CENTER,
           shading: { fill: 'F3F4F6' },
-          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'JK', bold: true, size: 19, font: 'Calibri' })] })],
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'JK', bold: true, size: 19, font: 'Arial' })] })],
         }),
         new TableCell({
-          width: { size: 1638, type: WidthType.DXA }, // ~17%
+          width: { size: COLUMN_WIDTHS[4], type: WidthType.DXA },
           verticalMerge: VerticalMergeType.RESTART,
           verticalAlign: VerticalAlignTable.CENTER,
           shading: { fill: 'F3F4F6' },
-          children: [new Paragraph({ alignment: AlignmentType.LEFT, children: [new TextRun({ text: 'MAPEL', bold: true, size: 19, font: 'Calibri' })] })],
+          children: [new Paragraph({ alignment: AlignmentType.LEFT, children: [new TextRun({ text: 'MAPEL', bold: true, size: 19, font: 'Arial' })] })],
         }),
         new TableCell({
-          width: { size: 2400, type: WidthType.DXA }, // ~27%
+          width: { size: COLUMN_WIDTHS[5] + COLUMN_WIDTHS[6], type: WidthType.DXA },
           columnSpan: 2,
           verticalAlign: VerticalAlignTable.CENTER,
           shading: { fill: 'F3F4F6' },
-          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'TANDA TANGAN', bold: true, size: 19, font: 'Calibri' })] })],
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'TANDA TANGAN', bold: true, size: 19, font: 'Arial' })] })],
         }),
       ],
     });
@@ -223,20 +240,20 @@ export async function generateAttendanceDocx(options: AttendanceDocxOptions): Pr
       cantSplit: true,
       tableHeader: true,
       children: [
-        new TableCell({ width: { size: 600, type: WidthType.DXA }, verticalMerge: VerticalMergeType.CONTINUE, children: [] }),
-        new TableCell({ width: { size: 1400, type: WidthType.DXA }, verticalMerge: VerticalMergeType.CONTINUE, children: [] }),
-        new TableCell({ width: { size: 3000, type: WidthType.DXA }, verticalMerge: VerticalMergeType.CONTINUE, children: [] }),
-        new TableCell({ width: { size: 600, type: WidthType.DXA }, verticalMerge: VerticalMergeType.CONTINUE, children: [] }),
-        new TableCell({ width: { size: 1638, type: WidthType.DXA }, verticalMerge: VerticalMergeType.CONTINUE, children: [] }),
+        new TableCell({ width: { size: COLUMN_WIDTHS[0], type: WidthType.DXA }, verticalMerge: VerticalMergeType.CONTINUE, children: [] }),
+        new TableCell({ width: { size: COLUMN_WIDTHS[1], type: WidthType.DXA }, verticalMerge: VerticalMergeType.CONTINUE, children: [] }),
+        new TableCell({ width: { size: COLUMN_WIDTHS[2], type: WidthType.DXA }, verticalMerge: VerticalMergeType.CONTINUE, children: [] }),
+        new TableCell({ width: { size: COLUMN_WIDTHS[3], type: WidthType.DXA }, verticalMerge: VerticalMergeType.CONTINUE, children: [] }),
+        new TableCell({ width: { size: COLUMN_WIDTHS[4], type: WidthType.DXA }, verticalMerge: VerticalMergeType.CONTINUE, children: [] }),
         new TableCell({
-          width: { size: 1200, type: WidthType.DXA },
+          width: { size: COLUMN_WIDTHS[5], type: WidthType.DXA },
           shading: { fill: 'F9FAFB' },
-          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'GANJIL', bold: true, size: 17, color: '6B7280', font: 'Calibri' })] })],
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'GANJIL', bold: true, size: 17, color: '6B7280', font: 'Arial' })] })],
         }),
         new TableCell({
-          width: { size: 1200, type: WidthType.DXA },
+          width: { size: COLUMN_WIDTHS[6], type: WidthType.DXA },
           shading: { fill: 'F9FAFB' },
-          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'GENAP', bold: true, size: 17, color: '6B7280', font: 'Calibri' })] })],
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'GENAP', bold: true, size: 17, color: '6B7280', font: 'Arial' })] })],
         }),
       ],
     });
@@ -258,43 +275,43 @@ export async function generateAttendanceDocx(options: AttendanceDocxOptions): Pr
           cantSplit: true,
           children: [
             new TableCell({
-              width: { size: 600, type: WidthType.DXA },
+              width: { size: COLUMN_WIDTHS[0], type: WidthType.DXA },
               verticalAlign: VerticalAlignTable.CENTER,
-              children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: `${no1}`, size: 19, font: 'Calibri' })] })],
+              children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: `${no1}`, size: 19, font: 'Arial' })] })],
             }),
             new TableCell({
-              width: { size: 1400, type: WidthType.DXA },
+              width: { size: COLUMN_WIDTHS[1], type: WidthType.DXA },
               verticalAlign: VerticalAlignTable.CENTER,
-              children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: p1.nisn || '-', size: 18, font: 'Calibri' })] })],
+              children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: p1.nisn || '-', size: 18, font: 'Arial' })] })],
             }),
             new TableCell({
-              width: { size: 3000, type: WidthType.DXA },
+              width: { size: COLUMN_WIDTHS[2], type: WidthType.DXA },
               verticalAlign: VerticalAlignTable.CENTER,
-              children: [new Paragraph({ children: [new TextRun({ text: p1.full_name, bold: true, size: 19, font: 'Calibri' })] })],
+              children: [new Paragraph({ children: [new TextRun({ text: p1.full_name, bold: true, size: 19, font: 'Arial' })] })],
             }),
             new TableCell({
-              width: { size: 600, type: WidthType.DXA },
+              width: { size: COLUMN_WIDTHS[3], type: WidthType.DXA },
               verticalAlign: VerticalAlignTable.CENTER,
-              children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: p1.gender || '-', size: 18, font: 'Calibri' })] })],
+              children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: p1.gender || '-', size: 18, font: 'Arial' })] })],
             }),
             new TableCell({
-              width: { size: 1638, type: WidthType.DXA },
+              width: { size: COLUMN_WIDTHS[4], type: WidthType.DXA },
               verticalAlign: VerticalAlignTable.CENTER,
-              children: [new Paragraph({ children: [new TextRun({ text: subjectTitle, size: 18, font: 'Calibri' })] })],
+              children: [new Paragraph({ children: [new TextRun({ text: subjectTitle, size: 18, font: 'Arial' })] })],
             }),
             // Signature Ganjil (Col 5): "1." - Vertical Merge RESTART across 2 rows
             new TableCell({
-              width: { size: 1200, type: WidthType.DXA },
+              width: { size: COLUMN_WIDTHS[5], type: WidthType.DXA },
               verticalMerge: VerticalMergeType.RESTART,
               verticalAlign: VerticalAlignTable.TOP,
-              children: [new Paragraph({ spacing: { before: 40 }, children: [new TextRun({ text: `${no1}.`, bold: true, size: 18, color: '374151', font: 'Calibri' })] })],
+              children: [new Paragraph({ spacing: { before: 40 }, children: [new TextRun({ text: `${no1}.`, bold: true, size: 18, color: '374151', font: 'Arial' })] })],
             }),
             // Signature Genap (Col 6): "2." - Vertical Merge RESTART across 2 rows
             new TableCell({
-              width: { size: 1200, type: WidthType.DXA },
+              width: { size: COLUMN_WIDTHS[6], type: WidthType.DXA },
               verticalMerge: VerticalMergeType.RESTART,
               verticalAlign: VerticalAlignTable.TOP,
-              children: [new Paragraph({ spacing: { before: 40 }, children: [new TextRun({ text: `${no2}.`, bold: true, size: 18, color: '374151', font: 'Calibri' })] })],
+              children: [new Paragraph({ spacing: { before: 40 }, children: [new TextRun({ text: `${no2}.`, bold: true, size: 18, color: '374151', font: 'Arial' })] })],
             }),
           ],
         });
@@ -304,39 +321,39 @@ export async function generateAttendanceDocx(options: AttendanceDocxOptions): Pr
           cantSplit: true,
           children: [
             new TableCell({
-              width: { size: 600, type: WidthType.DXA },
+              width: { size: COLUMN_WIDTHS[0], type: WidthType.DXA },
               verticalAlign: VerticalAlignTable.CENTER,
-              children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: `${no2}`, size: 19, font: 'Calibri' })] })],
+              children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: `${no2}`, size: 19, font: 'Arial' })] })],
             }),
             new TableCell({
-              width: { size: 1400, type: WidthType.DXA },
+              width: { size: COLUMN_WIDTHS[1], type: WidthType.DXA },
               verticalAlign: VerticalAlignTable.CENTER,
-              children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: p2.nisn || '-', size: 18, font: 'Calibri' })] })],
+              children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: p2.nisn || '-', size: 18, font: 'Arial' })] })],
             }),
             new TableCell({
-              width: { size: 3000, type: WidthType.DXA },
+              width: { size: COLUMN_WIDTHS[2], type: WidthType.DXA },
               verticalAlign: VerticalAlignTable.CENTER,
-              children: [new Paragraph({ children: [new TextRun({ text: p2.full_name, bold: true, size: 19, font: 'Calibri' })] })],
+              children: [new Paragraph({ children: [new TextRun({ text: p2.full_name, bold: true, size: 19, font: 'Arial' })] })],
             }),
             new TableCell({
-              width: { size: 600, type: WidthType.DXA },
+              width: { size: COLUMN_WIDTHS[3], type: WidthType.DXA },
               verticalAlign: VerticalAlignTable.CENTER,
-              children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: p2.gender || '-', size: 18, font: 'Calibri' })] })],
+              children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: p2.gender || '-', size: 18, font: 'Arial' })] })],
             }),
             new TableCell({
-              width: { size: 1638, type: WidthType.DXA },
+              width: { size: COLUMN_WIDTHS[4], type: WidthType.DXA },
               verticalAlign: VerticalAlignTable.CENTER,
-              children: [new Paragraph({ children: [new TextRun({ text: subjectTitle, size: 18, font: 'Calibri' })] })],
+              children: [new Paragraph({ children: [new TextRun({ text: subjectTitle, size: 18, font: 'Arial' })] })],
             }),
             // Signature Ganjil (Col 5): Vertical Merge CONTINUE
             new TableCell({
-              width: { size: 1200, type: WidthType.DXA },
+              width: { size: COLUMN_WIDTHS[5], type: WidthType.DXA },
               verticalMerge: VerticalMergeType.CONTINUE,
               children: [],
             }),
             // Signature Genap (Col 6): Vertical Merge CONTINUE
             new TableCell({
-              width: { size: 1200, type: WidthType.DXA },
+              width: { size: COLUMN_WIDTHS[6], type: WidthType.DXA },
               verticalMerge: VerticalMergeType.CONTINUE,
               children: [],
             }),
@@ -350,37 +367,37 @@ export async function generateAttendanceDocx(options: AttendanceDocxOptions): Pr
           cantSplit: true,
           children: [
             new TableCell({
-              width: { size: 600, type: WidthType.DXA },
+              width: { size: COLUMN_WIDTHS[0], type: WidthType.DXA },
               verticalAlign: VerticalAlignTable.CENTER,
-              children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: `${no1}`, size: 19, font: 'Calibri' })] })],
+              children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: `${no1}`, size: 19, font: 'Arial' })] })],
             }),
             new TableCell({
-              width: { size: 1400, type: WidthType.DXA },
+              width: { size: COLUMN_WIDTHS[1], type: WidthType.DXA },
               verticalAlign: VerticalAlignTable.CENTER,
-              children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: p1.nisn || '-', size: 18, font: 'Calibri' })] })],
+              children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: p1.nisn || '-', size: 18, font: 'Arial' })] })],
             }),
             new TableCell({
-              width: { size: 3000, type: WidthType.DXA },
+              width: { size: COLUMN_WIDTHS[2], type: WidthType.DXA },
               verticalAlign: VerticalAlignTable.CENTER,
-              children: [new Paragraph({ children: [new TextRun({ text: p1.full_name, bold: true, size: 19, font: 'Calibri' })] })],
+              children: [new Paragraph({ children: [new TextRun({ text: p1.full_name, bold: true, size: 19, font: 'Arial' })] })],
             }),
             new TableCell({
-              width: { size: 600, type: WidthType.DXA },
+              width: { size: COLUMN_WIDTHS[3], type: WidthType.DXA },
               verticalAlign: VerticalAlignTable.CENTER,
-              children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: p1.gender || '-', size: 18, font: 'Calibri' })] })],
+              children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: p1.gender || '-', size: 18, font: 'Arial' })] })],
             }),
             new TableCell({
-              width: { size: 1638, type: WidthType.DXA },
+              width: { size: COLUMN_WIDTHS[4], type: WidthType.DXA },
               verticalAlign: VerticalAlignTable.CENTER,
-              children: [new Paragraph({ children: [new TextRun({ text: subjectTitle, size: 18, font: 'Calibri' })] })],
+              children: [new Paragraph({ children: [new TextRun({ text: subjectTitle, size: 18, font: 'Arial' })] })],
             }),
             new TableCell({
-              width: { size: 1200, type: WidthType.DXA },
+              width: { size: COLUMN_WIDTHS[5], type: WidthType.DXA },
               verticalAlign: VerticalAlignTable.TOP,
-              children: [new Paragraph({ spacing: { before: 40 }, children: [new TextRun({ text: `${no1}.`, bold: true, size: 18, color: '374151', font: 'Calibri' })] })],
+              children: [new Paragraph({ spacing: { before: 40 }, children: [new TextRun({ text: `${no1}.`, bold: true, size: 18, color: '374151', font: 'Arial' })] })],
             }),
             new TableCell({
-              width: { size: 1200, type: WidthType.DXA },
+              width: { size: COLUMN_WIDTHS[6], type: WidthType.DXA },
               children: [],
             }),
           ],
@@ -391,7 +408,15 @@ export async function generateAttendanceDocx(options: AttendanceDocxOptions): Pr
     }
 
     const mainTable = new Table({
-      width: { size: 100, type: WidthType.PERCENTAGE },
+      columnWidths: COLUMN_WIDTHS,
+      layout: TableLayoutType.FIXED,
+      width: { size: TOTAL_TABLE_WIDTH, type: WidthType.DXA },
+      margins: {
+        top: 80,
+        bottom: 80,
+        left: 100,
+        right: 100,
+      },
       borders: {
         top: { style: BorderStyle.SINGLE, size: 4, color: '374151' },
         bottom: { style: BorderStyle.SINGLE, size: 4, color: '374151' },
@@ -409,7 +434,9 @@ export async function generateAttendanceDocx(options: AttendanceDocxOptions): Pr
       : new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
 
     const signatureTable = new Table({
-      width: { size: 100, type: WidthType.PERCENTAGE },
+      columnWidths: [4819, 4819],
+      layout: TableLayoutType.FIXED,
+      width: { size: TOTAL_TABLE_WIDTH, type: WidthType.DXA },
       borders: {
         top: { style: BorderStyle.NONE },
         bottom: { style: BorderStyle.NONE },
@@ -423,21 +450,21 @@ export async function generateAttendanceDocx(options: AttendanceDocxOptions): Pr
           cantSplit: true,
           children: [
             new TableCell({
-              width: { size: 50, type: WidthType.PERCENTAGE },
+              width: { size: 4819, type: WidthType.DXA },
               children: [
-                new Paragraph({ spacing: { before: 300 }, children: [new TextRun({ text: 'Mengetahui,', size: 19, font: 'Calibri' })] }),
-                new Paragraph({ children: [new TextRun({ text: 'Pengawas Ujian / Proktor', bold: true, size: 19, font: 'Calibri' })] }),
-                new Paragraph({ spacing: { before: 800 }, children: [new TextRun({ text: '( .................................................... )', size: 19, font: 'Calibri' })] }),
-                new Paragraph({ children: [new TextRun({ text: 'NIP. ', size: 18, font: 'Calibri' })] }),
+                new Paragraph({ spacing: { before: 300 }, children: [new TextRun({ text: 'Mengetahui,', size: 19, font: 'Arial' })] }),
+                new Paragraph({ children: [new TextRun({ text: 'Pengawas Ujian / Proktor', bold: true, size: 19, font: 'Arial' })] }),
+                new Paragraph({ spacing: { before: 800 }, children: [new TextRun({ text: '( .................................................... )', size: 19, font: 'Arial' })] }),
+                new Paragraph({ children: [new TextRun({ text: 'NIP. ', size: 18, font: 'Arial' })] }),
               ],
             }),
             new TableCell({
-              width: { size: 50, type: WidthType.PERCENTAGE },
+              width: { size: 4819, type: WidthType.DXA },
               children: [
-                new Paragraph({ alignment: AlignmentType.RIGHT, spacing: { before: 300 }, children: [new TextRun({ text: `Tasikmalaya, ${dateFormatted}`, size: 19, font: 'Calibri' })] }),
-                new Paragraph({ alignment: AlignmentType.RIGHT, children: [new TextRun({ text: 'Ketua Panitia Ujian', bold: true, size: 19, font: 'Calibri' })] }),
-                new Paragraph({ alignment: AlignmentType.RIGHT, spacing: { before: 800 }, children: [new TextRun({ text: '( .................................................... )', size: 19, font: 'Calibri' })] }),
-                new Paragraph({ alignment: AlignmentType.RIGHT, children: [new TextRun({ text: 'NIP. ', size: 18, font: 'Calibri' })] }),
+                new Paragraph({ alignment: AlignmentType.RIGHT, spacing: { before: 300 }, children: [new TextRun({ text: `Tasikmalaya, ${dateFormatted}`, size: 19, font: 'Arial' })] }),
+                new Paragraph({ alignment: AlignmentType.RIGHT, children: [new TextRun({ text: 'Ketua Panitia Ujian', bold: true, size: 19, font: 'Arial' })] }),
+                new Paragraph({ alignment: AlignmentType.RIGHT, spacing: { before: 800 }, children: [new TextRun({ text: '( .................................................... )', size: 19, font: 'Arial' })] }),
+                new Paragraph({ alignment: AlignmentType.RIGHT, children: [new TextRun({ text: 'NIP. ', size: 18, font: 'Arial' })] }),
               ],
             }),
           ],
