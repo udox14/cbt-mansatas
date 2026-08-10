@@ -11,6 +11,7 @@ import BulkImport from '@/components/admin/BulkImport';
 import MathContent from '@/components/content/MathContent';
 import { exportExamResults, exportExamAnalytics } from '@/lib/export';
 import { generateAttendanceDocx, downloadDocxBlob, ParticipantDocxData, MapelAttendanceData, AttendanceDocxOptions } from '@/lib/attendanceDocx';
+import { generateExamResultsDocx, downloadResultsDocxBlob, ExamResultDocxItem, ExamResultsDocxOptions } from '@/lib/examResultsDocx';
 import { isFullArabic } from '@/lib/rtl';
 import {
   ClipboardList, Users, School, Shield, LogOut, Menu, Layers,
@@ -590,6 +591,181 @@ function DownloadAttendanceModal({
   );
 }
 
+function DownloadExamResultsModal({
+  open,
+  onClose,
+  initialExamId,
+  events,
+  exams,
+  rooms,
+}: {
+  open: boolean;
+  onClose: () => void;
+  initialExamId?: string | null;
+  events: CbtEvent[];
+  exams: Exam[];
+  rooms: Room[];
+}) {
+  const { toast } = useToast();
+  const [selectedExamId, setSelectedExamId] = useState<string>('');
+  const [sortBy, setSortBy] = useState<'score' | 'name'>('score');
+  const [selectedRoom, setSelectedRoom] = useState<string>('all');
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      if (initialExamId && exams.some(e => e.id === initialExamId)) {
+        setSelectedExamId(initialExamId);
+      } else if (exams[0]) {
+        setSelectedExamId(exams[0].id);
+      }
+    }
+  }, [open, initialExamId, exams]);
+
+  const handleDownload = async () => {
+    if (!selectedExamId) {
+      toast('error', 'Pilih ujian terlebih dahulu');
+      return;
+    }
+    const targetExam = exams.find(e => e.id === selectedExamId);
+    if (!targetExam) return;
+
+    setLoading(true);
+    try {
+      const response = await GET<any[]>(`/api/admin/exams/${selectedExamId}/results-export`);
+      if (!response.success || !response.data) {
+        toast('error', response.error || 'Gagal memuat hasil ujian');
+        setLoading(false);
+        return;
+      }
+
+      let rawData = response.data || [];
+      if (selectedRoom !== 'all') {
+        rawData = rawData.filter((item: any) =>
+          item.room_id === selectedRoom || item.room_name === selectedRoom
+        );
+      }
+
+      const results: ExamResultDocxItem[] = rawData.map((item: any) => ({
+        nisn: item.nisn || item.username || '-',
+        full_name: item.full_name || 'Peserta',
+        class_name: item.class_name || item.grade || '-',
+        total_questions: Number(item.total_questions || 0),
+        total_correct: Number(item.total_correct || 0),
+        total_wrong: Number(item.total_wrong || 0),
+        total_unanswered: Number(item.total_unanswered || 0),
+        score: Number(item.score || 0),
+        room_name: item.room_name || '-',
+        status_pengerjaan: item.status_pengerjaan || 'Selesai',
+      }));
+
+      if (results.length === 0) {
+        toast('error', 'Tidak ada data hasil pengerjaan peserta untuk ujian ini');
+        setLoading(false);
+        return;
+      }
+
+      const eventObj = events.find(e => e.id === targetExam.event_id);
+      const roomObj = rooms.find(r => r.id === selectedRoom);
+
+      const blob = await generateExamResultsDocx({
+        exam_title: targetExam.title,
+        subject_name: targetExam.subject_name || targetExam.title,
+        event_name: eventObj?.name || 'CBT MAN 1 TASIKMALAYA',
+        room_name: selectedRoom === 'all' ? 'Semua Ruangan / Kelas' : (roomObj?.room_name || selectedRoom),
+        sortBy,
+        results,
+      });
+
+      const fileName = `Hasil_Ujian_${targetExam.title.replace(/[^a-zA-Z0-9_-]/g, '_')}_${sortBy === 'score' ? 'Peringkat' : 'Nama'}`;
+      downloadResultsDocxBlob(blob, fileName);
+
+      toast('success', 'File Word (.docx) hasil ujian berhasil di-download!');
+      onClose();
+    } catch (err: any) {
+      console.error('Error generating exam results docx:', err);
+      toast('error', 'Gagal membuat file Word hasil ujian');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!open) return null;
+
+  return (
+    <Modal open={open} onClose={onClose} title="Cetak / Download Hasil Ujian (.docx)" size="md">
+      <div style={{ padding: '4px 0' }}>
+        <p style={{ fontSize: '12px', color: C.textMid, lineHeight: 1.5, marginBottom: '14px' }}>
+          Format dokumen <strong>A4</strong> hasil pengerjaan ujian, lengkap dengan kolom <strong>Kelas</strong>, <strong>Jawaban Benar</strong>, <strong>Nilai Akhir</strong>, ringkasan statistik, dan footer tanda tangan.
+        </p>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <label style={{ display: 'block', fontSize: '11px', fontWeight: 800, color: C.textMid }}>
+            UJIAN / MATA PELAJARAN
+            <select
+              value={selectedExamId}
+              onChange={e => setSelectedExamId(e.target.value)}
+              style={{ width: '100%', marginTop: '5px', padding: '9px 10px', border: `1.5px solid ${C.borderMid}`, borderRadius: '9px', fontSize: '12.5px', background: C.white, fontWeight: 700 }}
+            >
+              {exams.map(ex => (
+                <option key={ex.id} value={ex.id}>
+                  {ex.title} {ex.subject_name ? `(${ex.subject_name})` : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label style={{ display: 'block', fontSize: '11px', fontWeight: 800, color: C.textMid }}>
+            URUTAN DATA (SORTING)
+            <select
+              value={sortBy}
+              onChange={e => setSortBy(e.target.value as 'score' | 'name')}
+              style={{ width: '100%', marginTop: '5px', padding: '9px 10px', border: `1.5px solid ${C.borderMid}`, borderRadius: '9px', fontSize: '12.5px', background: C.white, fontWeight: 700 }}
+            >
+              <option value="score">🏆 Urutkan Berdasarkan Nilai Tertinggi (Peringkat / Rank)</option>
+              <option value="name">🔤 Urutkan Berdasarkan Nama Peserta (A - Z)</option>
+            </select>
+          </label>
+
+          <label style={{ display: 'block', fontSize: '11px', fontWeight: 800, color: C.textMid }}>
+            RUANGAN / KELAS
+            <select
+              value={selectedRoom}
+              onChange={e => setSelectedRoom(e.target.value)}
+              style={{ width: '100%', marginTop: '5px', padding: '9px 10px', border: `1.5px solid ${C.borderMid}`, borderRadius: '9px', fontSize: '12.5px', background: C.white, fontWeight: 700 }}
+            >
+              <option value="all">Semua Ruangan / Kelas</option>
+              {rooms.map(rm => (
+                <option key={rm.id} value={rm.id}>
+                  {rm.room_name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '20px' }}>
+          <button
+            onClick={onClose}
+            disabled={loading}
+            style={{ background: C.bg, color: C.textMid, border: `1.5px solid ${C.borderMid}`, borderRadius: '9px', padding: '9px 15px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}
+          >
+            Batal
+          </button>
+          <button
+            onClick={handleDownload}
+            disabled={loading || !selectedExamId}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: C.green, color: '#fff', border: 'none', borderRadius: '9px', padding: '9px 18px', fontSize: '12px', fontWeight: 900, cursor: loading ? 'not-allowed' : 'pointer', opacity: loading ? 0.7 : 1 }}
+          >
+            {loading ? <Spinner size={14} /> : <FileDown size={14} />}
+            {loading ? 'Memproses Word...' : 'Download Hasil (.docx)'}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 // ── EXAMS PAGE ────────────────────────────────────────────────
 function ExamsPage({ activeEventId }: { activeEventId?: string | null }) {
   const { toast } = useToast();
@@ -606,6 +782,8 @@ function ExamsPage({ activeEventId }: { activeEventId?: string | null }) {
   const [showAttendanceModal, setShowAttendanceModal] = useState(false);
   const [attendanceEventId, setAttendanceEventId] = useState<string | null>(null);
   const [attendanceExamId, setAttendanceExamId] = useState<string | null>(null);
+  const [showResultsModal, setShowResultsModal] = useState(false);
+  const [resultsExamId, setResultsExamId] = useState<string | null>(null);
   const [rooms, setRooms] = useState<Room[]>([]);
 
   useEffect(() => {
@@ -707,6 +885,10 @@ function ExamsPage({ activeEventId }: { activeEventId?: string | null }) {
             <button onClick={() => { setAttendanceEventId(selectedExam.event_id || null); setAttendanceExamId(selectedExam.id); setShowAttendanceModal(true); }}
               style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: C.white, color: C.green, fontSize: '11.5px', fontWeight: 800, padding: '7px 13px', borderRadius: '10px', border: `1.5px solid ${C.greenBorder}`, cursor: 'pointer' }}>
               <FileDown size={13} strokeWidth={2} /> Cetak Absensi (.docx)
+            </button>
+            <button onClick={() => { setResultsExamId(selectedExam.id); setShowResultsModal(true); }}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: C.white, color: C.green, fontSize: '11.5px', fontWeight: 800, padding: '7px 13px', borderRadius: '10px', border: `1.5px solid ${C.greenBorder}`, cursor: 'pointer' }}>
+              <FileDown size={13} strokeWidth={2} /> Cetak Hasil (.docx)
             </button>
             <button onClick={() => setEditExam(selectedExam)}
               style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: C.bg, color: C.textMid, fontSize: '11.5px', fontWeight: 700, padding: '7px 13px', borderRadius: '10px', border: `1.5px solid ${C.borderMid}`, cursor: 'pointer' }}>
@@ -881,6 +1063,10 @@ function ExamsPage({ activeEventId }: { activeEventId?: string | null }) {
           <button onClick={() => { setAttendanceEventId(selectedEventId !== 'ALL' && selectedEventId !== 'NO_EVENT' ? selectedEventId : null); setAttendanceExamId('ALL'); setShowAttendanceModal(true); }}
             style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: C.white, color: C.green, fontSize: '12px', fontWeight: 800, padding: '8px 14px', borderRadius: '10px', border: `1.5px solid ${C.greenBorder}`, cursor: 'pointer' }}>
             <FileDown size={13} strokeWidth={2.5} /> Cetak Absensi (.docx)
+          </button>
+          <button onClick={() => { setResultsExamId(null); setShowResultsModal(true); }}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: C.white, color: C.green, fontSize: '12px', fontWeight: 800, padding: '8px 14px', borderRadius: '10px', border: `1.5px solid ${C.greenBorder}`, cursor: 'pointer' }}>
+            <FileDown size={13} strokeWidth={2.5} /> Cetak Hasil (.docx)
           </button>
           <button onClick={openNewExam}
             style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: C.green, color: '#fff', fontSize: '12px', fontWeight: 700, padding: '8px 14px', borderRadius: '10px', border: 'none', cursor: 'pointer' }}>
@@ -1080,6 +1266,15 @@ function ExamsPage({ activeEventId }: { activeEventId?: string | null }) {
         onClose={() => setShowAttendanceModal(false)}
         initialEventId={attendanceEventId}
         initialExamId={attendanceExamId}
+        events={events}
+        exams={exams}
+        rooms={rooms}
+      />
+
+      <DownloadExamResultsModal
+        open={showResultsModal}
+        onClose={() => setShowResultsModal(false)}
+        initialExamId={resultsExamId}
         events={events}
         exams={exams}
         rooms={rooms}
