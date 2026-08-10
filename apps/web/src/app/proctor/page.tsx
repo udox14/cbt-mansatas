@@ -479,7 +479,14 @@ function ProctorContent() {
                         <tr key={s.id || `${s.exam_id}-${s.user_type}-${s.user_id}`} style={{ borderBottom: i < filtered.length - 1 ? `1px solid ${C.borderLight}` : 'none', background: isLocked ? '#fffbeb' : isNotStarted ? '#f7f8f7' : 'transparent' }}>
                           <td style={{ padding: '10px 14px' }}>
                             <p style={{ color: isNotStarted ? C.textMuted : C.text, fontWeight: 700 }}>{s.full_name}</p>
-                            <p style={{ color: C.textFaint, fontSize: '10px', marginTop: '1px', fontFamily: 'monospace' }}>{s.nisn}</p>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px', flexWrap: 'wrap' }}>
+                              <span style={{ color: C.textFaint, fontSize: '10px', fontFamily: 'monospace' }}>{s.nisn}</span>
+                              {s.exam_title && filterExam === 'all' && (
+                                <span style={{ background: '#e0f2fe', color: '#0369a1', fontSize: '9.5px', fontWeight: 800, padding: '1px 6px', borderRadius: '4px', border: '1px solid #bae6fd' }}>
+                                  {s.exam_title}
+                                </span>
+                              )}
+                            </div>
                           </td>
                           <td style={{ padding: '10px 14px', textAlign: 'center', maxWidth: '210px' }}>
                             {s.device_id || s.user_agent
