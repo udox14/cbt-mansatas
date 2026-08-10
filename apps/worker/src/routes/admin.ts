@@ -928,6 +928,8 @@ async function getAssignedResultParticipants(env: Env, examId: string) {
       full_name: row.full_name || '',
       nisn: row.nisn || '',
       username: row.username || row.nisn || '',
+      class_name: row.class_name || row.grade || row.room_name || '',
+      grade: row.grade || '',
       asal_sekolah: row.asal_sekolah || '',
       pilihan_pesantren: row.pilihan_pesantren || '',
       room_id: row.room_id || (row.room_name ? roomNameToIdMap.get(row.room_name) || '' : ''),
@@ -942,6 +944,8 @@ async function getAssignedResultParticipants(env: Env, examId: string) {
     `SELECT r.source_id as user_id,
             CASE WHEN r.source_key = 'pmb' THEN 'pendaftar' ELSE r.source_key END as user_type,
             r.full_name, COALESCE(r.nisn, r.username) as nisn, r.username,
+            COALESCE(r.class_name, r.grade, rm.room_name, '') as class_name,
+            COALESCE(r.grade, '') as grade,
             r.tanggal_tes, r.sesi_tes, r.room_id, COALESCE(rm.room_name, '') as room_name,
             COALESCE(r.metadata_json, '{}') as metadata_json
      FROM cbt_exam_roster r
@@ -953,6 +957,7 @@ async function getAssignedResultParticipants(env: Env, examId: string) {
   const pendaftarSelectSql = `
     SELECT p.id as user_id, 'pendaftar' as user_type,
            p.nama_lengkap as full_name, p.nisn, p.nisn as username,
+           COALESCE(p.ruang_tes, '') as class_name,
            p.asal_sekolah, p.pilihan_pesantren, p.tanggal_tes, p.sesi_tes,
            p.ruang_tes as room_name
     FROM ${pmbTable} p
@@ -961,6 +966,8 @@ async function getAssignedResultParticipants(env: Env, examId: string) {
   const manualStudentSelect = `
     SELECT cu.id as user_id, 'cbt_user' as user_type,
            cu.nama_lengkap as full_name, cu.nisn, cu.username,
+           COALESCE(cu.class_name, cu.grade, r.room_name, '') as class_name,
+           COALESCE(cu.grade, '') as grade,
            '' as asal_sekolah, '' as pilihan_pesantren, '' as tanggal_tes, '' as sesi_tes,
            r.id as room_id, COALESCE(r.room_name, '') as room_name
     FROM cbt_users cu

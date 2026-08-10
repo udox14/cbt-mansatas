@@ -11,7 +11,7 @@ import BulkImport from '@/components/admin/BulkImport';
 import MathContent from '@/components/content/MathContent';
 import { exportExamResults, exportExamAnalytics } from '@/lib/export';
 import { generateAttendanceDocx, downloadDocxBlob, ParticipantDocxData, MapelAttendanceData, AttendanceDocxOptions } from '@/lib/attendanceDocx';
-import { generateExamResultsDocx, downloadResultsDocxBlob, ExamResultDocxItem, MapelResultsData, ExamResultsDocxOptions } from '@/lib/examResultsDocx';
+import { generateExamResultsDocx, downloadResultsDocxBlob, formatClassName, ExamResultDocxItem, MapelResultsData, ExamResultsDocxOptions } from '@/lib/examResultsDocx';
 import { isFullArabic } from '@/lib/rtl';
 import {
   ClipboardList, Users, School, Shield, LogOut, Menu, Layers,
@@ -668,7 +668,7 @@ function DownloadExamResultsModal({
           const results: ExamResultDocxItem[] = rawData.map((item: any) => ({
             nisn: item.nisn || item.username || '-',
             full_name: item.full_name || 'Peserta',
-            class_name: item.class_name || item.grade || '-',
+            class_name: formatClassName(item.class_name || item.grade, item.room_name),
             total_questions: Number(item.total_questions || 0),
             total_correct: Number(item.total_correct || 0),
             total_wrong: Number(item.total_wrong || 0),

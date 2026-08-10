@@ -44,6 +44,51 @@ export interface ExamResultsDocxOptions {
   mapels: MapelResultsData[];
 }
 
+export function formatClassName(rawClass?: string, rawRoom?: string): string {
+  const raw = (rawClass || '').trim() || (rawRoom || '').trim();
+  if (!raw || raw === '-') return '-';
+
+  // 1. If it already matches X-Y or XX-Y or 11-9, 12-1, 10-3
+  const regexWithSeparator = /\b(10|11|12|X|XI|XII)\s*[-_\/.]\s*(\d{1,2})\b/i;
+  const matchSep = raw.match(regexWithSeparator);
+  if (matchSep) {
+    let grade = matchSep[1].toUpperCase();
+    if (grade === 'X') grade = '10';
+    else if (grade === 'XI') grade = '11';
+    else if (grade === 'XII') grade = '12';
+    return `${grade}-${matchSep[2]}`;
+  }
+
+  // 2. Match pattern with Grade + optional major + number, e.g. "XI IPA 9", "11 MIPA 9", "XII IPS 1"
+  const regexFull = /\b(10|11|12|X|XI|XII)\b(?:\s+[A-Za-z]+)*\s+(\d{1,2})\b/i;
+  const matchFull = raw.match(regexFull);
+  if (matchFull) {
+    let grade = matchFull[1].toUpperCase();
+    if (grade === 'X') grade = '10';
+    else if (grade === 'XI') grade = '11';
+    else if (grade === 'XII') grade = '12';
+    return `${grade}-${matchFull[2]}`;
+  }
+
+  // 3. Clean out major names like IPA, IPS, MIPA, AGAMA, PK -> extract grade & number
+  let cleaned = raw.toUpperCase()
+    .replace(/\b(MIPA|IPA|IPS|AGAMA|KEAGAMAAN|BAHASA|PK|JURUSAN)\b/g, '')
+    .replace(/\b(RUANG|RUANGAN|LAB|R)\b/g, '')
+    .trim();
+
+  cleaned = cleaned
+    .replace(/\bXII\b/g, '12')
+    .replace(/\bXI\b/g, '11')
+    .replace(/\bX\b/g, '10');
+
+  const numbers = cleaned.match(/\d+/g);
+  if (numbers && numbers.length >= 2) {
+    return `${numbers[0]}-${numbers[1]}`;
+  }
+
+  return raw;
+}
+
 const DEFAULT_INSTITUTION = 'MADRASAH ALIYAH NEGERI 1 TASIKMALAYA';
 const DEFAULT_SUBTITLE = 'PANITIA PELAKSANA UJIAN & CBT';
 
@@ -367,7 +412,7 @@ export async function generateExamResultsDocx(options: ExamResultsDocxOptions): 
             width: { size: COLUMN_WIDTHS[3], type: WidthType.DXA },
             verticalAlign: VerticalAlignTable.CENTER,
             shading: { fill: bgFill },
-            children: [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 10, after: 10 }, children: [new TextRun({ text: item.class_name || '-', size: 18, font: 'Arial' })] })],
+            children: [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 10, after: 10 }, children: [new TextRun({ text: formatClassName(item.class_name, item.room_name), size: 18, font: 'Arial' })] })],
           }),
           new TableCell({
             width: { size: COLUMN_WIDTHS[4], type: WidthType.DXA },
