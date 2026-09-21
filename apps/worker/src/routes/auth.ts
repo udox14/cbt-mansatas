@@ -6,31 +6,17 @@
 // ============================================================
 
 import { Hono } from 'hono';
-import type { Env } from '../types';
-import { signJWT } from '../utils/jwt';
-import { verifyPassword, hashPassword, newId, ok, err } from '../utils/helpers';
-import { authMiddleware } from '../middleware/auth';
-import { checkRateLimit, resetRateLimit } from '../utils/ratelimit';
-import { findMansatasByCredentials } from '../services/participants';
-import { getPmbDb, getPmbTable } from '../utils/pmb';
+import type { Env } from '../types.ts';
+import { signJWT } from '../utils/jwt.ts';
+import { verifyPassword, newId, ok, err } from '../utils/helpers.ts';
+import { authMiddleware } from '../middleware/auth.ts';
+import { checkRateLimit, resetRateLimit } from '../utils/ratelimit.ts';
+import { findMansatasByCredentials } from '../services/participants.ts';
+import { MansatasStaffAuthAdapter } from '../services/platform/auth-mansatas.ts';
+import { syncStaffProfile } from '../services/platform/permissions.ts';
 
 const auth = new Hono<{ Bindings: Env }>();
 const STAFF_SESSION_HOURS = 24 * 90; // 3 bulan untuk admin/proktor
-
-function matchesPendaftarPassword(row: any, password: string): boolean {
-  if (row?.jalur && String(row.jalur).toUpperCase().includes('PRESTASI')) return false;
-  const tgl = String(row?.tanggal_lahir || '');
-  let expected = '';
-  if (/^\d{4}-\d{2}-\d{2}/.test(tgl)) {
-    const [y, m, d] = tgl.split(/[-T]/);
-    expected = `${d}${m}${y}`;
-  } else if (/^\d{2}[-/]\d{2}[-/]\d{4}/.test(tgl)) {
-    expected = tgl.replace(/[-/]/g, '');
-  } else {
-    expected = tgl.replace(/[-/\s]/g, '');
-  }
-  return !!expected && password === expected;
-}
 
 auth.post('/login', async (c) => {
   let body: { username?: string; password?: string };
@@ -44,13 +30,14 @@ auth.post('/login', async (c) => {
   if (!username || !password) return c.json(err('Username dan password wajib diisi'), 400);
 
   const uname = username.trim().slice(0, 100);
-  const pwd   = password.trim().slice(0, 200);
+  // Staff password must NOT be trimmed (PBKDF2 Web Crypto standard)
+  const rawPassword = password.slice(0, 200);
+  // Student & legacy passwords preserve .trim() for backward compatibility
+  const legacyPassword = password.trim().slice(0, 200);
 
-  if (!uname || !pwd) return c.json(err('Username dan password tidak boleh kosong'), 400);
+  if (!uname || !rawPassword) return c.json(err('Username dan password tidak boleh kosong'), 400);
 
   // ── Rate Limiting ─────────────────────────────────────────
-  // Batasi per IP (5 percobaan / 60 detik)
-  // dan per username (10 percobaan / 5 menit)
   const ip = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || 'unknown';
   const [ipLimit, userLimit] = await Promise.all([
     checkRateLimit(c.env.RATE_LIMIT, `login:ip:${ip}`, 5, 60),
@@ -64,44 +51,50 @@ auth.post('/login', async (c) => {
     return c.json(err('Terlalu banyak percobaan login untuk akun ini. Coba lagi dalam 5 menit.'), 429);
   }
 
-  // ── 1. Cek tabel admins (PMB existing) ─────────────────
-  // Preflight semua sumber untuk menolak credential yang valid di lebih dari
-  // satu sumber sebelum salah satu branch legacy mengeluarkan token.
-  let preflightMansatas: Awaited<ReturnType<typeof findMansatasByCredentials>>['participant'] = null;
+  // ── Multi-Source Preflight Collision Check ─────────────────
+  let preflightMansatasParticipant: Awaited<ReturnType<typeof findMansatasByCredentials>>['participant'] = null;
   try {
-    preflightMansatas = (await findMansatasByCredentials(c.env, uname, pwd)).participant;
+    preflightMansatasParticipant = (await findMansatasByCredentials(c.env, uname, legacyPassword)).participant;
   } catch (e) {
-    console.warn('mansatas-db login adapter belum siap:', e instanceof Error ? e.message : e);
+    console.warn('mansatas-db student login adapter check:', e instanceof Error ? e.message : e);
   }
-  const pmbDb = getPmbDb(c.env);
-  const pmbTable = getPmbTable(c.env);
 
-  const [preflightAdmin, preflightCbtUser, preflightPendaftar] = await Promise.all([
+  let preflightMansatasStaffMatch = false;
+  if (c.env.MANSATAS_DB) {
+    try {
+      preflightMansatasStaffMatch = await MansatasStaffAuthAdapter.preflight(c.env.MANSATAS_DB, uname, rawPassword);
+    } catch (e) {
+      console.warn('MANSATAS_DB staff preflight error:', e instanceof Error ? e.message : e);
+    }
+  }
+
+  const [preflightAdmin, preflightCbtUser] = await Promise.all([
     c.env.DB.prepare('SELECT id, username, password, nama_lengkap FROM admins WHERE username = ?').bind(uname).first<any>(),
     c.env.DB.prepare('SELECT * FROM cbt_users WHERE username = ? AND is_active = 1').bind(uname).first<any>(),
-    pmbDb.prepare(
-      `SELECT id, nisn, nama_lengkap, tanggal_lahir, ruang_tes, no_pendaftaran, jalur FROM ${pmbTable} WHERE nisn = ?`
-    ).bind(uname).first<any>(),
   ]);
 
-  let credentialMatches = preflightMansatas ? 1 : 0;
+  let credentialMatches = 0;
+  if (preflightMansatasParticipant) credentialMatches++;
+  if (preflightMansatasStaffMatch) credentialMatches++;
+
   if (preflightAdmin) {
     const valid = preflightAdmin.password?.includes(':')
-      ? await verifyPassword(pwd, preflightAdmin.password)
-      : preflightAdmin.password === pwd;
+      ? await verifyPassword(legacyPassword, preflightAdmin.password)
+      : preflightAdmin.password === legacyPassword;
     if (valid) credentialMatches++;
   }
   if (preflightCbtUser) {
     const valid = preflightCbtUser.password_hash?.includes(':')
-      ? await verifyPassword(pwd, preflightCbtUser.password_hash)
-      : preflightCbtUser.password_hash === pwd;
+      ? await verifyPassword(legacyPassword, preflightCbtUser.password_hash)
+      : preflightCbtUser.password_hash === legacyPassword;
     if (valid) credentialMatches++;
   }
-  if (preflightPendaftar && matchesPendaftarPassword(preflightPendaftar, pwd)) credentialMatches++;
+
   if (credentialMatches > 1) {
     return c.json(err('Username atau password cocok di lebih dari satu sumber. Hubungi administrator.'), 401);
   }
 
+  // ── 1. Cek tabel admins (PMB existing) ─────────────────────
   const admin = await c.env.DB.prepare(
     'SELECT id, username, password, nama_lengkap FROM admins WHERE username = ?'
   ).bind(uname).first<any>();
@@ -109,37 +102,45 @@ auth.post('/login', async (c) => {
   if (admin) {
     let valid = false;
     if (admin.password && admin.password.includes(':')) {
-      // PBKDF2 hash (format baru)
-      valid = await verifyPassword(pwd, admin.password);
+      valid = await verifyPassword(legacyPassword, admin.password);
     } else {
-      // Plain text (format lama dari PMB) — masih didukung tapi deprecated
-      valid = admin.password === pwd;
+      valid = admin.password === legacyPassword;
     }
-    // Username admin boleh kebetulan sama dengan sumber peserta; jika
-    // password admin tidak cocok, lanjutkan mencoba sumber lain.
     if (valid) {
-      // Reset rate limit counter setelah berhasil login
       await resetRateLimit(c.env.RATE_LIMIT, `login:ip:${ip}`);
       await resetRateLimit(c.env.RATE_LIMIT, `login:user:${uname}`);
 
+      const allowedModes = ['pmb', 'kegiatan', 'tka', 'semester', 'ulangan'];
       const token = await signJWT({
-        sub: admin.id, username: admin.username, role: 'admin',
-        room_id: null, full_name: admin.nama_lengkap || 'Admin',
+        sub: admin.id,
+        username: admin.username,
+        role: 'admin',
+        room_id: null,
+        full_name: admin.nama_lengkap || 'Admin',
         source: 'admins',
+        roles: ['admin'],
+        permissions: ['*'],
+        allowed_modes: allowedModes,
       }, c.env.JWT_SECRET, STAFF_SESSION_HOURS);
 
       return c.json(ok({
         token,
-        user: { id: admin.id, username: admin.username, full_name: admin.nama_lengkap, role: 'admin', room_id: null, source: 'admins' },
+        user: {
+          id: admin.id,
+          username: admin.username,
+          full_name: admin.nama_lengkap,
+          role: 'admin',
+          room_id: null,
+          source: 'admins',
+          roles: ['admin'],
+          permissions: ['*'],
+          allowed_modes: allowedModes,
+        },
       }, 'Login berhasil'));
     }
   }
 
-  // ── 2. Cek tabel cbt_users (proktor / student non-PMB) ──
-  // Sumber sekolah dibaca lebih awal agar collision credential dapat
-  // ditolak sebelum legacy source mengembalikan token.
-  const mansatasParticipant = preflightMansatas;
-
+  // ── 2. Cek tabel cbt_users (proktor / student non-PMB) ─────
   const cbtUser = await c.env.DB.prepare(
     'SELECT * FROM cbt_users WHERE username = ? AND is_active = 1'
   ).bind(uname).first<any>();
@@ -147,177 +148,143 @@ auth.post('/login', async (c) => {
   if (cbtUser) {
     let valid = false;
     if (cbtUser.password_hash?.includes(':')) {
-      valid = await verifyPassword(pwd, cbtUser.password_hash);
+      valid = await verifyPassword(legacyPassword, cbtUser.password_hash);
     } else {
-      // Plain text lama — masih didukung tapi deprecated
-      valid = cbtUser.password_hash === pwd;
+      valid = cbtUser.password_hash === legacyPassword;
     }
-    // Jika kredensial cbt_user tidak cocok, lanjutkan mencoba sumber lain.
-    // Ini penting untuk login global ketika username kebetulan sama.
     if (valid) {
-      if (mansatasParticipant) {
-        return c.json(err('Username atau password cocok di lebih dari satu sumber. Hubungi administrator.'), 401);
-      }
-
       await resetRateLimit(c.env.RATE_LIMIT, `login:ip:${ip}`);
       await resetRateLimit(c.env.RATE_LIMIT, `login:user:${uname}`);
 
       const sessionHours = ['admin', 'proctor'].includes(cbtUser.role)
         ? STAFF_SESSION_HOURS
         : undefined;
+
+      const roles = [cbtUser.role];
+      const allowed_modes = cbtUser.role === 'admin'
+        ? ['pmb', 'kegiatan', 'tka', 'semester', 'ulangan']
+        : cbtUser.role === 'proctor'
+        ? ['kegiatan', 'semester']
+        : [];
+
       const token = await signJWT({
-        sub: cbtUser.id, username: cbtUser.username, role: cbtUser.role,
-        room_id: cbtUser.room_id, full_name: cbtUser.nama_lengkap,
+        sub: cbtUser.id,
+        username: cbtUser.username,
+        role: cbtUser.role,
+        room_id: cbtUser.room_id,
+        full_name: cbtUser.nama_lengkap,
         source: 'cbt_user',
+        roles,
+        allowed_modes,
       }, c.env.JWT_SECRET, sessionHours);
 
       return c.json(ok({
         token,
-        user: { id: cbtUser.id, username: cbtUser.username, full_name: cbtUser.nama_lengkap, role: cbtUser.role, room_id: cbtUser.room_id, source: 'cbt_user' },
+        user: {
+          id: cbtUser.id,
+          username: cbtUser.username,
+          full_name: cbtUser.nama_lengkap,
+          role: cbtUser.role,
+          room_id: cbtUser.room_id,
+          source: 'cbt_user',
+          roles,
+          allowed_modes,
+        },
       }, 'Login berhasil'));
     }
   }
 
-  // ── 2.5 Cek MANSATAS_DB (GTK user login dengan Email) ──
+  // ── 2.5 Cek MANSATAS_DB Staff (Authoritative PBKDF2 Web Crypto) ─
   if (c.env.MANSATAS_DB) {
     try {
-      let mansatasGtk: any = null;
-      try {
-        mansatasGtk = await c.env.MANSATAS_DB.prepare(`SELECT * FROM "user" WHERE LOWER(email) = LOWER(?)`).bind(uname).first<any>();
-      } catch (e) {
-        mansatasGtk = await c.env.MANSATAS_DB.prepare(`SELECT * FROM users WHERE LOWER(email) = LOWER(?)`).bind(uname).first<any>();
-      }
+      const staffIdentity = await MansatasStaffAuthAdapter.authenticate(
+        c.env.MANSATAS_DB,
+        uname,
+        rawPassword
+      );
 
-      if (mansatasGtk) {
-        let valid = false;
-        if (pwd === 'mansatas2026') {
-          valid = true;
-        } else if (mansatasGtk.password || mansatasGtk.password_hash) {
-          const passField = mansatasGtk.password || mansatasGtk.password_hash;
-          if (passField.includes(':')) {
-            valid = await verifyPassword(pwd, passField);
-          } else {
-            valid = passField === pwd;
-          }
+      if (staffIdentity) {
+        await resetRateLimit(c.env.RATE_LIMIT, `login:ip:${ip}`);
+        await resetRateLimit(c.env.RATE_LIMIT, `login:user:${uname}`);
+
+        // Sync staff identity into CBT DB profile & RBAC tables (no passwords copied!)
+        const resolvedAuth = await syncStaffProfile(c.env.DB, staffIdentity);
+
+        let primaryRole: any = 'guru';
+        if (resolvedAuth.roles.includes('admin')) {
+          primaryRole = 'admin';
+        } else if (resolvedAuth.roles.includes('proctor')) {
+          primaryRole = 'proctor';
+        } else if (resolvedAuth.roles.includes('guru') || resolvedAuth.roles.includes('teacher')) {
+          primaryRole = 'guru';
         }
 
-        if (valid) {
-          await resetRateLimit(c.env.RATE_LIMIT, `login:ip:${ip}`);
-          await resetRateLimit(c.env.RATE_LIMIT, `login:user:${uname}`);
+        const permissionsList = resolvedAuth.permissions.map((p) => p.permission);
 
-          const existingAdmin = await c.env.DB.prepare('SELECT * FROM admins WHERE LOWER(username) = LOWER(?)').bind(uname).first<any>();
-          const existingUser = await c.env.DB.prepare('SELECT * FROM cbt_users WHERE LOWER(username) = LOWER(?)').bind(uname).first<any>();
+        const token = await signJWT({
+          sub: resolvedAuth.profile.id,
+          username: staffIdentity.email,
+          role: primaryRole,
+          room_id: null,
+          full_name: staffIdentity.nama_lengkap,
+          source: 'mansatas_gtk',
+          staff_id: resolvedAuth.profile.id,
+          roles: resolvedAuth.roles,
+          permissions: permissionsList,
+          allowed_modes: resolvedAuth.allowedModes,
+        }, c.env.JWT_SECRET, STAFF_SESSION_HOURS);
 
-          const role = existingAdmin ? 'admin' : (existingUser?.role || 'proctor');
-          const userId = existingAdmin?.id || existingUser?.id || newId();
-          const fullName = mansatasGtk.nama || mansatasGtk.nama_lengkap || mansatasGtk.name || uname;
-
-          if (!existingUser && !existingAdmin) {
-            const pwdHash = await hashPassword(pwd);
-            await c.env.DB.prepare(
-              'INSERT INTO cbt_users (id, username, password_hash, nama_lengkap, role, is_active) VALUES (?,?,?,?,?,1)'
-            ).bind(userId, uname.toLowerCase(), pwdHash, fullName, 'proctor').run();
-          }
-
-          const token = await signJWT({
-            sub: userId, username: uname.toLowerCase(), role,
-            room_id: existingUser?.room_id || null, full_name: fullName,
+        return c.json(ok({
+          token,
+          user: {
+            id: resolvedAuth.profile.id,
+            username: staffIdentity.email,
+            full_name: staffIdentity.nama_lengkap,
+            role: primaryRole,
+            room_id: null,
             source: 'mansatas_gtk',
-          }, c.env.JWT_SECRET, STAFF_SESSION_HOURS);
-
-          return c.json(ok({
-            token,
-            user: { id: userId, username: uname.toLowerCase(), full_name: fullName, role, room_id: existingUser?.room_id || null, source: 'mansatas_gtk' },
-          }, 'Login berhasil'));
-        }
+            staff_id: resolvedAuth.profile.id,
+            roles: resolvedAuth.roles,
+            permissions: permissionsList,
+            allowed_modes: resolvedAuth.allowedModes,
+          },
+        }, 'Login berhasil'));
       }
     } catch (e) {
-      console.warn('MANSATAS_DB GTK auth check error:', e);
+      console.warn('MANSATAS_DB staff auth check error:', e instanceof Error ? e.message : e);
     }
   }
 
-  // ── 3. Cek tabel pendaftar (PMB existing, login pakai NISN + tanggal lahir) ──
-  const pendaftar = await pmbDb.prepare(
-    `SELECT id, nisn, nama_lengkap, tanggal_lahir, ruang_tes, no_pendaftaran, jalur FROM ${pmbTable} WHERE nisn = ?`
-  ).bind(uname).first<any>();
-
-  if (pendaftar) {
-    // Jalur Prestasi tidak mengikuti CBT — tolak login
-    if (pendaftar.jalur && pendaftar.jalur.toUpperCase().includes('PRESTASI') && !mansatasParticipant) {
-      return c.json(err('Username atau password salah'), 401);
-      // Catatan: Tidak mengungkapkan alasan spesifik agar tidak enumerate akun
-    }
-
-    // Password = tanggal lahir format DDMMYYYY (misal: 22122002)
-    const tgl = pendaftar.tanggal_lahir || '';
-    let expectedPwd = '';
-
-    if (tgl.match(/^\d{4}-\d{2}-\d{2}/)) {
-      const [y, m, d] = tgl.split(/[-T]/);
-      expectedPwd = `${d}${m}${y}`;
-    } else if (tgl.match(/^\d{2}[-/]\d{2}[-/]\d{4}/)) {
-      expectedPwd = tgl.replace(/[-/]/g, '');
-    } else {
-      expectedPwd = tgl.replace(/[-/\s]/g, '');
-    }
-
-    if (!expectedPwd || pwd !== expectedPwd) {
-      if (!mansatasParticipant) return c.json(err('Username atau password salah'), 401);
-    } else if (!(pendaftar.jalur && pendaftar.jalur.toUpperCase().includes('PRESTASI'))) {
-      if (mansatasParticipant) {
-        return c.json(err('Username atau password cocok di lebih dari satu sumber. Hubungi administrator.'), 401);
-      }
-
-      await resetRateLimit(c.env.RATE_LIMIT, `login:ip:${ip}`);
-      await resetRateLimit(c.env.RATE_LIMIT, `login:user:${uname}`);
-
-    // Map ruang_tes dari pendaftar ke cbt_rooms jika ada
-      let roomId: string | null = null;
-      if (pendaftar.ruang_tes) {
-        const room = await c.env.DB.prepare(
-          'SELECT id FROM cbt_rooms WHERE room_name = ?'
-        ).bind(pendaftar.ruang_tes).first<any>();
-        if (room) roomId = room.id;
-      }
-
-      const token = await signJWT({
-        sub: pendaftar.id, username: pendaftar.nisn, role: 'student',
-        room_id: roomId, full_name: pendaftar.nama_lengkap,
-        source: 'pendaftar',
-      }, c.env.JWT_SECRET);
-
-      return c.json(ok({
-        token,
-        user: { id: pendaftar.id, username: pendaftar.nisn, full_name: pendaftar.nama_lengkap, role: 'student', room_id: roomId, source: 'pendaftar', no_pendaftaran: pendaftar.no_pendaftaran },
-      }, 'Login berhasil'));
-    }
-  }
-
-  if (mansatasParticipant) {
+  // ── 3. Cek Siswa Mansatas (School / PMB Participant via mansatas-db) ──
+  if (preflightMansatasParticipant) {
     await resetRateLimit(c.env.RATE_LIMIT, `login:ip:${ip}`);
     await resetRateLimit(c.env.RATE_LIMIT, `login:user:${uname}`);
 
     const token = await signJWT({
-      sub: mansatasParticipant.source_id,
-      username: mansatasParticipant.username,
+      sub: preflightMansatasParticipant.source_id,
+      username: preflightMansatasParticipant.username,
       role: 'student',
       room_id: null,
-      full_name: mansatasParticipant.full_name,
+      full_name: preflightMansatasParticipant.full_name,
       source: 'mansatas',
+      roles: ['student'],
+      allowed_modes: ['pmb', 'kegiatan', 'tka', 'semester', 'ulangan'],
     }, c.env.JWT_SECRET);
 
     return c.json(ok({
       token,
       user: {
-        id: mansatasParticipant.source_id,
-        username: mansatasParticipant.username,
-        full_name: mansatasParticipant.full_name,
+        id: preflightMansatasParticipant.source_id,
+        username: preflightMansatasParticipant.username,
+        full_name: preflightMansatasParticipant.full_name,
         role: 'student',
         room_id: null,
         source: 'mansatas',
-        nisn: mansatasParticipant.nisn,
-        class_name: mansatasParticipant.class_name,
-        grade: mansatasParticipant.grade,
+        nisn: preflightMansatasParticipant.nisn,
+        class_name: preflightMansatasParticipant.class_name,
+        grade: preflightMansatasParticipant.grade,
+        roles: ['student'],
+        allowed_modes: ['pmb', 'kegiatan', 'tka', 'semester', 'ulangan'],
       },
     }, 'Login berhasil'));
   }
@@ -327,6 +294,21 @@ auth.post('/login', async (c) => {
 
 auth.get('/me', authMiddleware, (c) => {
   return c.json(ok(c.get('user')));
+});
+
+auth.get('/modes', authMiddleware, (c) => {
+  const user = c.get('user');
+  const allowed = user.allowed_modes || (user.role === 'admin' ? ['pmb', 'kegiatan', 'tka', 'semester', 'ulangan'] : []);
+  return c.json(ok({
+    modes: allowed,
+    user: {
+      id: user.sub,
+      username: user.username,
+      full_name: user.full_name,
+      role: user.role,
+      roles: user.roles || [user.role],
+    },
+  }));
 });
 
 export default auth;

@@ -19,14 +19,26 @@ export default function LoginPage() {
     const r = await POST('/api/auth/login', { username: username.trim(), password });
     setLoading(false);
     if (!r.success) { setError(r.error || 'Login gagal'); return; }
+    const user = r.data.user;
     setToken(r.data.token);
     localStorage.setItem('cbt_user', JSON.stringify({
-      sub: r.data.user.id, username: r.data.user.username,
-      role: r.data.user.role, room_id: r.data.user.room_id,
-      full_name: r.data.user.full_name, source: r.data.user.source,
+      sub: user.id,
+      username: user.username,
+      role: user.role,
+      room_id: user.room_id,
+      full_name: user.full_name,
+      source: user.source,
+      roles: user.roles || [user.role],
+      permissions: user.permissions || [],
+      allowed_modes: user.allowed_modes || [],
     }));
-    const routes: Record<string, string> = { admin: '/admin/', proctor: '/proctor/', student: '/student/' };
-    window.location.href = routes[r.data.user.role] || '/student/';
+
+    if (user.role === 'student') {
+      window.location.href = '/student/';
+    } else {
+      // Staff (admin, guru, proctor) choose exam mode
+      window.location.href = '/app/select-mode/';
+    }
   }
 
   return (

@@ -3,9 +3,9 @@
 // ============================================================
 
 import { Hono } from 'hono';
-import type { Env } from '../types';
-import { authMiddleware, requireRole } from '../middleware/auth';
-import { ok, err, now, newId, parseSesiJam, cekJadwal } from '../utils/helpers';
+import type { Env } from '../types.ts';
+import { authMiddleware, requireRole } from '../middleware/auth.ts';
+import { ok, err, now, newId, parseSesiJam, cekJadwal } from '../utils/helpers.ts';
 
 const VIOLATION_LABELS: Record<string, string> = {
   tab_switch:       'Pindah Tab / Minimize Window',
@@ -69,22 +69,6 @@ proctor.get('/sessions', async (c) => {
       WHERE et.room_id = ? AND et.is_active = 1 AND e.active_status = 'active'
     ),
     participants AS (
-      SELECT DISTINCT t.exam_id, t.room_id,
-             t.exam_title, t.duration_minutes, p.id as user_id, 'pendaftar' as user_type,
-             p.nama_lengkap as full_name, p.nisn as nisn, COALESCE(p.sesi_tes, '') as sesi_tes,
-             COALESCE(p.tanggal_tes, '') as tanggal_tes
-      FROM active_tokens t
-      JOIN pendaftar p ON p.ruang_tes = t.room_name
-       AND (t.tanggal_tes = '' OR p.tanggal_tes = '' OR p.tanggal_tes = t.tanggal_tes)
-       AND (t.sesi_tes = '' OR p.sesi_tes = '' OR p.sesi_tes = t.sesi_tes)
-       WHERE UPPER(COALESCE(p.jalur, '')) NOT LIKE '%PRESTASI%'
-         AND NOT EXISTS (
-           SELECT 1 FROM cbt_exam_roster rr
-           WHERE rr.exam_id = t.exam_id AND rr.source_key = 'pmb' AND rr.source_id = p.id
-         )
-
-      UNION ALL
-
       SELECT DISTINCT t.exam_id, t.room_id,
              t.exam_title, t.duration_minutes, cu.id as user_id, 'cbt_user' as user_type,
              cu.nama_lengkap as full_name, cu.nisn as nisn, '' as sesi_tes, '' as tanggal_tes

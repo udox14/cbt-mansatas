@@ -3,32 +3,31 @@
 // ============================================================
 
 import { Hono } from 'hono';
-import type { Env } from '../types';
-import { authMiddleware, requireRole } from '../middleware/auth';
-import { err, newId, now, ok } from '../utils/helpers';
+import type { Env, ExamMode, EventStatus, CbtEvent } from '../types.ts';
+import { authMiddleware, requireRole } from '../middleware/auth.ts';
+import { err, newId, now, ok } from '../utils/helpers.ts';
 import {
   listMansatasParticipants,
   type NormalizedParticipant,
   type ParticipantFilters,
   type ParticipantSourceKey,
   MansatasConfigError,
-} from '../services/participants';
-import { getPmbDb, getPmbTable } from '../utils/pmb';
+} from '../services/participants.ts';
+import {
+  listEvents,
+  getEventById,
+  createEventRecord,
+  updateEventRecord,
+} from '../services/platform/events.ts';
+import { validateEventTransition } from '../services/platform/event-lifecycle.ts';
+import { listPmbSourceParticipants } from '../services/sources/pmb.ts';
 
 const adminEvents = new Hono<{ Bindings: Env }>();
 adminEvents.use('*', authMiddleware, requireRole('admin'));
 
-const PMB_EXCLUDE = "UPPER(COALESCE(jalur, '')) NOT LIKE '%PRESTASI%'";
 const SOURCES: ParticipantSourceKey[] = ['pmb', 'mansatas', 'cbt_user'];
 
-type EventRow = {
-  id: string;
-  code: string;
-  name: string;
-  activity_type: string;
-  participant_source: ParticipantSourceKey;
-  status: 'draft' | 'active' | 'archived';
-};
+type EventRow = CbtEvent;
 
 type ExtendedFilters = ParticipantFilters & {
   jalur?: string;
@@ -66,29 +65,6 @@ function readFilters(c: any): ExtendedFilters {
   };
 }
 
-function normalizePmb(row: any): NormalizedParticipant {
-  return {
-    source_key: 'pmb',
-    source_id: String(row.source_id),
-    username: String(row.username || row.nisn || ''),
-    nisn: String(row.nisn || ''),
-    full_name: String(row.full_name || ''),
-    class_name: '',
-    grade: '',
-    gender: String(row.gender || ''),
-    is_active: true,
-    room_name: row.room_name || null,
-    tanggal_tes: row.tanggal_tes || null,
-    sesi_tes: row.sesi_tes || null,
-    metadata: {
-      source: 'pmb',
-      no_pendaftaran: row.no_pendaftaran || null,
-      jalur: row.jalur || null,
-      asal_sekolah: row.asal_sekolah || null,
-    },
-  };
-}
-
 function normalizeCbtUser(row: any): NormalizedParticipant {
   return {
     source_key: 'cbt_user',
@@ -102,56 +78,6 @@ function normalizeCbtUser(row: any): NormalizedParticipant {
     is_active: !!row.is_active,
     room_id: row.room_id || null,
     metadata: { source: 'cbt_user', role: row.role || 'student' },
-  };
-}
-
-async function listPmbParticipants(
-  db: D1Database,
-  tableName: string,
-  filters: ExtendedFilters,
-  ids?: string[],
-): Promise<{ items: NormalizedParticipant[]; total: number }> {
-  if (filters.is_active === false) return { items: [], total: 0 };
-  const where: string[] = [PMB_EXCLUDE];
-  const params: (string | number)[] = [];
-  if (ids) {
-    if (!ids.length) return { items: [], total: 0 };
-    where.push(`id IN (${ids.map(() => '?').join(',')})`);
-    params.push(...ids);
-  }
-  if (filters.q) {
-    where.push('(LOWER(COALESCE(nama_lengkap, \'\')) LIKE ? OR LOWER(COALESCE(nisn, \'\')) LIKE ?)');
-    const q = `%${filters.q.toLowerCase()}%`;
-    params.push(q, q);
-  }
-  if (filters.gender) {
-    where.push('LOWER(COALESCE(jenis_kelamin, \'\')) = ?');
-    params.push(filters.gender.toLowerCase());
-  }
-  if (filters.jalur) { where.push('LOWER(COALESCE(jalur, \'\')) = ?'); params.push(filters.jalur.toLowerCase()); }
-  if (filters.room_name) { where.push('ruang_tes = ?'); params.push(filters.room_name); }
-  if (filters.tanggal_tes) { where.push('tanggal_tes = ?'); params.push(filters.tanggal_tes); }
-  if (filters.sesi_tes) { where.push('sesi_tes = ?'); params.push(filters.sesi_tes); }
-  // PMB existing does not expose class/grade/status-active columns. Its
-  // legacy behavior remains authoritative; those filters are applied by the
-  // mansatas adapter where the mapped fields actually exist.
-  const whereSql = ` WHERE ${where.join(' AND ')}`;
-  const page = Math.max(Number(filters.page || 1), 1);
-  const pageSize = Math.min(Math.max(Number(filters.page_size || 50), 1), 5000);
-  const [rows, count] = await Promise.all([
-    db.prepare(
-      `SELECT id AS source_id, nisn AS username, nisn, nama_lengkap AS full_name,
-              jenis_kelamin AS gender, ruang_tes AS room_name, tanggal_tes, sesi_tes,
-              no_pendaftaran, jalur, asal_sekolah
-       FROM ${tableName}${whereSql}
-       ORDER BY LOWER(COALESCE(nama_lengkap, '')), nisn
-       LIMIT ? OFFSET ?`
-    ).bind(...params, pageSize, (page - 1) * pageSize).all(),
-    db.prepare(`SELECT COUNT(*) AS total FROM ${tableName}${whereSql}`).bind(...params).first<any>(),
-  ]);
-  return {
-    items: (rows.results as any[]).map(normalizePmb),
-    total: Number(count?.total || 0),
   };
 }
 
@@ -204,7 +130,12 @@ async function listSourceParticipants(
     }
     return listMansatasParticipants(c.env, effectiveFilters, { ids, max: 5000 });
   }
-  if (source === 'pmb') return listPmbParticipants(getPmbDb(c.env), getPmbTable(c.env), filters, ids);
+  if (source === 'pmb') {
+    if (c.env.MANSATAS_DB) {
+      return listPmbSourceParticipants(c.env.MANSATAS_DB, filters, ids);
+    }
+    return { items: [], total: 0 };
+  }
   return listCbtUsers(c.env.DB, filters, ids);
 }
 
@@ -228,13 +159,9 @@ function validateEventBody(body: any) {
 }
 
 adminEvents.get('/events', async (c) => {
-  const { results } = await c.env.DB.prepare(
-    `SELECT e.*, COUNT(DISTINCT ex.id) AS exam_count, COUNT(DISTINCT r.id) AS roster_count
-     FROM cbt_events e
-     LEFT JOIN cbt_exams ex ON ex.event_id = e.id
-     LEFT JOIN cbt_exam_roster r ON r.event_id = e.id
-     GROUP BY e.id ORDER BY e.created_at DESC`
-  ).all();
+  const mode = c.req.query('mode') as ExamMode | undefined;
+  const status = c.req.query('status') as EventStatus | undefined;
+  const results = await listEvents(c.env.DB, { mode, status });
   return c.json(ok(results));
 });
 
@@ -276,39 +203,49 @@ adminEvents.get('/roster', async (c) => {
   return c.json(ok(results));
 });
 
+adminEvents.get('/events/:eventId', async (c) => {
+  const event = await getEventById(c.env.DB, c.req.param('eventId'));
+  if (!event) return c.json(err('Kegiatan tidak ditemukan'), 404);
+  return c.json(ok(event));
+});
 
 adminEvents.post('/events', async (c) => {
   const body = await c.req.json<any>();
-  const parsed = validateEventBody(body);
-  if ('error' in parsed) return c.json(err(parsed.error || 'Data kegiatan tidak valid'), 400);
-  const id = newId();
-  try {
-    await c.env.DB.prepare(
-      `INSERT INTO cbt_events (id, code, name, activity_type, participant_source, status, created_by)
-       VALUES (?,?,?,?,?,?,?)`
-    ).bind(id, parsed.code, parsed.name, parsed.activityType, parsed.source, body.status === 'draft' ? 'draft' : 'active', c.get('user').sub).run();
-  } catch (e: any) {
-    if (String(e?.message || '').toLowerCase().includes('unique')) return c.json(err('Kode kegiatan sudah digunakan'), 409);
-    throw e;
+  const user = c.get('user');
+  const result = await createEventRecord(c.env.DB, body, user.sub);
+  if (!result.success) {
+    return c.json(err(result.error || 'Gagal membuat kegiatan'), 400);
   }
-  return c.json(ok({ id }, 'Kegiatan dibuat'), 201);
+  return c.json(ok({ id: result.id }, 'Kegiatan dibuat'), 201);
 });
 
 adminEvents.put('/events/:eventId', async (c) => {
   const eventId = c.req.param('eventId');
-  const current = await getEvent(c.env.DB, eventId);
-  if (!current) return c.json(err('Kegiatan tidak ditemukan'), 404);
   const body = await c.req.json<any>();
-  const parsed = validateEventBody({ ...current, ...body });
-  if ('error' in parsed) return c.json(err(parsed.error || 'Data kegiatan tidak valid'), 400);
-  if (parsed.source !== current.participant_source) {
-    const rosterCount = await c.env.DB.prepare('SELECT COUNT(*) AS total FROM cbt_exam_roster WHERE event_id=?').bind(eventId).first<any>();
-    if (Number(rosterCount?.total || 0) > 0) return c.json(err('Sumber peserta tidak dapat diubah setelah roster dibuat'), 409);
+  const result = await updateEventRecord(c.env.DB, eventId, body);
+  if (!result.success) {
+    return c.json(err(result.error || 'Gagal memperbarui kegiatan'), 400);
   }
-  await c.env.DB.prepare(
-    `UPDATE cbt_events SET code=?, name=?, activity_type=?, participant_source=?, status=?, updated_at=? WHERE id=?`
-  ).bind(parsed.code, parsed.name, parsed.activityType, parsed.source, body.status === 'archived' ? 'archived' : body.status === 'draft' ? 'draft' : current.status, now(), eventId).run();
   return c.json(ok(null, 'Kegiatan diperbarui'));
+});
+
+adminEvents.put('/events/:eventId/status', async (c) => {
+  const eventId = c.req.param('eventId');
+  const body = await c.req.json<any>();
+  const targetStatus = body.status as EventStatus;
+  const current = await getEventById(c.env.DB, eventId);
+  if (!current) return c.json(err('Kegiatan tidak ditemukan'), 404);
+
+  const transitionCheck = validateEventTransition(current.status, targetStatus);
+  if (!transitionCheck.valid) {
+    return c.json(err(transitionCheck.error || 'Transisi status tidak valid'), 400);
+  }
+
+  await c.env.DB.prepare('UPDATE cbt_events SET status = ?, updated_at = ? WHERE id = ?')
+    .bind(targetStatus, now(), eventId)
+    .run();
+
+  return c.json(ok({ id: eventId, status: targetStatus }, `Status kegiatan diubah menjadi ${targetStatus}`));
 });
 
 adminEvents.get('/events/:eventId/participants', async (c) => {

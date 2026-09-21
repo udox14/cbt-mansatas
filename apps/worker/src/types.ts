@@ -35,16 +35,107 @@ export interface Env {
   MANSATAS_DB_CLASS_GROUP_COLUMN?: string;
 }
 
-export type Role = 'admin' | 'proctor' | 'student';
-export type UserSource = 'admins' | 'pendaftar' | 'cbt_user' | 'mansatas' | 'mansatas_gtk';
+export type Role = 'admin' | 'proctor' | 'student' | 'teacher';
+export type UserSource = 'admins' | 'pendaftar' | 'cbt_user' | 'mansatas' | 'mansatas_gtk' | 'mansatas_staff';
+
+export const EXAM_MODES = ['pmb', 'kegiatan', 'tka', 'semester', 'ulangan'] as const;
+export type ExamMode = (typeof EXAM_MODES)[number];
+
+export const EVENT_STATUSES = [
+  'draft',
+  'configuration',
+  'ready',
+  'active',
+  'completed',
+  'archived',
+] as const;
+export type EventStatus = (typeof EVENT_STATUSES)[number];
+
+export interface CbtEvent {
+  id: string;
+  code: string;
+  name: string;
+  mode: ExamMode;
+  activity_type: string;
+  participant_source: 'pmb' | 'mansatas' | 'cbt_user';
+  status: EventStatus;
+  academic_year_id?: string | null;
+  academic_year_name?: string | null;
+  term?: string | null;
+  proctor_access_before_minutes: number;
+  proctor_access_after_minutes: number;
+  created_by?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CbtExam {
+  id: string;
+  title: string;
+  description?: string | null;
+  duration_minutes: number;
+  rules_text?: string | null;
+  completion_message?: string | null;
+  is_score_visible: number;
+  randomize_questions: number;
+  randomize_options: number;
+  active_status: 'draft' | 'active' | 'finished';
+  passing_score: number;
+  target_jalur?: string | null;
+  event_id?: string | null;
+  subject_name?: string | null;
+  sequence_order: number;
+  cheat_limit: number;
+  cheat_action: string;
+  enforce_fullscreen: number;
+  mode?: ExamMode | null;
+  owner_staff_id?: string | null;
+  version_label?: string | null;
+  is_frozen: number;
+  created_by?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ScopeType = 'global' | 'mode' | 'event' | 'subject' | 'own' | 'room_slot';
+
+export interface StaffProfile {
+  id: string;                 // local cbt staff profile ID
+  mansatas_user_id: string;   // external identity from Mansatas
+  email: string;              // canonical normalized lowercase
+  nama_lengkap: string;
+  nip: string | null;
+  is_active: number;
+  synced_at: string;
+}
+
+export interface RoleAssignment {
+  id: string;
+  staff_id: string;
+  role: 'admin' | 'teacher' | 'proctor';
+  created_at: string;
+}
+
+export interface PermissionGrant {
+  id: string;
+  staff_id: string;
+  permission: string;
+  scope_type: ScopeType;
+  scope_value: string;        // normalized non-null: '*' for global
+  created_at: string;
+}
 
 export interface JWTPayload {
-  sub: string;         // user id (TEXT)
+  sub: string;                // user id or staff_id (TEXT)
   username: string;
   role: Role;
   room_id: string | null;
   full_name: string;
-  source: UserSource;  // dari tabel mana
+  source: UserSource;         // dari tabel mana
+  staff_id?: string;          // local cbt_staff_profiles.id if staff
+  roles?: string[];           // all assigned base roles
+  permissions?: string[];     // granted permission keys
+  allowed_modes?: string[];   // list of authorized exam modes
   iat: number;
   exp: number;
 }

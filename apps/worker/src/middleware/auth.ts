@@ -3,8 +3,8 @@
 // ============================================================
 
 import { createMiddleware } from 'hono/factory';
-import type { Env, JWTPayload, Role } from '../types';
-import { verifyJWT } from '../utils/jwt';
+import type { Env, JWTPayload, Role } from '../types.ts';
+import { verifyJWT } from '../utils/jwt.ts';
 
 declare module 'hono' {
   interface ContextVariableMap { user: JWTPayload; }

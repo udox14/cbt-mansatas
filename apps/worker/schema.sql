@@ -1,9 +1,12 @@
 -- ============================================================
--- Sistem CBT - Schema (Numpang di Database PMB Existing)
--- Semua tabel di-prefix "cbt_" agar tidak bentrok
+-- Sistem CBT - Schema (Prefix cbt_)
 -- ============================================================
--- Tabel existing yang TIDAK disentuh:
+-- Tabel legacy PMB lama (compatibility-only; bukan source of truth fitur baru):
 --   admins, pendaftar, prestasi, pengaturan, _cf_KV
+-- Catatan Arsitektur:
+--   Authoritative source of truth untuk pendaftar PMB baru dan seluruh master data
+--   madrasah adalah mansatas-db via adapter. Tabel legacy dipertahankan sementara.
+-- ============================================================
 
 -- CBT Users: Proktor + Peserta non-PMB (admin pakai tabel admins existing)
 CREATE TABLE IF NOT EXISTS cbt_users (

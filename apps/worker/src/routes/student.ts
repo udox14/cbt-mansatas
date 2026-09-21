@@ -8,7 +8,6 @@ import { authMiddleware, requireRole } from '../middleware/auth';
 import { buildRandomMaps, newId, ok, err, now, parseSesiJam, cekJadwal } from '../utils/helpers';
 import { checkRateLimit } from '../utils/ratelimit';
 import { sourceToSessionUserType, sourceToRosterKey } from '../services/participants';
-import { getPmbDb, getPmbTable } from '../utils/pmb';
 
 const student = new Hono<{ Bindings: Env }>();
 student.use('*', authMiddleware, requireRole('student'));
@@ -47,25 +46,12 @@ student.get('/exams', async (c) => {
      ORDER BY COALESCE(ev.code, ''), COALESCE(e.sequence_order, 0), LOWER(e.title)`
   ).bind(user.sub, userType).all();
 
-  // Kalau pendaftar PMB, ambil jadwal, jalur, dan ruangan
-  let jadwalData: { sesi_tes: string; tanggal_tes: string; jalur: string; ruang_tes: string } | null = null;
   let studentRoom: string | null = null;
   let studentSesi: string | null = null;
   let studentGroupKey: string | null = null; // composite key "tanggal_tes|sesi_tes"
   const rosterByExam = new Map<string, { room_id: string | null; tanggal_tes: string; sesi_tes: string }>();
 
-  if (userType === 'pendaftar') {
-    const pmbDb = getPmbDb(c.env);
-    const pmbTable = getPmbTable(c.env);
-    jadwalData = await pmbDb.prepare(
-      `SELECT sesi_tes, tanggal_tes, jalur, ruang_tes FROM ${pmbTable} WHERE id = ?`
-    ).bind(user.sub).first<any>() || null;
-    studentRoom = jadwalData?.ruang_tes || null;
-    studentSesi = jadwalData?.sesi_tes || null;
-    if (jadwalData?.tanggal_tes && jadwalData?.sesi_tes) {
-      studentGroupKey = `${jadwalData.tanggal_tes}|${jadwalData.sesi_tes}`;
-    }
-  } else if (userType === 'mansatas') {
+  if (userType === 'mansatas') {
     const { results: rosterRows } = await c.env.DB.prepare(
       `SELECT exam_id, room_id, tanggal_tes, sesi_tes
        FROM cbt_exam_roster
@@ -107,16 +93,13 @@ student.get('/exams', async (c) => {
     }
     if (userType === 'mansatas') return rosterByExam.has(exam.id);
     if (assignedExamIds.has(exam.id)) return true;
-    if (!exam.target_jalur) return true;
-    if (!jadwalData?.jalur) return true;
-    const targets = exam.target_jalur.split(',').map((t: string) => t.trim().toLowerCase());
-    return targets.includes(jadwalData.jalur.trim().toLowerCase());
+    return true;
   });
 
   const enriched = filtered.map(exam => {
     let jadwal_status: 'aktif' | 'belum' | 'selesai' | 'dikunci' | 'no_schedule' = 'no_schedule';
     let jadwal_info: string | null = null;
-    const schedule = userType === 'mansatas' ? rosterByExam.get(exam.id) : jadwalData;
+    const schedule = rosterByExam.get(exam.id);
 
     if (isDummy) {
       jadwal_status = 'aktif';
@@ -196,26 +179,6 @@ student.post('/exams/:examId/validate-token', async (c) => {
     const rl = await checkRateLimit(c.env.RATE_LIMIT, `token:user:${user.sub}`, 3, 300);
     if (!rl.allowed) {
       return c.json(err('Terlalu banyak percobaan token. Coba lagi dalam 5 menit.'), 429);
-    }
-  }
-
-  // ── Validasi jadwal untuk pendaftar PMB jika belum ada di roster ──
-  if (userType === 'pendaftar' && !isDummy && (!tanggalTes || !sesiTes)) {
-    const pmbDb = getPmbDb(c.env);
-    const pmbTable = getPmbTable(c.env);
-    const jadwal = await pmbDb.prepare(
-      `SELECT sesi_tes, tanggal_tes FROM ${pmbTable} WHERE id = ?`
-    ).bind(user.sub).first<any>();
-
-    if (jadwal?.sesi_tes && jadwal?.tanggal_tes) {
-      tanggalTes = jadwal.tanggal_tes;
-      sesiTes = jadwal.sesi_tes;
-      const parsed = parseSesiJam(jadwal.sesi_tes);
-      if (parsed) {
-        const status = cekJadwal(jadwal.tanggal_tes, parsed.jamMulai, parsed.jamSelesai);
-        if (status === 'belum') return c.json(err(`Ujian belum dimulai. Jadwal Anda: ${jadwal.sesi_tes}`), 403);
-        if (status === 'selesai') return c.json(err(`Waktu ujian Anda telah berakhir (${jadwal.sesi_tes})`), 403);
-      }
     }
   }
 
