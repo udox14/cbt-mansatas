@@ -25,12 +25,12 @@ export async function getExamQuestionAnalytics(db: D1Database, examId: string) {
             es.id as session_id,
             es.started_at,
             COALESCE(es.finished_at, es.last_heartbeat) as ended_at,
-            r.room_name,
+            COALESCE(r.room_name, '-') as room_name,
             COALESCE(rr.tanggal_tes, '') as tanggal_tes,
             COALESCE(rr.sesi_tes, '') as sesi_tes
      FROM cbt_questions q
      JOIN cbt_exam_sessions es ON es.exam_id = q.exam_id
-     JOIN cbt_rooms r ON r.id = es.room_id
+     LEFT JOIN cbt_rooms r ON r.id = es.room_id
      LEFT JOIN cbt_exam_roster rr ON rr.exam_id = es.exam_id AND rr.source_id = es.user_id
        AND rr.source_key = CASE WHEN es.user_type = 'pendaftar' THEN 'pmb' ELSE es.user_type END
      LEFT JOIN cbt_student_answers a ON a.session_id = es.id AND a.question_id = q.id

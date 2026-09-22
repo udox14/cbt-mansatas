@@ -40,7 +40,7 @@ const EXAM_MODES: ExamModeDef[] = [
     title: 'Kegiatan & Lomba',
     desc: 'Seleksi kesiswaan, olimpiade madrasah, dan kompetisi akademik khusus.',
     icon: Trophy,
-    targetUrl: '/admin/?mode=kegiatan',
+    targetUrl: '/kegiatan',
   },
   {
     id: 'tka',
@@ -48,7 +48,7 @@ const EXAM_MODES: ExamModeDef[] = [
     title: 'Tes Kemampuan Akademik',
     desc: 'Asesmen kemampuan akademik siswa kelas 12 dengan mapel pilihan terintegrasi.',
     icon: BookOpen,
-    targetUrl: '/admin/?mode=tka',
+    targetUrl: '/tka',
   },
   {
     id: 'semester',
@@ -56,7 +56,7 @@ const EXAM_MODES: ExamModeDef[] = [
     title: 'Penilaian Semester',
     desc: 'Penilaian Akhir Semester (PAS) & Asesmen Sumatif terjadwal per sesi & ruang.',
     icon: Calendar,
-    targetUrl: '/admin/?mode=semester',
+    targetUrl: '/semester',
   },
   {
     id: 'ulangan',
@@ -64,7 +64,7 @@ const EXAM_MODES: ExamModeDef[] = [
     title: 'Ulangan Guru',
     desc: 'Penilaian harian dan asesmen mandiri oleh guru mata pelajaran untuk kelas ajar.',
     icon: FileCheck,
-    targetUrl: '/admin/?mode=ulangan',
+    targetUrl: '/ulangan',
   },
 ];
 

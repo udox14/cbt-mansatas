@@ -96,15 +96,15 @@ export async function getExamResults(db: D1Database, examId: string) {
        '' as pilihan_pesantren,
        COALESCE(rr.sesi_tes, '') as sesi_tes,
        COALESCE(rr.tanggal_tes, '') as tanggal_tes,
-       r.room_name
+       COALESCE(r.room_name, '-') as room_name
      FROM cbt_exam_results er
      JOIN cbt_exam_sessions es ON es.id = er.session_id
-     JOIN cbt_rooms r ON r.id = es.room_id
+     LEFT JOIN cbt_rooms r ON r.id = es.room_id
      LEFT JOIN cbt_users cu ON er.user_id = cu.id AND er.user_type = 'cbt_user'
      LEFT JOIN cbt_exam_roster rr ON rr.exam_id = er.exam_id AND rr.source_id = er.user_id
        AND rr.source_key = CASE WHEN er.user_type = 'pendaftar' THEN 'pmb' ELSE er.user_type END
      WHERE er.exam_id = ?
-     ORDER BY r.room_name, full_name`
+     ORDER BY COALESCE(r.room_name, ''), full_name`
   ).bind(examId).all();
 
   return results || [];

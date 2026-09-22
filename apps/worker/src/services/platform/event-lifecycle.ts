@@ -16,7 +16,7 @@ import { EXAM_MODES, EVENT_STATUSES } from '../../types.ts';
  * Rollback preparatory states: configuration -> draft, ready -> configuration
  * Archived is strictly reachable ONLY from completed. Not for cancellation.
  */
-const VALID_TRANSITIONS: Record<EventStatus, readonly EventStatus[]> = {
+export const VALID_TRANSITIONS: Record<EventStatus, readonly EventStatus[]> = {
   draft: ['configuration'],
   configuration: ['ready', 'draft'],
   ready: ['active', 'configuration'],
@@ -42,6 +42,17 @@ export function isValidExamMode(mode: unknown): mode is ExamMode {
  */
 export function isValidEventStatus(status: unknown): status is EventStatus {
   return typeof status === 'string' && (EVENT_STATUSES as readonly string[]).includes(status);
+}
+
+/**
+ * Evaluates whether physical room management is mandatory for an exam mode.
+ * Centralized shared engine policy:
+ * - 'ulangan': Classroom daily assessment, room assignment is optional.
+ * - 'pmb', 'semester', 'kegiatan', 'tka': Centralized/proctored exams, room assignment is mandatory.
+ */
+export function isRoomRequiredForExam(mode?: string | null): boolean {
+  if (mode === 'ulangan') return false;
+  return true;
 }
 
 /**

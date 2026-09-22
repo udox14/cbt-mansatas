@@ -198,6 +198,16 @@ export function hasPermission(
     return true;
   }
 
+  // Baseline teacher role capabilities for Ulangan self-service
+  if (roles?.includes('teacher')) {
+    if (requiredPermission === 'ulangan.access' || requiredPermission === 'ulangan.exam.create') {
+      return true;
+    }
+    if (requiredPermission === 'ulangan.exam.manage_own' && !scope) {
+      return true;
+    }
+  }
+
   for (const grant of permissions) {
     // Platform superuser permission
     if (grant.permission === 'platform.manage') {

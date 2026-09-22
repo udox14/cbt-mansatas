@@ -4,10 +4,12 @@
 
 import { Hono } from 'hono';
 import type { Env } from '../types';
-import { authMiddleware, requireRole } from '../middleware/auth';
-import { buildRandomMaps, newId, ok, err, now, parseSesiJam, cekJadwal } from '../utils/helpers';
-import { checkRateLimit } from '../utils/ratelimit';
-import { sourceToSessionUserType, sourceToRosterKey } from '../services/participants';
+import { authMiddleware, requireRole } from '../middleware/auth.ts';
+import { buildRandomMaps, newId, ok, err, now, parseSesiJam, cekJadwal } from '../utils/helpers.ts';
+import { checkRateLimit } from '../utils/ratelimit.ts';
+import { sourceToSessionUserType, sourceToRosterKey } from '../services/participants.ts';
+import { isRoomRequiredForExam } from '../services/platform/event-lifecycle.ts';
+import { authorizeSemesterExamSchedule } from '../services/domains/semester/runtime.ts';
 
 const student = new Hono<{ Bindings: Env }>();
 student.use('*', authMiddleware, requireRole('student'));
@@ -170,7 +172,31 @@ student.post('/exams/:examId/validate-token', async (c) => {
     return c.json(err('Anda belum di-assign ke roster ujian ini'), 403);
   }
 
-  if (!roomId && !isDummy) return c.json(err('Anda belum di-assign ke ruangan'), 400);
+  // ── Cek ujian aktif ──
+  const exam = await c.env.DB.prepare(
+    `SELECT * FROM cbt_exams WHERE id=? AND active_status='active'`
+  ).bind(examId).first<any>();
+  if (!exam) return c.json(err('Ujian tidak tersedia'), 404);
+
+  // ── Semester Schedule Authorization Hook ──
+  const existingSession = await c.env.DB.prepare(
+    'SELECT id, status FROM cbt_exam_sessions WHERE exam_id=? AND user_id=? AND user_type=?'
+  ).bind(examId, user.sub, userType).first<any>();
+  const isResumed = !!(existingSession && existingSession.status !== 'submitted');
+
+  const scheduleAuth = await authorizeSemesterExamSchedule(c.env.DB, examId, new Date(), isResumed);
+  if (!scheduleAuth.allowed) {
+    return c.json(err(scheduleAuth.error || 'Jadwal ujian semester tidak valid'), scheduleAuth.status || 403);
+  }
+
+  const roomRequired = isRoomRequiredForExam(exam.mode);
+  if (roomRequired && !roomId && !isDummy) {
+    return c.json(err('Anda belum di-assign ke ruangan'), 400);
+  }
+  if (!roomId) {
+    roomId = null;
+  }
+
   if (!cleanToken)   return c.json(err('Token wajib diisi'), 400);
   if (!device_id)    return c.json(err('Device ID diperlukan'), 400);
 
@@ -184,21 +210,24 @@ student.post('/exams/:examId/validate-token', async (c) => {
 
   // ── Validasi token + cek expires_at ──
   // Step 1: Cari token aktif berdasarkan exam_id, room_id, dan UPPER(token_code)
-  let tokenRow = await c.env.DB.prepare(
-    `SELECT * FROM cbt_exam_tokens
-     WHERE exam_id=? AND room_id=? AND UPPER(token_code)=? AND is_active=1
-       AND (expires_at IS NULL OR expires_at > datetime('now'))
-     ORDER BY created_at DESC LIMIT 1`
-  ).bind(examId, roomId, cleanToken).first();
+  let tokenRow: any = null;
+  if (roomId) {
+    tokenRow = await c.env.DB.prepare(
+      `SELECT * FROM cbt_exam_tokens
+       WHERE exam_id=? AND room_id=? AND UPPER(token_code)=? AND is_active=1
+         AND (expires_at IS NULL OR expires_at > datetime('now'))
+       ORDER BY created_at DESC LIMIT 1`
+    ).bind(examId, roomId, cleanToken).first();
+  }
 
-  // Step 2: Fallback ke token tingkat exam jika token di-set global / tanpa filter ruangan khusus
+  // Step 2: Fallback ke token roomless / tingkat exam jika token di-set global / tanpa filter ruangan khusus
   if (!tokenRow) {
     tokenRow = await c.env.DB.prepare(
       `SELECT * FROM cbt_exam_tokens
-       WHERE exam_id=? AND UPPER(token_code)=? AND is_active=1
+       WHERE exam_id=? AND (room_id IS NULL OR room_id = ?) AND UPPER(token_code)=? AND is_active=1
          AND (expires_at IS NULL OR expires_at > datetime('now'))
        ORDER BY created_at DESC LIMIT 1`
-    ).bind(examId, cleanToken).first();
+    ).bind(examId, roomId || '', cleanToken).first();
   }
 
   // Step 3: Akun dummy diperbolehkan pakai token 'DUMMY' atau '1234' atau token ujian aktif apa saja
@@ -236,12 +265,6 @@ student.post('/exams/:examId/validate-token', async (c) => {
       'DELETE FROM cbt_exam_sessions WHERE exam_id=? AND user_id=? AND user_type=?'
     ).bind(examId, user.sub, userType).run();
   }
-
-  // ── Cek ujian aktif ──
-  const exam = await c.env.DB.prepare(
-    `SELECT * FROM cbt_exams WHERE id=? AND active_status='active'`
-  ).bind(examId).first<any>();
-  if (!exam) return c.json(err('Ujian tidak tersedia'), 404);
 
   // ── H3: Anti race-condition — coba INSERT dulu, handle UNIQUE conflict ──
   const sessionId = newId();

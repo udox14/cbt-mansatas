@@ -7,7 +7,7 @@ import { FileDown } from 'lucide-react';
 import { C, parseServerTime, sessionFilterKey, sessionFilterLabel, buildSessionFilters } from '../components/theme';
 import TableHead from '../components/TableHead';
 
-export function AnalyticsView({ examId }: { examId: string }) {
+export function AnalyticsView({ examId, apiPrefix = '/api/admin' }: { examId: string; apiPrefix?: string }) {
   const [sessions, setSessions] = useState<any[]>([]);
   const [results, setResults] = useState<any[]>([]);
   const [questionAnalytics, setQuestionAnalytics] = useState<any>({ questions: [], options: [], rows: [] });
@@ -19,9 +19,9 @@ export function AnalyticsView({ examId }: { examId: string }) {
   useEffect(() => {
     setLoading(true);
     Promise.all([
-      GET(`/api/admin/exams/${examId}/sessions`),
-      GET(`/api/admin/exams/${examId}/results`),
-      GET(`/api/admin/exams/${examId}/question-analytics`),
+      GET(`${apiPrefix}/exams/${examId}/sessions`),
+      GET(`${apiPrefix}/exams/${examId}/results`),
+      GET(`${apiPrefix}/exams/${examId}/question-analytics`),
     ])
       .then(([s, r, q]) => {
         if (s.success) setSessions(s.data || []);
@@ -29,7 +29,7 @@ export function AnalyticsView({ examId }: { examId: string }) {
         if (q.success) setQuestionAnalytics(q.data || { questions: [], options: [], rows: [] });
       })
       .finally(() => setLoading(false));
-  }, [examId]);
+  }, [examId, apiPrefix]);
 
   const rooms = useMemo(() => Array.from(new Set([...sessions, ...results].map((x: any) => x.room_name).filter(Boolean))).sort(), [sessions, results]);
   const sessionOptions = useMemo(() => buildSessionFilters([...sessions, ...results]), [sessions, results]);

@@ -33,9 +33,10 @@ interface BulkImportProps {
   onSuccess: () => void;
   onClose: () => void;
   open: boolean;
+  apiPrefix?: string;
 }
 
-export default function BulkImport({ type, examId, onSuccess, onClose, open }: BulkImportProps) {
+export default function BulkImport({ type, examId, onSuccess, onClose, open, apiPrefix = '/api/admin' }: BulkImportProps) {
   const [step, setStep] = useState<'upload' | 'preview' | 'importing'>('upload');
   const [error, setError] = useState('');
   const [parsedQuestions, setParsedQuestions] = useState<ParsedQuestion[]>([]);
@@ -309,7 +310,7 @@ export default function BulkImport({ type, examId, onSuccess, onClose, open }: B
           points: 1,
           options: q.options,
         }));
-        const r = await POST(`/api/admin/exams/${examId}/questions/bulk`, { questions: payload });
+        const r = await POST(`${apiPrefix}/exams/${examId}/questions/bulk`, { questions: payload });
         if (r.success) {
           setImportResult(`Berhasil mengimport ${parsedQuestions.length} soal!`);
           onSuccess();

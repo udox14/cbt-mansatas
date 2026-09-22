@@ -10,7 +10,7 @@ import { Plus, Pencil, Trash2, Upload, Image, Volume2, X } from 'lucide-react';
 import type { Question, QOption } from '../types';
 import { C } from '../components/theme';
 
-export function QuestionsView({ examId }: { examId: string }) {
+export function QuestionsView({ examId, apiPrefix = '/api/admin' }: { examId: string; apiPrefix?: string }) {
   const { toast } = useToast();
   const [questions, setQuestions] = useState<Question[]>([]);
   const [loading, setLoading] = useState(true);
@@ -22,18 +22,18 @@ export function QuestionsView({ examId }: { examId: string }) {
   const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 
   const fetchQ = useCallback(async () => {
-    const r = await GET<Question[]>(`/api/admin/exams/${examId}/questions`);
+    const r = await GET<Question[]>(`${apiPrefix}/exams/${examId}/questions`);
     if (r.success) setQuestions(r.data || []);
     setLoading(false);
-  }, [examId]);
+  }, [examId, apiPrefix]);
   useEffect(() => { fetchQ(); }, [fetchQ]);
 
   const saveQ = async () => {
     if (!editQ?.question_text) { toast('error', 'Teks soal wajib'); return; }
     setSaving(true);
     const r = editQ.id
-      ? await PUT(`/api/admin/questions/${editQ.id}`, editQ)
-      : await POST(`/api/admin/exams/${examId}/questions`, { ...editQ, question_order: questions.length + 1 });
+      ? await PUT(`${apiPrefix}/questions/${editQ.id}`, editQ)
+      : await POST(`${apiPrefix}/exams/${examId}/questions`, { ...editQ, question_order: questions.length + 1 });
     setSaving(false);
     if (r.success) { toast('success', 'Berhasil'); setEditQ(null); fetchQ(); } else toast('error', r.error || 'Gagal');
   };
@@ -50,8 +50,10 @@ export function QuestionsView({ examId }: { examId: string }) {
   const upload = async (type: 'image' | 'audio', e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; if (!file) return;
     setUploading(type);
-    const fd = new FormData(); fd.append('file', file);
-    const r = await POST<{ url: string }>('/api/admin/upload', fd);
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('exam_id', examId);
+    const r = await POST<{ url: string }>(`${apiPrefix}/upload`, fd);
     setUploading('');
     if (r.success && r.data) { setEditQ(prev => prev ? { ...prev, [type === 'image' ? 'image_url' : 'audio_url']: r.data!.url } : null); toast('success', 'Upload berhasil'); }
     else toast('error', r.error || 'Gagal');
@@ -143,9 +145,9 @@ export function QuestionsView({ examId }: { examId: string }) {
         )}
       </Modal>
       <Confirm open={!!delTarget} onClose={() => setDelTarget(null)}
-        onConfirm={async () => { if (!delTarget) return; await DEL(`/api/admin/questions/${delTarget}`); setDelTarget(null); fetchQ(); }}
+        onConfirm={async () => { if (!delTarget) return; await DEL(`${apiPrefix}/questions/${delTarget}`); setDelTarget(null); fetchQ(); }}
         title="Hapus Soal?" message="Soal yang dihapus tidak dapat dikembalikan." />
-      <BulkImport type="questions" examId={examId} open={showImport} onClose={() => setShowImport(false)} onSuccess={() => { setShowImport(false); fetchQ(); }} />
+      <BulkImport type="questions" examId={examId} apiPrefix={apiPrefix} open={showImport} onClose={() => setShowImport(false)} onSuccess={() => { setShowImport(false); fetchQ(); }} />
     </div>
   );
 }

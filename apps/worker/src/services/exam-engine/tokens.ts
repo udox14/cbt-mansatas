@@ -2,15 +2,14 @@ import { newId, generateToken, ok, err } from '../../utils/helpers.ts';
 
 
 export async function getAssignedTokenTargets(db: D1Database, examId: string) {
-  const targets = new Map<string, { room_id: string; tanggal_tes: string; sesi_tes: string }>();
+  const targets = new Map<string, { room_id: string | null; tanggal_tes: string; sesi_tes: string }>();
   const add = (roomId?: string | null, tanggalTes?: string | null, sesiTes?: string | null) => {
-    if (!roomId) return;
     const target = {
-      room_id: roomId,
+      room_id: roomId || null,
       tanggal_tes: tanggalTes || '',
       sesi_tes: sesiTes || '',
     };
-    targets.set(`${target.room_id}|${target.tanggal_tes}|${target.sesi_tes}`, target);
+    targets.set(`${target.room_id || 'null'}|${target.tanggal_tes}|${target.sesi_tes}`, target);
   };
 
   const { results: roomRows } = await db.prepare('SELECT id, room_name FROM cbt_rooms').all();
@@ -46,18 +45,27 @@ export async function getAssignedTokenTargets(db: D1Database, examId: string) {
     }
   }
 
+  // Fallback for room-optional exams (such as Ulangan) or exams with room-less roster
+  if (targets.size === 0) {
+    const exam = await db.prepare('SELECT id, mode FROM cbt_exams WHERE id=?').bind(examId).first<any>();
+    const rosterCount = await db.prepare('SELECT COUNT(*) as cnt FROM cbt_exam_roster WHERE exam_id=?').bind(examId).first<any>();
+    if (exam?.mode === 'ulangan' || Number(rosterCount?.cnt || 0) > 0) {
+      add(null, '', '');
+    }
+  }
+
   return Array.from(targets.values()).sort((a, b) =>
-    `${a.tanggal_tes} ${a.sesi_tes} ${a.room_id}`.localeCompare(`${b.tanggal_tes} ${b.sesi_tes} ${b.room_id}`)
+    `${a.tanggal_tes} ${a.sesi_tes} ${a.room_id || ''}`.localeCompare(`${b.tanggal_tes} ${b.sesi_tes} ${b.room_id || ''}`)
   );
 }
 
 export async function listExamTokens(db: D1Database, examId: string) {
   const { results } = await db.prepare(
-    `SELECT t.*, r.room_name
+    `SELECT t.*, COALESCE(r.room_name, 'Kelas') as room_name
      FROM cbt_exam_tokens t
-     JOIN cbt_rooms r ON r.id = t.room_id
+     LEFT JOIN cbt_rooms r ON r.id = t.room_id
      WHERE t.exam_id = ?
-     ORDER BY r.room_name`
+     ORDER BY COALESCE(r.room_name, 'Kelas')`
   ).bind(examId).all();
   return results || [];
 }
@@ -66,16 +74,16 @@ export async function toggleTokenActive(
   db: D1Database,
   examId: string,
   tokenId: string,
-  isActive: number | boolean
+  isActive?: number | boolean
 ) {
   const token = await db.prepare(
-    'SELECT id FROM cbt_exam_tokens WHERE id=? AND exam_id=?'
-  ).bind(tokenId, examId).first();
+    'SELECT id, is_active FROM cbt_exam_tokens WHERE id=? AND exam_id=?'
+  ).bind(tokenId, examId).first<{ id: string; is_active: number }>();
   if (!token) {
     return { success: false, error: 'Token tidak ditemukan', status: 404 };
   }
 
-  const activeVal = isActive === 1 || isActive === true ? 1 : 0;
+  const activeVal = isActive !== undefined ? (isActive === 1 || isActive === true ? 1 : 0) : (token.is_active ? 0 : 1);
   await db.prepare(
     'UPDATE cbt_exam_tokens SET is_active=? WHERE id=? AND exam_id=?'
   ).bind(activeVal, tokenId, examId).run();
@@ -105,7 +113,7 @@ export async function generateExamTokens(
 
   let targetRows = await getAssignedTokenTargets(db, examId);
   if (options.room_ids?.length) {
-    targetRows = targetRows.filter(t => options.room_ids!.includes(t.room_id));
+    targetRows = targetRows.filter(t => t.room_id ? options.room_ids!.includes(t.room_id) : false);
   }
   if (options.groups?.length) {
     const allowedGroups = new Set(options.groups.map(g => `${g.tanggal_tes || ''}|${g.sesi_tes || ''}`));

@@ -110,6 +110,7 @@ function createTestD1Database() {
       owner_staff_id TEXT,
       version_label TEXT DEFAULT 'v1.0',
       is_frozen INTEGER NOT NULL DEFAULT 0,
+      subject_id TEXT,
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now'))
     );
@@ -168,7 +169,7 @@ function createTestD1Database() {
     CREATE TABLE cbt_exam_tokens (
       id TEXT PRIMARY KEY,
       exam_id TEXT NOT NULL REFERENCES cbt_exams(id) ON DELETE CASCADE,
-      room_id TEXT NOT NULL REFERENCES cbt_rooms(id) ON DELETE CASCADE,
+      room_id TEXT REFERENCES cbt_rooms(id) ON DELETE CASCADE,
       tanggal_tes TEXT NOT NULL DEFAULT '',
       sesi_tes TEXT NOT NULL DEFAULT '',
       token_code TEXT NOT NULL,

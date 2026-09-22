@@ -10,6 +10,10 @@ import type { Env } from './types';
 import authRoutes from './routes/auth';
 import adminRoutes from './routes/admin';
 import adminEventRoutes from './routes/admin-events';
+import kegiatanRoutes from './routes/domains/kegiatan';
+import ulanganRoutes from './routes/domains/ulangan';
+import tkaRoutes from './routes/domains/tka';
+import semesterRoutes from './routes/domains/semester';
 import proctorRoutes from './routes/proctor';
 import studentRoutes from './routes/student';
 
@@ -49,6 +53,10 @@ app.get('/api/health', (c) => {
 app.route('/api/auth', authRoutes);
 app.route('/api/admin', adminEventRoutes);
 app.route('/api/admin', adminRoutes);
+app.route('/api/kegiatan', kegiatanRoutes);
+app.route('/api/ulangan', ulanganRoutes);
+app.route('/api/tka', tkaRoutes);
+app.route('/api/semester', semesterRoutes);
 app.route('/api/proctor', proctorRoutes);
 app.route('/api/student', studentRoutes);
 

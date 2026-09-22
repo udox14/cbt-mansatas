@@ -64,6 +64,9 @@ export interface CbtEvent {
   term?: string | null;
   proctor_access_before_minutes: number;
   proctor_access_after_minutes: number;
+  description?: string | null;
+  starts_at?: string | null;
+  ends_at?: string | null;
   created_by?: string | null;
   created_at: string;
   updated_at: string;
@@ -79,7 +82,7 @@ export interface CbtExam {
   is_score_visible: number;
   randomize_questions: number;
   randomize_options: number;
-  active_status: 'draft' | 'active' | 'finished';
+  active_status: 'draft' | 'configuration' | 'ready' | 'active' | 'completed' | 'archived' | 'finished';
   passing_score: number;
   target_jalur?: string | null;
   event_id?: string | null;
@@ -92,6 +95,11 @@ export interface CbtExam {
   owner_staff_id?: string | null;
   version_label?: string | null;
   is_frozen: number;
+  teaching_assignment_id?: string | null;
+  subject_id?: string | null;
+  class_id?: string | null;
+  class_name?: string | null;
+  target_grade?: string | null;
   created_by?: string | null;
   created_at: string;
   updated_at: string;
@@ -133,6 +141,7 @@ export interface JWTPayload {
   full_name: string;
   source: UserSource;         // dari tabel mana
   staff_id?: string;          // local cbt_staff_profiles.id if staff
+  mansatas_user_id?: string;  // external mansatas user id if staff
   roles?: string[];           // all assigned base roles
   permissions?: string[];     // granted permission keys
   allowed_modes?: string[];   // list of authorized exam modes
@@ -145,4 +154,32 @@ export interface ApiResponse<T = unknown> {
   data?: T;
   message?: string;
   error?: string;
+}
+
+export type TkaValidationStatus =
+  | 'valid'
+  | 'missing_option'
+  | 'duplicate_option'
+  | 'duplicate_mandatory'
+  | 'unresolved'
+  | 'pending';
+
+export interface TkaParticipant {
+  id: string;
+  event_id: string;
+  student_id: string;
+  nisn: string | null;
+  nama_lengkap: string;
+  class_id: string | null;
+  class_name: string | null;
+  gender: string | null;
+  mapel_pilihan1_raw: string | null;
+  mapel_pilihan2_raw: string | null;
+  mapel_pilihan1_subject_id: string | null;
+  mapel_pilihan2_subject_id: string | null;
+  validation_status: TkaValidationStatus;
+  validation_notes: string | null;
+  room_id: string | null;
+  created_at: string;
+  updated_at: string;
 }

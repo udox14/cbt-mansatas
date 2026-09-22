@@ -270,5 +270,4 @@ export function EventManagementPage({
   );
 }
 
-export const KegiatanPage = EventManagementPage;
 export default EventManagementPage;

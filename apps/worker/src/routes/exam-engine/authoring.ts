@@ -40,7 +40,7 @@ authoringRoutes.get('/exams/:id', async (c) => {
 authoringRoutes.post('/exams', async (c) => {
   const b = await c.req.json();
   const user = c.get('user' as any);
-  const result = await createExam(c.env.DB, b, user);
+  const result = await createExam(c.env.DB, b, user, c.env.MANSATAS_DB);
   if (!result.success) {
     return c.json(err(result.error!), (result.status as any) || 400);
   }
@@ -49,7 +49,7 @@ authoringRoutes.post('/exams', async (c) => {
 
 authoringRoutes.put('/exams/:id', async (c) => {
   const b = await c.req.json();
-  const result = await updateExam(c.env.DB, c.req.param('id'), b);
+  const result = await updateExam(c.env.DB, c.req.param('id'), b, c.env.MANSATAS_DB);
   if (!result.success) {
     return c.json(err(result.error!), (result.status as any) || 400);
   }

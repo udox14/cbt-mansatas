@@ -1,0 +1,308 @@
+// ============================================================
+// Kegiatan Domain — HTTP Router
+//
+// Mounts all Kegiatan domain endpoints with:
+// 1. Strict server-side RBAC evaluation
+// 2. Strict event.mode === 'kegiatan' domain boundaries
+// 3. Explicit student_ids roster snapshotting
+// 4. Delegation of exam persistence to Phase 2 shared exam engine
+// ============================================================
+
+import { Hono } from 'hono';
+import type { Env, EventStatus } from '../../types.ts';
+import { authMiddleware } from '../../middleware/auth.ts';
+import { requirePermission } from '../../middleware/rbac.ts';
+import { ok, err } from '../../utils/helpers.ts';
+import { listClassesFromMansatas } from '../../services/sources/students.ts';
+import {
+  listKegiatanEvents,
+  getKegiatanEventById,
+  createKegiatanEvent,
+  updateKegiatanEvent,
+  transitionKegiatanEventStatus,
+  DomainMismatchError,
+} from '../../services/domains/kegiatan/events.ts';
+import { checkKegiatanEventReadiness } from '../../services/domains/kegiatan/readiness.ts';
+import {
+  listKegiatanEligibleStudents,
+  listKegiatanEventRoster,
+  batchSnapshotToKegiatanRoster,
+  removeStudentFromKegiatanRoster,
+} from '../../services/domains/kegiatan/participants.ts';
+import { createExam, listExams } from '../../services/exam-engine/exams.ts';
+
+const kegiatan = new Hono<{ Bindings: Env }>();
+
+// ── Base Authentication & RBAC Guard ─────────────────────────
+kegiatan.use('*', authMiddleware);
+
+// Ensure student role is strictly rejected from all administrative Kegiatan endpoints
+kegiatan.use('*', async (c, next) => {
+  const user = c.get('user');
+  if (user?.role === 'student' || (user?.roles?.includes('student') && !user?.roles?.includes('admin'))) {
+    return c.json(err('Akses ditolak: siswa tidak diizinkan mengakses administrasi Kegiatan'), 403);
+  }
+  await next();
+});
+
+// ── 1. Event Listing & Details ───────────────────────────────
+
+kegiatan.get('/events', requirePermission('kegiatan.event.read'), async (c) => {
+  const status = c.req.query('status') as EventStatus | undefined;
+  const events = await listKegiatanEvents(c.env.DB, { status });
+  return c.json(ok(events));
+});
+
+kegiatan.post('/events', requirePermission('kegiatan.event.create'), async (c) => {
+  const body = await c.req.json<any>();
+  const user = c.get('user');
+  const result = await createKegiatanEvent(c.env.DB, body, user.sub);
+  if (!result.success) {
+    return c.json(err(result.error || 'Gagal membuat kegiatan'), 400);
+  }
+  return c.json(ok({ id: result.id }, 'Kegiatan berhasil dibuat'), 201);
+});
+
+kegiatan.get('/events/:eventId', requirePermission('kegiatan.event.read'), async (c) => {
+  const eventId = c.req.param('eventId');
+  try {
+    const event = await getKegiatanEventById(c.env.DB, eventId);
+    if (!event) return c.json(err('Kegiatan tidak ditemukan'), 404);
+    return c.json(ok(event));
+  } catch (e) {
+    if (e instanceof DomainMismatchError) {
+      return c.json(err(e.message), 400);
+    }
+    throw e;
+  }
+});
+
+kegiatan.put('/events/:eventId', requirePermission('kegiatan.event.update'), async (c) => {
+  const eventId = c.req.param('eventId');
+  const body = await c.req.json<any>();
+  try {
+    const result = await updateKegiatanEvent(c.env.DB, eventId, body);
+    if (!result.success) {
+      return c.json(err(result.error || 'Gagal memperbarui kegiatan'), 400);
+    }
+    return c.json(ok(null, 'Kegiatan berhasil diperbarui'));
+  } catch (e) {
+    if (e instanceof DomainMismatchError) {
+      return c.json(err(e.message), 400);
+    }
+    throw e;
+  }
+});
+
+kegiatan.put('/events/:eventId/status', requirePermission('kegiatan.event.transition'), async (c) => {
+  const eventId = c.req.param('eventId');
+  const body = await c.req.json<any>();
+  const targetStatus = body.status as EventStatus;
+  if (!targetStatus) {
+    return c.json(err('Status target wajib diisi'), 400);
+  }
+
+  try {
+    const result = await transitionKegiatanEventStatus(c.env.DB, eventId, targetStatus);
+    if (!result.success) {
+      return c.json(
+        {
+          success: false,
+          error: result.error || 'Gagal mengubah status kegiatan',
+          readiness: result.readiness,
+        },
+        400
+      );
+    }
+    return c.json(ok({ id: eventId, status: targetStatus }, `Status kegiatan diubah menjadi ${targetStatus}`));
+  } catch (e) {
+    if (e instanceof DomainMismatchError) {
+      return c.json(err(e.message), 400);
+    }
+    throw e;
+  }
+});
+
+// ── 2. Readiness Evaluation ──────────────────────────────────
+
+kegiatan.get('/events/:eventId/readiness', requirePermission('kegiatan.event.read'), async (c) => {
+  const eventId = c.req.param('eventId');
+  try {
+    const event = await getKegiatanEventById(c.env.DB, eventId);
+    if (!event) return c.json(err('Kegiatan tidak ditemukan'), 404);
+
+    const readiness = await checkKegiatanEventReadiness(c.env.DB, eventId);
+    return c.json(ok(readiness));
+  } catch (e) {
+    if (e instanceof DomainMismatchError) {
+      return c.json(err(e.message), 400);
+    }
+    throw e;
+  }
+});
+
+// ── 3. Participants & Roster ─────────────────────────────────
+
+kegiatan.get('/classes', requirePermission('kegiatan.event.read'), async (c) => {
+  if (!c.env.MANSATAS_DB) {
+    return c.json(ok([]));
+  }
+  const classes = await listClassesFromMansatas(c.env.MANSATAS_DB);
+  return c.json(ok(classes));
+});
+
+kegiatan.get('/events/:eventId/participants', requirePermission('kegiatan.event.read'), async (c) => {
+  const eventId = c.req.param('eventId');
+  try {
+    const event = await getKegiatanEventById(c.env.DB, eventId);
+    if (!event) return c.json(err('Kegiatan tidak ditemukan'), 404);
+
+    const filters = {
+      q: c.req.query('q')?.trim() || undefined,
+      class_id: c.req.query('class_id')?.trim() || undefined,
+      grade: c.req.query('grade')?.trim() || undefined,
+      gender: c.req.query('gender')?.trim() || undefined,
+      page: Number(c.req.query('page') || 1),
+      page_size: Number(c.req.query('page_size') || 50),
+    };
+
+    const result = await listKegiatanEligibleStudents(c.env.MANSATAS_DB, filters);
+    return c.json(
+      ok({
+        items: result.items,
+        pagination: {
+          page: filters.page,
+          page_size: filters.page_size,
+          total: result.total,
+          total_pages: Math.ceil(result.total / filters.page_size),
+        },
+      })
+    );
+  } catch (e) {
+    if (e instanceof DomainMismatchError) {
+      return c.json(err(e.message), 400);
+    }
+    throw e;
+  }
+});
+
+kegiatan.get('/events/:eventId/roster', requirePermission('kegiatan.event.read'), async (c) => {
+  const eventId = c.req.param('eventId');
+  const examId = c.req.query('exam_id') || undefined;
+  try {
+    const roster = await listKegiatanEventRoster(c.env.DB, eventId, examId);
+    return c.json(ok(roster));
+  } catch (e) {
+    if (e instanceof DomainMismatchError) {
+      return c.json(err(e.message), 400);
+    }
+    throw e;
+  }
+});
+
+kegiatan.post('/events/:eventId/exams/:examId/roster', requirePermission('kegiatan.roster.manage'), async (c) => {
+  const eventId = c.req.param('eventId');
+  const examId = c.req.param('examId');
+  const body = await c.req.json<any>();
+
+  const studentIds = body.student_ids;
+  if (!Array.isArray(studentIds) || studentIds.length === 0) {
+    return c.json(err('Daftar ID siswa wajib disertakan (pilih minimal 1 siswa)'), 400);
+  }
+  if (studentIds.length > 1000) {
+    return c.json(err('Maksimal 1.000 siswa per operasi snapshot'), 400);
+  }
+
+  try {
+    const result = await batchSnapshotToKegiatanRoster(
+      c.env.DB,
+      c.env.MANSATAS_DB,
+      eventId,
+      examId,
+      studentIds,
+      {
+        room_id: body.room_id,
+        tanggal_tes: body.tanggal_tes,
+        sesi_tes: body.sesi_tes,
+      }
+    );
+    return c.json(ok(result, 'Roster peserta berhasil diproses'));
+  } catch (e: any) {
+    if (e instanceof DomainMismatchError) {
+      return c.json(err(e.message), 400);
+    }
+    return c.json(err(e?.message || 'Gagal memproses snapshot roster'), 400);
+  }
+});
+
+kegiatan.delete('/events/:eventId/exams/:examId/roster/:rosterId', requirePermission('kegiatan.roster.manage'), async (c) => {
+  const eventId = c.req.param('eventId');
+  const examId = c.req.param('examId');
+  const rosterId = c.req.param('rosterId');
+
+  try {
+    const result = await removeStudentFromKegiatanRoster(c.env.DB, eventId, examId, rosterId);
+    if (!result.success) {
+      return c.json(err(result.error || 'Gagal menghapus peserta'), 409);
+    }
+    return c.json(ok(null, 'Peserta berhasil dihapus dari roster'));
+  } catch (e: any) {
+    if (e instanceof DomainMismatchError) {
+      return c.json(err(e.message), 400);
+    }
+    return c.json(err(e?.message || 'Gagal menghapus peserta roster'), 400);
+  }
+});
+
+// ── 4. Exam Management (Delegates directly to Shared Engine) ─
+
+kegiatan.get('/events/:eventId/exams', requirePermission('kegiatan.event.read'), async (c) => {
+  const eventId = c.req.param('eventId');
+  try {
+    const event = await getKegiatanEventById(c.env.DB, eventId);
+    if (!event) return c.json(err('Kegiatan tidak ditemukan'), 404);
+
+    const exams = await listExams(c.env.DB, { event_id: eventId, mode: 'kegiatan' });
+    return c.json(ok(exams));
+  } catch (e) {
+    if (e instanceof DomainMismatchError) {
+      return c.json(err(e.message), 400);
+    }
+    throw e;
+  }
+});
+
+kegiatan.post('/events/:eventId/exams', requirePermission('kegiatan.exam.create'), async (c) => {
+  const eventId = c.req.param('eventId');
+  try {
+    const event = await getKegiatanEventById(c.env.DB, eventId);
+    if (!event) return c.json(err('Kegiatan tidak ditemukan'), 404);
+
+    const body = await c.req.json<any>();
+    const user = c.get('user');
+
+    // Delegate creation to shared examination engine
+    const result = await createExam(
+      c.env.DB,
+      {
+        ...body,
+        event_id: eventId,
+        mode: 'kegiatan', // Server authoritative mode inheritance
+      },
+      user
+    );
+
+    if (!result.success) {
+      return c.json(err(result.error || 'Gagal membuat ujian kegiatan'), (result.status as any) || 400);
+    }
+
+    return c.json(ok({ id: result.data?.id }, 'Ujian kegiatan berhasil dibuat'), 201);
+  } catch (e) {
+    if (e instanceof DomainMismatchError) {
+      return c.json(err(e.message), 400);
+    }
+    throw e;
+  }
+});
+
+export default kegiatan;

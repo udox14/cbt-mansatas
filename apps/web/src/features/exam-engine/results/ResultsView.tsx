@@ -6,7 +6,7 @@ import { exportExamResults } from '@/lib/export';
 import { FileDown, RefreshCw, Trash2 } from 'lucide-react';
 import { C, sessionFilterKey, sessionFilterLabel, buildSessionFilters } from '../components/theme';
 
-export function ResultsView({ examId }: { examId: string }) {
+export function ResultsView({ examId, apiPrefix = '/api/admin' }: { examId: string; apiPrefix?: string }) {
   const { toast } = useToast();
   const [results, setResults] = useState<any[]>([]);
   const [exportRows, setExportRows] = useState<any[]>([]);
@@ -20,8 +20,8 @@ export function ResultsView({ examId }: { examId: string }) {
     let alive = true;
     setLoading(true);
     Promise.all([
-      GET(`/api/admin/exams/${examId}/results`),
-      GET(`/api/admin/exams/${examId}/results-export`),
+      GET(`${apiPrefix}/exams/${examId}/results`),
+      GET(`${apiPrefix}/exams/${examId}/results-export`),
     ]).then(([resultResponse, exportResponse]) => {
       if (!alive) return;
       if (resultResponse.success) setResults(resultResponse.data || []);
@@ -33,14 +33,14 @@ export function ResultsView({ examId }: { examId: string }) {
       setLoading(false);
     });
     return () => { alive = false; };
-  }, [examId, toast]);
+  }, [examId, apiPrefix, toast]);
   useEffect(() => {
     return fetchResults();
   }, [fetchResults]);
 
   const deleteResultSession = async (sessionId: string, studentName: string) => {
     if (!confirm(`Hapus hasil pengerjaan "${studentName}"? Data nilai dan jawaban akan dibersihkan.`)) return;
-    const res = await DEL(`/api/admin/exams/${examId}/results/${sessionId}`);
+    const res = await DEL(`${apiPrefix}/exams/${examId}/results/${sessionId}`);
     if (res.success) {
       toast('success', res.message || 'Hasil berhasil dihapus');
       fetchResults();
@@ -105,7 +105,7 @@ export function ResultsView({ examId }: { examId: string }) {
   };
   const recoverMissingResults = async () => {
     setRecovering(true);
-    const r = await POST<{ repaired: number }>(`/api/admin/exams/${examId}/results/recompute-missing`, {});
+    const r = await POST<{ repaired: number }>(`${apiPrefix}/exams/${examId}/results/recompute-missing`, {});
     setRecovering(false);
     toast(r.success ? 'success' : 'error', r.message || r.error || 'Gagal memulihkan hasil');
     if (r.success) fetchResults();

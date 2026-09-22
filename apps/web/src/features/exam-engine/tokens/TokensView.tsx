@@ -5,7 +5,7 @@ import { Button, EmptyState, useToast, Spinner } from '@/components/ui';
 import { RefreshCw, Power } from 'lucide-react';
 import { C } from '../components/theme';
 
-export function TokensView({ examId }: { examId: string }) {
+export function TokensView({ examId, apiPrefix = '/api/admin' }: { examId: string; apiPrefix?: string }) {
   const { toast } = useToast();
   const [tokens, setTokens] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -16,12 +16,12 @@ export function TokensView({ examId }: { examId: string }) {
   const [settingManual, setSettingManual] = useState(false);
   const [filterRoom, setFilterRoom] = useState('all');
   const [filterGroup, setFilterGroup] = useState('all');
-  const fetchT = useCallback(async () => { const r = await GET(`/api/admin/exams/${examId}/tokens`); if (r.success) setTokens(r.data || []); setLoading(false); }, [examId]);
+  const fetchT = useCallback(async () => { const r = await GET(`${apiPrefix}/exams/${examId}/tokens`); if (r.success) setTokens(r.data || []); setLoading(false); }, [examId, apiPrefix]);
   useEffect(() => { fetchT(); }, [fetchT]);
-  const generate = async () => { setGen(true); const r = await POST(`/api/admin/exams/${examId}/tokens/generate`, {}); setGen(false); toast(r.success ? 'success' : 'error', r.message || r.error || 'Gagal'); fetchT(); };
+  const generate = async () => { setGen(true); const r = await POST(`${apiPrefix}/exams/${examId}/tokens/generate`, {}); setGen(false); toast(r.success ? 'success' : 'error', r.message || r.error || 'Gagal'); fetchT(); };
   const regenerateOne = async (tokenId: string) => {
     setRegenId(tokenId);
-    const r = await POST(`/api/admin/exams/${examId}/tokens/generate`, { token_id: tokenId });
+    const r = await POST(`${apiPrefix}/exams/${examId}/tokens/generate`, { token_id: tokenId });
     setRegenId(null);
     toast(r.success ? 'success' : 'error', r.message || r.error || 'Gagal');
     fetchT();
@@ -30,7 +30,7 @@ export function TokensView({ examId }: { examId: string }) {
     const token_code = manualToken.trim().toUpperCase();
     if (!token_code) { toast('error', 'Isi token manual dulu'); return; }
     setSettingManual(true);
-    const r = await POST(`/api/admin/exams/${examId}/tokens/set-code`, { token_code });
+    const r = await POST(`${apiPrefix}/exams/${examId}/tokens/set-code`, { token_code });
     setSettingManual(false);
     toast(r.success ? 'success' : 'error', r.message || r.error || 'Gagal');
     if (r.success) { setManualToken(token_code); fetchT(); }
@@ -38,7 +38,7 @@ export function TokensView({ examId }: { examId: string }) {
   const toggleTokenActive = async (token: any) => {
     setToggleId(token.id);
     const nextActive = Number(token.is_active) === 1 ? 0 : 1;
-    const r = await POST(`/api/admin/exams/${examId}/tokens/${token.id}/active`, { is_active: nextActive });
+    const r = await POST(`${apiPrefix}/exams/${examId}/tokens/${token.id}/active`, { is_active: nextActive });
     setToggleId(null);
     toast(r.success ? 'success' : 'error', r.message || r.error || 'Gagal mengubah status token');
     if (r.success) fetchT();

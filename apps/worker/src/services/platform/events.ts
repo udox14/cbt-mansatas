@@ -43,7 +43,7 @@ export async function listEvents(
            e.proctor_access_before_minutes, e.proctor_access_after_minutes,
            e.created_by, e.created_at, e.updated_at,
            COUNT(DISTINCT ex.id) AS exam_count,
-           COUNT(DISTINCT r.id) AS roster_count
+           COUNT(DISTINCT r.source_key || ':' || r.source_id) AS roster_count
     FROM cbt_events e
     LEFT JOIN cbt_exams ex ON ex.event_id = e.id
     LEFT JOIN cbt_exam_roster r ON r.event_id = e.id

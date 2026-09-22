@@ -4,12 +4,12 @@ import { GET } from '@/lib/api';
 import { EmptyState, Spinner } from '@/components/ui';
 import { C, parseServerTime, sessionFilterKey, sessionFilterLabel, buildSessionFilters } from '../components/theme';
 
-export function MonitorView({ examId }: { examId: string }) {
+export function MonitorView({ examId, apiPrefix = '/api/admin' }: { examId: string; apiPrefix?: string }) {
   const [sessions, setSessions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterRoom, setFilterRoom] = useState('all');
   const [filterSession, setFilterSession] = useState('all');
-  const fetchS = useCallback(async () => { const r = await GET(`/api/admin/exams/${examId}/sessions`); if (r.success) setSessions(r.data || []); setLoading(false); }, [examId]);
+  const fetchS = useCallback(async () => { const r = await GET(`${apiPrefix}/exams/${examId}/sessions`); if (r.success) setSessions(r.data || []); setLoading(false); }, [examId, apiPrefix]);
   useEffect(() => { fetchS(); const iv = setInterval(fetchS, 10000); return () => clearInterval(iv); }, [fetchS]);
   const rooms = Array.from(new Set(sessions.map((s: any) => s.room_name).filter(Boolean))).sort();
   const sessionOptions = buildSessionFilters(sessions);

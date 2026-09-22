@@ -4,8 +4,8 @@
 
 import { createMiddleware } from 'hono/factory';
 import type { Context } from 'hono';
-import type { Env, ScopeType, PermissionGrant } from '../types';
-import { hasPermission } from '../services/platform/permissions';
+import type { Env, ScopeType, PermissionGrant } from '../types.ts';
+import { hasPermission } from '../services/platform/permissions.ts';
 
 export type ScopeResolver = (c: Context<{ Bindings: Env }>) => { type: ScopeType; value: string } | Promise<{ type: ScopeType; value: string }>;
 
@@ -13,7 +13,8 @@ export type ScopeResolver = (c: Context<{ Bindings: Env }>) => { type: ScopeType
  * Middleware that enforces a specific permission on a route.
  * Admins (legacy admins and role 'admin') always pass.
  */
-export function requirePermission(permission: string, scopeResolver?: ScopeResolver) {
+export function requirePermission(permission: string | string[], scopeResolver?: ScopeResolver) {
+  const perms = Array.isArray(permission) ? permission : [permission];
   return createMiddleware<{ Bindings: Env }>(async (c, next) => {
     const user = c.get('user');
     if (!user) {
@@ -34,14 +35,15 @@ export function requirePermission(permission: string, scopeResolver?: ScopeResol
 
     // 1. Quick check from token claims if present
     if (user.permissions && Array.isArray(user.permissions)) {
+      const userPerms = user.permissions;
       // If user has platform superuser permission
-      if (user.permissions.includes('platform.manage') || user.permissions.includes('*')) {
+      if (userPerms.includes('platform.manage') || userPerms.includes('*')) {
         await next();
         return;
       }
 
-      // If no specific scope required and user has permission in token
-      if (!scope && user.permissions.includes(permission)) {
+      // If no specific scope required and user has any of the permissions in token
+      if (!scope && perms.some((p) => userPerms.includes(p))) {
         await next();
         return;
       }
@@ -60,7 +62,7 @@ export function requirePermission(permission: string, scopeResolver?: ScopeResol
 
       const grants = results || [];
       const roles = user.roles || [user.role];
-      const allowed = hasPermission(grants, permission, scope, roles);
+      const allowed = perms.some((p) => hasPermission(grants, p, scope, roles));
       if (allowed) {
         await next();
         return;

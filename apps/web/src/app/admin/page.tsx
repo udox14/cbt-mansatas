@@ -14,7 +14,6 @@ import { TanggalHari } from '@/features/exam-engine/components/TanggalHari';
 
 // Feature Views
 import { ExamsPage } from '@/features/exam-engine/exams/ExamsPage';
-import { KegiatanPage } from '@/features/platform/events/EventManagementPage';
 import { PesertaPage } from '@/features/platform/participants/PesertaPage';
 import { RoomsPage } from '@/features/exam-engine/rooms/RoomsPage';
 import { PelaksanaPage } from '@/features/platform/staff/PelaksanaPage';
@@ -24,7 +23,9 @@ function AdminContent() {
   const { user, loading: authLoading, logout } = useAuth('admin');
   const [page, setPage] = useState<Page>(() => {
     if (typeof window !== 'undefined') {
-      return (localStorage.getItem('admin_page') as Page) || 'exams';
+      const stored = localStorage.getItem('admin_page') as Page;
+      if (stored === 'kegiatan') return 'exams';
+      return stored || 'exams';
     }
     return 'exams';
   });
@@ -82,7 +83,15 @@ function AdminContent() {
     { key: 'pelaksana', label: 'Pelaksana Tes', icon: <Shield size={14} strokeWidth={2} /> },
     { key: 'settings', label: 'Pengaturan', icon: <Settings size={14} strokeWidth={2} /> },
   ];
-  const nav = (p: Page) => { setPage(p); setSidebarOpen(false); localStorage.setItem('admin_page', p); };
+  const nav = (p: Page) => {
+    if (p === 'kegiatan') {
+      window.location.href = '/kegiatan';
+      return;
+    }
+    setPage(p);
+    setSidebarOpen(false);
+    localStorage.setItem('admin_page', p);
+  };
 
   return (
     <div style={{ minHeight: '100vh', background: C.bg, display: 'flex', fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}>
@@ -187,7 +196,6 @@ function AdminContent() {
 
         <main style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
           {page === 'exams' && <ExamsPage activeEventId={activeEventId} />}
-          {page === 'kegiatan' && <KegiatanPage activeEventId={activeEventId} setActiveEventId={setActiveEventId} />}
           {page === 'peserta' && <PesertaPage activeEventId={activeEventId} />}
           {page === 'rooms' && <RoomsPage activeEventId={activeEventId} />}
           {page === 'pelaksana' && <PelaksanaPage />}
