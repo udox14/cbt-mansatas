@@ -1,7 +1,27 @@
 export const newId = () => crypto.randomUUID();
 export const now = () => new Date().toISOString();
 export const ok  = (data?: any, message?: string) => ({ success: true, data, message });
-export const err = (error: string, data?: any) => ({ success: false, error, ...(data !== undefined ? { data } : {}) });
+export const err = (error: string, data?: any, code?: string, requestId?: string) => ({
+  success: false,
+  error,
+  ...(code ? { code } : {}),
+  ...(code ? { error_detail: { code, message: error, ...(requestId ? { requestId } : {}) } } : {}),
+  ...(data !== undefined ? { data } : {}),
+});
+
+export function structuredError(code: string, message: string, requestId?: string) {
+  return {
+    success: false,
+    error: message,
+    code,
+    error_detail: {
+      code,
+      message,
+      ...(requestId ? { requestId } : {}),
+    },
+  };
+}
+
 
 // ── PASSWORD HASHING (PBKDF2 via Web Crypto) ──────────────────
 export async function hashPassword(password: string): Promise<string> {

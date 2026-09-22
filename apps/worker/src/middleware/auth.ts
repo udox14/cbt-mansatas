@@ -7,7 +7,10 @@ import type { Env, JWTPayload, Role } from '../types.ts';
 import { verifyJWT } from '../utils/jwt.ts';
 
 declare module 'hono' {
-  interface ContextVariableMap { user: JWTPayload; }
+  interface ContextVariableMap {
+    user: JWTPayload;
+    requestId: string;
+  }
 }
 
 export const authMiddleware = createMiddleware<{ Bindings: Env }>(async (c, next) => {

@@ -39,6 +39,15 @@ import {
   deleteAiDraft,
   acceptAiDrafts,
 } from '../../services/exam-engine/ai-authoring.ts';
+import {
+  getExamResults,
+  getExamResultsExport,
+  deleteExamResult,
+} from '../../services/exam-engine/results.ts';
+import { getExamSessions } from '../../services/exam-engine/monitoring.ts';
+import { getExamQuestionAnalytics } from '../../services/exam-engine/analytics.ts';
+import { recomputeMissingExamResults } from '../../services/exam-engine/scoring.ts';
+
 
 
 const kegiatan = new Hono<{ Bindings: Env }>();
@@ -493,6 +502,89 @@ kegiatan.post('/events/:eventId/exams/:examId/ai/drafts/accept', requirePermissi
     return c.json(err(result.error!), (result.status as any) || 400);
   }
   return c.json(ok(result.data, result.message), 200);
+});
+
+// ── Results & Monitoring Endpoints for Kegiatan ──────────────
+
+async function assertKegiatanExam(db: D1Database, examId: string) {
+  const exam = await db.prepare(
+    `SELECT e.id, e.event_id, ev.mode FROM cbt_exams e
+     JOIN cbt_events ev ON ev.id = e.event_id
+     WHERE e.id = ?`
+  ).bind(examId).first<any>();
+  if (!exam) throw new Error('Ujian tidak ditemukan');
+  if (exam.mode !== 'kegiatan') throw new Error('Ujian bukan merupakan domain Kegiatan');
+  return exam;
+}
+
+kegiatan.get('/exams/:id/results', requirePermission(['kegiatan.event.read', 'kegiatan.access']), async (c) => {
+  const examId = c.req.param('id');
+  try {
+    await assertKegiatanExam(c.env.DB, examId);
+    const results = await getExamResults(c.env.DB, examId);
+    return c.json(ok(results));
+  } catch (e: any) {
+    return c.json(err(e?.message || 'Gagal memuat hasil ujian'), 400);
+  }
+});
+
+kegiatan.get('/exams/:id/results-export', requirePermission(['kegiatan.event.read', 'kegiatan.access']), async (c) => {
+  const examId = c.req.param('id');
+  try {
+    await assertKegiatanExam(c.env.DB, examId);
+    const results = await getExamResultsExport(c.env.DB, examId);
+    return c.json(ok(results));
+  } catch (e: any) {
+    return c.json(err(e?.message || 'Gagal memuat export hasil ujian'), 400);
+  }
+});
+
+kegiatan.get('/exams/:id/sessions', requirePermission(['kegiatan.event.read', 'kegiatan.access']), async (c) => {
+  const examId = c.req.param('id');
+  const roomId = c.req.query('room_id') || null;
+  try {
+    await assertKegiatanExam(c.env.DB, examId);
+    const sessions = await getExamSessions(c.env.DB, examId, roomId);
+    return c.json(ok(sessions));
+  } catch (e: any) {
+    return c.json(err(e?.message || 'Gagal memuat sesi ujian'), 400);
+  }
+});
+
+kegiatan.get('/exams/:id/question-analytics', requirePermission(['kegiatan.event.read', 'kegiatan.access']), async (c) => {
+  const examId = c.req.param('id');
+  try {
+    await assertKegiatanExam(c.env.DB, examId);
+    const analytics = await getExamQuestionAnalytics(c.env.DB, examId);
+    return c.json(ok(analytics));
+  } catch (e: any) {
+    return c.json(err(e?.message || 'Gagal memuat analitik soal'), 400);
+  }
+});
+
+kegiatan.post('/exams/:id/results/recompute-missing', requirePermission('kegiatan.event.update'), async (c) => {
+  const examId = c.req.param('id');
+  try {
+    await assertKegiatanExam(c.env.DB, examId);
+    const result = await recomputeMissingExamResults(c.env.DB, examId);
+    return c.json(ok(result, result.repaired > 0
+      ? `${result.repaired} hasil peserta berhasil dipulihkan`
+      : 'Tidak ada hasil hilang yang perlu dipulihkan'));
+  } catch (e: any) {
+    return c.json(err(e?.message || 'Gagal menghitung ulang hasil ujian'), 400);
+  }
+});
+
+kegiatan.delete('/exams/:id/results/:sessionId', requirePermission('kegiatan.event.update'), async (c) => {
+  const examId = c.req.param('id');
+  const sessionId = c.req.param('sessionId');
+  try {
+    await assertKegiatanExam(c.env.DB, examId);
+    const result = await deleteExamResult(c.env.DB, examId, sessionId);
+    return c.json(ok(result.data, result.message));
+  } catch (e: any) {
+    return c.json(err(e?.message || 'Gagal menghapus hasil ujian'), 400);
+  }
 });
 
 export default kegiatan;

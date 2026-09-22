@@ -29,21 +29,11 @@ student.get('/exams', async (c) => {
     `SELECT e.id, e.title, e.subject_name, e.sequence_order, e.description, e.duration_minutes, e.rules_text, e.active_status, e.target_jalur, e.enforce_fullscreen,
             e.event_id, ev.name as event_name, ev.code as event_code,
             es.id as session_id, es.status as session_status, es.is_time_locked,
-            COALESCE(ac.answered_count, 0) as answered_count,
-            COALESCE(qc.total_questions, 0) as total_questions
+            COALESCE((SELECT COUNT(*) FROM cbt_student_answers sa WHERE sa.session_id = es.id), 0) as answered_count,
+            COALESCE((SELECT COUNT(*) FROM cbt_questions q WHERE q.exam_id = e.id), 0) as total_questions
      FROM cbt_exams e
      LEFT JOIN cbt_events ev ON ev.id = e.event_id
      LEFT JOIN cbt_exam_sessions es ON es.exam_id = e.id AND es.user_id = ? AND es.user_type = ?
-     LEFT JOIN (
-       SELECT session_id, COUNT(*) as answered_count
-       FROM cbt_student_answers
-       GROUP BY session_id
-     ) ac ON ac.session_id = es.id
-     LEFT JOIN (
-       SELECT exam_id, COUNT(*) as total_questions
-       FROM cbt_questions
-       GROUP BY exam_id
-     ) qc ON qc.exam_id = e.id
      WHERE e.active_status = 'active'
      ORDER BY COALESCE(ev.code, ''), COALESCE(e.sequence_order, 0), LOWER(e.title)`
   ).bind(user.sub, userType).all();
@@ -266,6 +256,36 @@ student.post('/exams/:examId/validate-token', async (c) => {
     ).bind(examId, user.sub, userType).run();
   }
 
+  // Fast path for session resume: avoids querying all questions and options when session exists
+  if (!isDummy) {
+    const existing = await c.env.DB.prepare(
+      'SELECT * FROM cbt_exam_sessions WHERE exam_id=? AND user_id=? AND user_type=?'
+    ).bind(examId, user.sub, userType).first<any>();
+
+    if (existing) {
+      if (existing.status === 'submitted')
+        return c.json(err('Anda sudah menyelesaikan ujian ini'), 400);
+      if (existing.is_time_locked && !isLockedByCheat(existing, exam))
+        return c.json(err('Waktu ujian dikunci oleh pengawas. Hubungi pengawas untuk membuka.'), 403);
+      if (existing.device_id && existing.device_id !== device_id)
+        return c.json(err('Sesi terkunci di perangkat lain. Hubungi pengawas untuk reset.'), 403);
+
+      await c.env.DB.prepare(
+        'UPDATE cbt_exam_sessions SET device_id=?, last_heartbeat=? WHERE id=?'
+      ).bind(device_id, now(), existing.id).run();
+
+      return c.json(ok({
+        session_id: existing.id, resumed: true,
+        question_map: JSON.parse(existing.question_map || '[]'),
+        option_map: JSON.parse(existing.option_map || '{}'),
+        started_at: existing.started_at, duration_minutes: exam.duration_minutes,
+        locked: !!existing.is_time_locked,
+        cheat_locked: isLockedByCheat(existing, exam),
+        cheat_warnings: existing.cheat_warnings ?? 0,
+      }, 'Sesi dilanjutkan'));
+    }
+  }
+
   // ── H3: Anti race-condition — coba INSERT dulu, handle UNIQUE conflict ──
   const sessionId = newId();
   const { results: questions } = await c.env.DB.prepare(
@@ -301,8 +321,15 @@ student.post('/exams/:examId/validate-token', async (c) => {
     }, 'Ujian dimulai'), 201);
 
   } catch (e: any) {
-    // UNIQUE constraint → sesi sudah ada (race condition atau double-submit)
-    if (e.message?.includes('UNIQUE') || e.message?.includes('unique')) {
+    // UNIQUE constraint → sesi sudah ada (race condition atau simultaneous start)
+    if (
+      e.message?.includes('UNIQUE') ||
+      e.message?.includes('unique') ||
+      e?.code === 'SQLITE_CONSTRAINT' ||
+      e?.errcode === 1555 ||
+      e?.errcode === 19 ||
+      e?.errcode === 2067
+    ) {
       const existing = await c.env.DB.prepare(
         'SELECT * FROM cbt_exam_sessions WHERE exam_id=? AND user_id=? AND user_type=?'
       ).bind(examId, user.sub, userType).first<any>();
@@ -562,28 +589,43 @@ student.post('/sessions/:sessionId/submit', async (c) => {
   ).bind(sessionId, user.sub, userType).first<any>();
   if (!session) return c.json(err('Sesi tidak ditemukan'), 404);
 
-  if (session.status !== 'submitted') {
-    const timeExpired = isSessionDurationExpired(session);
-    if (session.is_time_locked) {
-      return c.json(err('Ujian dikunci karena pelanggaran. Hubungi pengawas untuk melanjutkan.'), 403);
-    }
-    if (timeExpired) {
-      await c.env.DB.prepare(
-        'UPDATE cbt_exam_sessions SET is_time_locked=1, locked_at=COALESCE(locked_at, ?), last_heartbeat=? WHERE id=? AND user_id=? AND user_type=?'
-      ).bind(now(), now(), sessionId, user.sub, userType).run();
-      return c.json(err('Waktu ujian sudah habis. Hubungi pengawas.'), 403);
-    }
-
-    await saveAnswers(c.env.DB, session.id, body.answers || []);
-    const missingCount = await countMissingRequiredAnswers(c.env.DB, session.id, session.exam_id);
-    if (missingCount > 0) {
-      return c.json(err(`${missingCount} soal belum diisi. Lengkapi semua soal sebelum mengirim ujian.`), 400);
-    }
-
-    await finalizeSession(c.env.DB, session, [], 'submitted');
+  if (session.status === 'submitted') {
+    const existingResult = await c.env.DB.prepare(
+      'SELECT total_questions, total_correct, total_wrong, total_unanswered, score FROM cbt_exam_results WHERE session_id=?'
+    ).bind(sessionId).first<any>();
+    const exam = await c.env.DB.prepare(
+      'SELECT completion_message, is_score_visible FROM cbt_exams WHERE id=?'
+    ).bind(session.exam_id).first<any>();
+    return c.json(ok({
+      completion_message: exam?.completion_message || 'Ujian selesai.',
+      score_visible: !!exam?.is_score_visible,
+      ...(exam?.is_score_visible && existingResult ? existingResult : {}),
+    }, 'Ujian berhasil diselesaikan'));
   }
 
-  const result = await computeScore(c.env.DB, sessionId, session.exam_id, session.user_id, session.user_type);
+  const timeExpired = isSessionDurationExpired(session);
+  if (session.is_time_locked) {
+    return c.json(err('Ujian dikunci karena pelanggaran. Hubungi pengawas untuk melanjutkan.'), 403);
+  }
+  if (timeExpired) {
+    await c.env.DB.prepare(
+      'UPDATE cbt_exam_sessions SET is_time_locked=1, locked_at=COALESCE(locked_at, ?), last_heartbeat=? WHERE id=? AND user_id=? AND user_type=?'
+    ).bind(now(), now(), sessionId, user.sub, userType).run();
+    return c.json(err('Waktu ujian sudah habis. Hubungi pengawas.'), 403);
+  }
+
+  await saveAnswers(c.env.DB, session.id, body.answers || []);
+  const missingCount = await countMissingRequiredAnswers(c.env.DB, session.id, session.exam_id);
+  if (missingCount > 0) {
+    return c.json(err(`${missingCount} soal belum diisi. Lengkapi semua soal sebelum mengirim ujian.`), 400);
+  }
+
+  let result;
+  try {
+    result = await finalizeSession(c.env.DB, session, [], 'submitted');
+  } catch (finalErr: any) {
+    return c.json(err(finalErr.message || 'Gagal menyelesaikan ujian'), 403);
+  }
 
   const exam = await c.env.DB.prepare(
     'SELECT completion_message, is_score_visible FROM cbt_exams WHERE id=?'
@@ -641,11 +683,36 @@ function isLockedByCheat(session: any, exam: any) {
 
 async function finalizeSession(db: D1Database, session: any, answers: any[], status: 'submitted') {
   await saveAnswers(db, session.id, answers || []);
-  await db.prepare(
+  const updateRes = await db.prepare(
     `UPDATE cbt_exam_sessions
      SET status=?, finished_at=COALESCE(finished_at, ?), last_heartbeat=?
-     WHERE id=? AND user_id=? AND user_type=? AND status != 'submitted'`
+     WHERE id=? AND user_id=? AND user_type=? AND status IN ('active', 'paused') AND is_time_locked = 0`
   ).bind(status, now(), now(), session.id, session.user_id, session.user_type).run();
+
+  if ((updateRes?.meta as any)?.changes === 0) {
+    const currentSession = await db.prepare(
+      'SELECT status, is_time_locked FROM cbt_exam_sessions WHERE id=?'
+    ).bind(session.id).first<any>();
+
+    if (currentSession?.status === 'submitted') {
+      const existingResult = await db.prepare(
+        'SELECT total_questions, total_correct, total_wrong, total_unanswered, score FROM cbt_exam_results WHERE session_id=?'
+      ).bind(session.id).first<any>();
+      if (existingResult) return existingResult;
+    }
+
+    if (currentSession?.is_time_locked) {
+      throw new Error('Sesi terkunci atau waktu telah habis, tidak dapat diserahkan');
+    }
+
+    const fallbackResult = await db.prepare(
+      'SELECT total_questions, total_correct, total_wrong, total_unanswered, score FROM cbt_exam_results WHERE session_id=?'
+    ).bind(session.id).first<any>();
+    if (fallbackResult) return fallbackResult;
+
+    throw new Error('Transisi status sesi tidak valid');
+  }
+
   return computeScore(db, session.id, session.exam_id, session.user_id, session.user_type);
 }
 

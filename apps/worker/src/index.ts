@@ -16,11 +16,38 @@ import tkaRoutes from './routes/domains/tka';
 import semesterRoutes from './routes/domains/semester';
 import proctorRoutes from './routes/proctor';
 import studentRoutes from './routes/student';
+import reportingRoutes from './routes/reporting';
 import { genericAiRoutes } from './routes/exam-engine/authoring';
 
 const app = new Hono<{ Bindings: Env }>();
 
 // ── Global Middleware ────────────────────────────────────────
+
+app.use('*', async (c, next) => {
+  const rawId = c.req.header('x-request-id') || c.req.header('cf-ray');
+  // Strict sanitization: alphanumeric, hyphen, underscore, 1-64 chars max. Never trust for auth or keys.
+  const reqId = (rawId && /^[a-zA-Z0-9\-_]{1,64}$/.test(rawId))
+    ? rawId
+    : crypto.randomUUID();
+  c.set('requestId', reqId);
+  c.header('X-Request-Id', reqId);
+
+  const start = Date.now();
+  await next();
+  const duration = Date.now() - start;
+
+  if (c.res.status >= 400) {
+    console.error(JSON.stringify({
+      level: 'warn',
+      requestId: reqId,
+      method: c.req.method,
+      path: c.req.path,
+      status: c.res.status,
+      durationMs: duration,
+      timestamp: new Date().toISOString(),
+    }));
+  }
+});
 
 app.use('*', async (c, next) => {
   const allowedOrigins = (c.env.CORS_ORIGIN || '*')
@@ -35,7 +62,7 @@ app.use('*', async (c, next) => {
       return allowedOrigins.includes(origin) ? origin : '';
     },
     allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowHeaders: ['Content-Type', 'Authorization'],
+    allowHeaders: ['Content-Type', 'Authorization', 'X-Request-Id'],
     maxAge: 86400,
   });
   return corsMiddleware(c, next);
@@ -46,7 +73,7 @@ app.use('*', logger());
 // ── Health Check ─────────────────────────────────────────────
 
 app.get('/api/health', (c) => {
-  return c.json({ status: 'ok', timestamp: new Date().toISOString() });
+  return c.json({ status: 'ok', timestamp: new Date().toISOString(), requestId: c.get('requestId') });
 });
 
 // ── Routes ───────────────────────────────────────────────────
@@ -60,6 +87,7 @@ app.route('/api/tka', tkaRoutes);
 app.route('/api/semester', semesterRoutes);
 app.route('/api/proctor', proctorRoutes);
 app.route('/api/student', studentRoutes);
+app.route('/api/reporting', reportingRoutes);
 app.route('/api', genericAiRoutes);
 
 // ── R2 Media Serve (Public read) ─────────────────────────────
@@ -95,14 +123,32 @@ app.get('/api/settings', async (c) => {
 // ── 404 Fallback ─────────────────────────────────────────────
 
 app.notFound((c) => {
-  return c.json({ success: false, error: 'Endpoint tidak ditemukan' }, 404);
+  return c.json({ success: false, error: 'Endpoint tidak ditemukan', code: 'NOT_FOUND' }, 404);
 });
 
 // ── Error Handler ────────────────────────────────────────────
 
 app.onError((e, c) => {
-  console.error('Worker Error:', e.message, e.stack);
-  return c.json({ success: false, error: 'Terjadi kesalahan server' }, 500);
+  const reqId = c.get('requestId') || 'unknown';
+  console.error(JSON.stringify({
+    level: 'error',
+    requestId: reqId,
+    error: e.message,
+    stack: e.stack,
+    path: c.req.path,
+    method: c.req.method,
+    timestamp: new Date().toISOString(),
+  }));
+  return c.json({
+    success: false,
+    error: 'Terjadi kesalahan server',
+    code: 'INTERNAL_SERVER_ERROR',
+    error_detail: {
+      code: 'INTERNAL_SERVER_ERROR',
+      message: 'Terjadi kesalahan server',
+      requestId: reqId,
+    },
+  }, 500);
 });
 
 export default app;

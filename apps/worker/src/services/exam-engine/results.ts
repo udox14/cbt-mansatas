@@ -55,23 +55,32 @@ export async function getAssignedResultParticipants(db: D1Database, examId: stri
     LEFT JOIN cbt_rooms r ON r.id = cu.room_id
   `;
 
-  for (const assignment of (assignments as any[]) || []) {
-    if (assignment.user_type === 'cbt_user') {
-      const row = await db.prepare(
-        `${manualStudentSelect}
-         WHERE cu.id=? AND cu.role='student' AND cu.is_active=1`
-      ).bind(assignment.user_id).first<any>();
-      add(row);
-      continue;
-    }
+  const userAssignments = ((assignments as any[]) || []).filter(a => a.user_type === 'cbt_user');
+  const roomAssignments = ((assignments as any[]) || []).filter(a => a.user_type === 'room');
 
-    if (assignment.user_type === 'room') {
-      const room = roomNameToIdMap.get(assignment.user_id) || assignment.user_id;
+  if (userAssignments.length > 0) {
+    const userIds = userAssignments.map(a => a.user_id);
+    for (let i = 0; i < userIds.length; i += 100) {
+      const chunk = userIds.slice(i, i + 100);
+      const ph = chunk.map(() => '?').join(',');
+      const { results: userRows } = await db.prepare(
+        `${manualStudentSelect}
+         WHERE cu.id IN (${ph}) AND cu.role='student' AND cu.is_active=1`
+      ).bind(...chunk).all();
+      addAll((userRows as any[]) || []);
+    }
+  }
+
+  if (roomAssignments.length > 0) {
+    const roomIds = roomAssignments.map(a => roomNameToIdMap.get(a.user_id) || a.user_id);
+    for (let i = 0; i < roomIds.length; i += 100) {
+      const chunk = roomIds.slice(i, i + 100);
+      const ph = chunk.map(() => '?').join(',');
       const { results: manualRows } = await db.prepare(
         `${manualStudentSelect}
-         WHERE cu.room_id=? AND cu.role='student' AND cu.is_active=1
+         WHERE cu.room_id IN (${ph}) AND cu.role='student' AND cu.is_active=1
          ORDER BY cu.nama_lengkap`
-      ).bind(room).all();
+      ).bind(...chunk).all();
       addAll((manualRows as any[]) || []);
     }
   }
