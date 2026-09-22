@@ -13,6 +13,7 @@
 import type { SemesterSlot, SemesterSchedule, SemesterConflict } from './types.ts';
 import { assertSemesterEvent, EventFrozenError } from './events.ts';
 import { newId, now } from '../../../utils/helpers.ts';
+import { invalidateDownstreamRevisions } from './concurrency.ts';
 
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_REGEX = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -392,12 +393,22 @@ export async function assignSemesterExamSlot(
     );
   }
 
+  // Check if existing schedule is locked
+  const existingSch = await db
+    .prepare('SELECT id, slot_id, is_locked FROM cbt_semester_schedules WHERE event_id = ? AND exam_id = ?')
+    .bind(eventId, examId)
+    .first<{ id: string; slot_id: string; is_locked: number }>();
+
+  if (existingSch && existingSch.is_locked === 1 && existingSch.slot_id !== slotId) {
+    throw new Error('Jadwal ujian ini sedang terkunci (locked). Buka kunci jadwal terlebih dahulu.');
+  }
+
   // 5. Upsert schedule binding
   const currentTimestamp = now();
   await db
     .prepare(
-      `INSERT INTO cbt_semester_schedules (id, event_id, exam_id, slot_id, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)
+      `INSERT INTO cbt_semester_schedules (id, event_id, exam_id, slot_id, is_locked, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 0, ?, ?)
        ON CONFLICT(event_id, exam_id) DO UPDATE SET
          slot_id = excluded.slot_id,
          updated_at = excluded.updated_at`
@@ -422,6 +433,9 @@ export async function assignSemesterExamSlot(
     .bind(examId)
     .run();
 
+  // Invalidate downstream
+  await invalidateDownstreamRevisions(db, eventId, 'timetable');
+
   const updatedSchedules = await listSemesterSchedules(db, eventId);
   return updatedSchedules.find((s) => s.exam_id === examId)!;
 }
@@ -441,12 +455,16 @@ export async function removeSemesterExamSlot(
   }
 
   const sch = await db
-    .prepare('SELECT id, exam_id FROM cbt_semester_schedules WHERE (id = ? OR exam_id = ?) AND event_id = ?')
+    .prepare('SELECT id, exam_id, is_locked FROM cbt_semester_schedules WHERE (id = ? OR exam_id = ?) AND event_id = ?')
     .bind(scheduleOrExamId, scheduleOrExamId, eventId)
-    .first<{ id: string; exam_id: string }>();
+    .first<{ id: string; exam_id: string; is_locked: number }>();
 
   if (!sch) {
     throw new Error('Jadwal tidak ditemukan');
+  }
+
+  if (sch.is_locked === 1) {
+    throw new Error('Jadwal ujian ini sedang terkunci (locked). Buka kunci jadwal terlebih dahulu.');
   }
 
   const currentTimestamp = now();
@@ -472,6 +490,9 @@ export async function removeSemesterExamSlot(
     .prepare('DELETE FROM cbt_exam_tokens WHERE exam_id = ?')
     .bind(sch.exam_id)
     .run();
+
+  // Invalidate downstream
+  await invalidateDownstreamRevisions(db, eventId, 'timetable');
 }
 
 /**

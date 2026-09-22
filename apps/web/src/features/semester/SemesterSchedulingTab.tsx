@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { GET, POST, DEL } from '@/lib/api';
 import { Button, Spinner, Badge, Modal, useToast, EmptyState, Confirm } from '@/components/ui';
-import { Calendar, Clock, Plus, Trash2, AlertTriangle, ShieldCheck, CheckCircle2, ChevronRight } from 'lucide-react';
+import { Calendar, Clock, Plus, Trash2, AlertTriangle, ShieldCheck, CheckCircle2, ChevronRight, Lock, Unlock, Sparkles } from 'lucide-react';
 import type { SemesterEvent, SemesterSlot, SemesterSchedule, SemesterExam } from './types';
 
 interface SemesterSchedulingTabProps {
@@ -17,6 +17,12 @@ export function SemesterSchedulingTab({ event }: SemesterSchedulingTabProps) {
   const [exams, setExams] = useState<SemesterExam[]>([]);
   const [conflicts, setConflicts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Timetable Solver Modal
+  const [showSolverModal, setShowSolverModal] = useState(false);
+  const [solverMaxPerDay, setSolverMaxPerDay] = useState(2);
+  const [solverClearExisting, setSolverClearExisting] = useState(false);
+  const [runningSolver, setRunningSolver] = useState(false);
 
   // Add Slot Modal
   const [showSlotModal, setShowSlotModal] = useState(false);
@@ -112,6 +118,38 @@ export function SemesterSchedulingTab({ event }: SemesterSchedulingTabProps) {
     }
   };
 
+  const handleRunSolver = async () => {
+    setRunningSolver(true);
+    const res = await POST<any>(`/api/semester/events/${event.id}/automation/timetable`, {
+      max_exams_per_day: Number(solverMaxPerDay) || 2,
+      clear_existing: solverClearExisting,
+    });
+    setRunningSolver(false);
+    if (res.success) {
+      toast(
+        'success',
+        `Solver selesai: ${res.data?.assigned_count || 0} ujian dijadwalkan, ${res.data?.skipped_count || 0} dilewati/terkunci.`
+      );
+      setShowSolverModal(false);
+      fetchData();
+    } else {
+      toast('error', res.error || 'Gagal menjalankan solver penjadwalan');
+    }
+  };
+
+  const handleToggleLockSchedule = async (schedule: SemesterSchedule) => {
+    const nextLocked = !(schedule.is_locked === 1);
+    const res = await POST<any>(`/api/semester/events/${event.id}/schedules/${schedule.id}/lock`, {
+      is_locked: nextLocked,
+    });
+    if (res.success) {
+      toast('success', nextLocked ? 'Jadwal ujian dikunci (pin)' : 'Kunci jadwal ujian dilepas');
+      fetchData();
+    } else {
+      toast('error', res.error || 'Gagal mengubah status kunci jadwal');
+    }
+  };
+
   const handleDeleteSlot = async () => {
     if (!delSlotTarget) return;
     const res = await DEL<any>(`/api/semester/events/${event.id}/slots/${delSlotTarget.id}`);
@@ -169,11 +207,22 @@ export function SemesterSchedulingTab({ event }: SemesterSchedulingTabProps) {
               <Button
                 variant="secondary"
                 size="sm"
+                onClick={() => setShowSolverModal(true)}
+                disabled={slots.length === 0 || exams.length === 0}
+                className="text-emerald-700 border-emerald-300 hover:bg-emerald-50"
+              >
+                <Sparkles className="w-3.5 h-3.5 mr-1 text-emerald-600" />
+                Otomasi Penjadwalan
+              </Button>
+
+              <Button
+                variant="secondary"
+                size="sm"
                 onClick={() => setShowAssignModal(true)}
                 disabled={slots.length === 0 || unscheduledExams.length === 0}
               >
                 <Plus className="w-3.5 h-3.5 mr-1" />
-                Jadwalkan Ujian
+                Jadwalkan Manual
               </Button>
 
               <Button variant="primary" size="sm" onClick={() => setShowSlotModal(true)}>
@@ -311,14 +360,23 @@ export function SemesterSchedulingTab({ event }: SemesterSchedulingTabProps) {
                       return (
                         <div
                           key={sc.id}
-                          className="bg-gray-50 border border-gray-200 rounded-lg p-3 flex items-start justify-between gap-2"
+                          className={`border rounded-lg p-3 flex items-start justify-between gap-2 transition-colors ${
+                            sc.is_locked ? 'bg-amber-50/60 border-amber-200' : 'bg-gray-50 border-gray-200'
+                          }`}
                         >
                           <div>
-                            {examObj && (
-                              <span className="bg-gray-200 text-gray-700 text-[10px] font-bold px-1.5 py-0.2 rounded mr-1.5">
-                                Kelas {examObj.target_grade}
-                              </span>
-                            )}
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              {examObj && (
+                                <span className="bg-gray-200 text-gray-700 text-[10px] font-bold px-1.5 py-0.2 rounded">
+                                  Kelas {examObj.target_grade}
+                                </span>
+                              )}
+                              {sc.is_locked === 1 && (
+                                <span className="inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.2 rounded bg-amber-100 text-amber-800">
+                                  <Lock className="w-2.5 h-2.5" /> Terkunci
+                                </span>
+                              )}
+                            </div>
                             <h5 className="font-bold text-gray-900 text-xs mt-1">
                               {sc.exam_title || examObj?.title || 'Ujian'}
                             </h5>
@@ -329,15 +387,40 @@ export function SemesterSchedulingTab({ event }: SemesterSchedulingTabProps) {
                             )}
                           </div>
 
-                          {!isFrozen && (
-                            <button
-                              onClick={() => setDelScheduleTarget(sc)}
-                              className="text-gray-400 hover:text-red-600 p-1"
-                              title="Lepaskan Ujian dari Sesi"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          )}
+                          <div className="flex items-center gap-1 shrink-0">
+                            {!isFrozen && (
+                              <button
+                                onClick={() => handleToggleLockSchedule(sc)}
+                                className={`p-1 rounded transition-colors ${
+                                  sc.is_locked
+                                    ? 'text-amber-700 hover:bg-amber-100'
+                                    : 'text-gray-400 hover:text-gray-600 hover:bg-gray-200'
+                                }`}
+                                title={
+                                  sc.is_locked
+                                    ? 'Jadwal terkunci (Pin) - Solver tidak akan memindahkan. Klik untuk membuka'
+                                    : 'Kunci Jadwal (Pin) - Klik untuk mengunci'
+                                }
+                              >
+                                {sc.is_locked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+                              </button>
+                            )}
+
+                            {!isFrozen && (
+                              <button
+                                onClick={() => setDelScheduleTarget(sc)}
+                                className={`p-1 rounded transition-colors ${
+                                  sc.is_locked
+                                    ? 'text-gray-300 cursor-not-allowed'
+                                    : 'text-gray-400 hover:text-red-600 hover:bg-red-50'
+                                }`}
+                                title={sc.is_locked ? 'Lepaskan kunci terlebih dahulu untuk menghapus' : 'Lepaskan Ujian dari Sesi'}
+                                disabled={Boolean(sc.is_locked)}
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
                         </div>
                       );
                     })}
@@ -474,6 +557,63 @@ export function SemesterSchedulingTab({ event }: SemesterSchedulingTabProps) {
               </Button>
             </div>
           </form>
+        </Modal>
+      )}
+
+      {/* Timetable Solver Modal */}
+      {showSolverModal && (
+        <Modal open={true} title="Otomasi Penjadwalan Ujian (Greedy MRV Solver)" onClose={() => setShowSolverModal(false)} size="md">
+          <div className="space-y-4 text-xs">
+            <p className="text-gray-600">
+              Solver otomatis akan memetakan seluruh ujian ke slot waktu yang tersedia menggunakan algoritma <em>Greedy Minimum Remaining Values (MRV)</em> dengan pemenuhan constraint ketat:
+            </p>
+            <ul className="list-disc pl-5 space-y-1 text-gray-500 text-[11px]">
+              <li>Tidak ada siswa dalam rombel/kelas audiens yang bentrok waktu di slot yang sama.</li>
+              <li>Beban ujian siswa per hari dibatasi sesuai batas maksimum.</li>
+              <li>Jadwal yang <strong>terkunci (pinned)</strong> tidak akan dipindahkan oleh solver.</li>
+            </ul>
+
+            <div className="bg-amber-50 border border-amber-200 rounded p-3 text-[11px] text-amber-800">
+              <strong>Peringatan Reschedule:</strong> Ujian yang dijadwalkan ulang oleh solver akan membatalkan (purge) token ujian yang belum terpakai demi keamanan sesi.
+            </div>
+
+            <div>
+              <label className="block font-semibold text-gray-700 mb-1">
+                Maksimal Ujian per Hari per Siswa
+              </label>
+              <input
+                type="number"
+                min="1"
+                max="5"
+                value={solverMaxPerDay}
+                onChange={(e) => setSolverMaxPerDay(Number(e.target.value))}
+                className="w-full border border-gray-300 rounded px-3 py-2 text-xs"
+              />
+            </div>
+
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="clearExisting"
+                checked={solverClearExisting}
+                onChange={(e) => setSolverClearExisting(e.target.checked)}
+                className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+              />
+              <label htmlFor="clearExisting" className="text-gray-700 font-medium">
+                Bersihkan & susun ulang jadwal yang belum terkunci
+              </label>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-gray-100">
+              <Button type="button" variant="secondary" onClick={() => setShowSolverModal(false)} disabled={runningSolver}>
+                Batal
+              </Button>
+              <Button type="button" variant="primary" loading={runningSolver} onClick={handleRunSolver}>
+                <Sparkles className="w-3.5 h-3.5 mr-1" />
+                Jalankan Solver
+              </Button>
+            </div>
+          </div>
         </Modal>
       )}
 

@@ -15,6 +15,7 @@ import { assertSemesterEvent, EventFrozenError } from './events.ts';
 import { formatStudentClassName } from '../../sources/students.ts';
 import { getActiveAcademicYear } from '../../sources/teaching-assignments.ts';
 import { newId, now } from '../../../utils/helpers.ts';
+import { invalidateDownstreamRevisions } from './concurrency.ts';
 
 export interface SnapshotOptions {
   grades?: string[]; // e.g. ['10', '11', '12'] (default: all three)
@@ -334,6 +335,32 @@ export async function assignSemesterParticipantRooms(
       }
     }
 
+    // Check participant lock
+    const pRecord = await db
+      .prepare('SELECT id, student_id, room_id, is_room_locked FROM cbt_semester_participants WHERE id = ? AND event_id = ?')
+      .bind(participant_id, eventId)
+      .first<{ id: string; student_id: string; room_id: string | null; is_room_locked: number }>();
+
+    if (!pRecord) continue;
+
+    if (pRecord.is_room_locked === 1 && pRecord.room_id !== room_id) {
+      throw new Error(`Peserta '${participant_id}' memiliki ruangan terkunci (locked). Buka kunci terlebih dahulu.`);
+    }
+
+    // Check seat assignment
+    const seatAssign = await db
+      .prepare('SELECT id, is_locked FROM cbt_semester_seat_assignments WHERE participant_id = ? AND event_id = ?')
+      .bind(participant_id, eventId)
+      .first<{ id: string; is_locked: number }>();
+
+    if (seatAssign && pRecord.room_id !== room_id) {
+      if (seatAssign.is_locked === 1) {
+        throw new Error('Peserta memiliki alokasi kursi terkunci (locked). Buka kunci kursi terlebih dahulu.');
+      }
+      // Service must clear unlocked seat before changing room
+      await db.prepare('DELETE FROM cbt_semester_seat_assignments WHERE id = ?').bind(seatAssign.id).run();
+    }
+
     // 1. Update participant room
     const res = await db
       .prepare(
@@ -348,22 +375,19 @@ export async function assignSemesterParticipantRooms(
       updatedCount++;
 
       // 2. Synchronously update cbt_exam_roster.room_id for this participant
-      const participant = await db
-        .prepare('SELECT student_id FROM cbt_semester_participants WHERE id = ?')
-        .bind(participant_id)
-        .first<{ student_id: string }>();
-
-      if (participant) {
-        await db
-          .prepare(
-            `UPDATE cbt_exam_roster
-             SET room_id = ?, updated_at = ?
-             WHERE event_id = ? AND source_id = ?`
-          )
-          .bind(room_id, currentTimestamp, eventId, participant.student_id)
-          .run();
-      }
+      await db
+        .prepare(
+          `UPDATE cbt_exam_roster
+           SET room_id = ?, updated_at = ?
+           WHERE event_id = ? AND source_id = ?`
+        )
+        .bind(room_id, currentTimestamp, eventId, pRecord.student_id)
+        .run();
     }
+  }
+
+  if (updatedCount > 0) {
+    await invalidateDownstreamRevisions(db, eventId, 'room_allocation');
   }
 
   return { updatedCount };

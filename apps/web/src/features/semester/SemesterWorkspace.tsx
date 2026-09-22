@@ -25,6 +25,7 @@ import {
   AlertTriangle,
   Clock,
   GraduationCap,
+  LayoutGrid,
 } from 'lucide-react';
 import { C } from '../exam-engine/components/theme';
 import StatusBadge from '../exam-engine/components/StatusBadge';
@@ -33,7 +34,9 @@ import { SemesterParticipantsTab } from './SemesterParticipantsTab';
 import { SemesterExamsTab } from './SemesterExamsTab';
 import { SemesterAudienceTab } from './SemesterAudienceTab';
 import { SemesterRoomsTab } from './SemesterRoomsTab';
+import { SemesterSeatingTab } from './SemesterSeatingTab';
 import { SemesterSchedulingTab } from './SemesterSchedulingTab';
+import { SemesterInvigilatorsTab } from './SemesterInvigilatorsTab';
 import { SemesterReadinessTab } from './SemesterReadinessTab';
 import { QuestionsView } from '../exam-engine/questions/QuestionsView';
 import { TokensView } from '../exam-engine/tokens/TokensView';
@@ -52,7 +55,9 @@ type WorkspaceTab =
   | 'ujian'
   | 'audiens'
   | 'ruang'
+  | 'seating'
   | 'jadwal'
+  | 'invigilators'
   | 'readiness'
   | 'soal'
   | 'token'
@@ -309,7 +314,9 @@ export function SemesterWorkspace({ eventId, onBack }: SemesterWorkspaceProps) {
             { key: 'ujian', label: `Mata Pelajaran (${exams.length})`, icon: BookOpen },
             { key: 'audiens', label: 'Audiens & Roster', icon: Users },
             { key: 'ruang', label: 'Ruangan Ujian', icon: Home },
+            { key: 'seating', label: 'Denah & Kursi', icon: LayoutGrid },
             { key: 'jadwal', label: 'Sesi Waktu', icon: Clock },
+            { key: 'invigilators', label: 'Pengawas Ruangan', icon: ShieldCheck },
             { key: 'readiness', label: 'Kesiapan (Ready)', icon: ShieldCheck },
             { key: 'soal', label: 'Bank Soal', icon: HelpCircle },
             { key: 'token', label: 'Token Ruangan', icon: Key },
@@ -492,8 +499,14 @@ export function SemesterWorkspace({ eventId, onBack }: SemesterWorkspaceProps) {
       {/* Tab: Ruang */}
       {activeTab === 'ruang' && <SemesterRoomsTab event={event} />}
 
+      {/* Tab: Denah & Kursi */}
+      {activeTab === 'seating' && <SemesterSeatingTab event={event} />}
+
       {/* Tab: Jadwal */}
       {activeTab === 'jadwal' && <SemesterSchedulingTab event={event} />}
+
+      {/* Tab: Pengawas Ruangan */}
+      {activeTab === 'invigilators' && <SemesterInvigilatorsTab event={event} />}
 
       {/* Tab: Readiness */}
       {activeTab === 'readiness' && (

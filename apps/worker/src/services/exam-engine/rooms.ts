@@ -86,7 +86,7 @@ export async function updateRoom(
   id: string,
   b: { room_name?: string; capacity?: number; event_id?: string | null }
 ) {
-  const existing = await db.prepare('SELECT id, room_name, event_id FROM cbt_rooms WHERE id=?').bind(id).first<any>();
+  const existing = await db.prepare('SELECT id, room_name, capacity, event_id FROM cbt_rooms WHERE id=?').bind(id).first<any>();
   if (!existing) {
     return { success: false, error: 'Ruangan tidak ditemukan', status: 404 };
   }
@@ -103,6 +103,69 @@ export async function updateRoom(
     const duplicate = await db.prepare('SELECT id FROM cbt_rooms WHERE room_name = ? AND id != ?').bind(roomName, id).first();
     if (duplicate) {
       return { success: false, error: 'Nama ruangan sudah ada', status: 400 };
+    }
+  }
+
+  if (roomCapacity !== undefined && roomCapacity !== existing.capacity) {
+    try {
+      const layout = await db
+        .prepare('SELECT * FROM cbt_semester_room_layouts WHERE room_id = ?')
+        .bind(id)
+        .first<any>();
+
+      if (layout) {
+        if (layout.layout_type === 'physical_configured' && layout.total_seats !== roomCapacity) {
+          return {
+            success: false,
+            error: `Kapasitas ruangan tidak dapat diubah karena ruangan ini memiliki denah fisik terkonfigurasi (${layout.total_seats} kursi). Perbarui tata letak fisik terlebih dahulu.`,
+            status: 400,
+          };
+        } else if (layout.layout_type === 'logical_fallback') {
+          // Check if decreasing below current assigned participants
+          const participantCount = await db
+            .prepare('SELECT COUNT(*) as cnt FROM cbt_semester_participants WHERE room_id = ?')
+            .bind(id)
+            .first<{ cnt: number }>();
+          if ((participantCount?.cnt || 0) > roomCapacity) {
+            return {
+              success: false,
+              error: `Kapasitas tidak dapat dikurangi di bawah jumlah siswa yang saat ini terdaftar di ruangan (${participantCount?.cnt || 0} siswa).`,
+              status: 400,
+            };
+          }
+
+          // Atomically reconcile logical seats and layout total_seats
+          const batchStatements: any[] = [
+            db.prepare('UPDATE cbt_rooms SET room_name=COALESCE(?, room_name), capacity=COALESCE(?, capacity), event_id=? WHERE id=?')
+              .bind(roomName, roomCapacity ?? null, eventId, id),
+            db.prepare("UPDATE cbt_semester_room_layouts SET total_seats = ?, updated_at = datetime('now') WHERE id = ?")
+              .bind(roomCapacity, layout.id),
+          ];
+
+          if (roomCapacity > existing.capacity) {
+            for (let s = existing.capacity + 1; s <= roomCapacity; s++) {
+              batchStatements.push(
+                db.prepare(`
+                  INSERT OR IGNORE INTO cbt_semester_seats (id, event_id, room_id, seat_number, seat_label, row_num, col_num, sequence_order)
+                  VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+                `).bind(newId(), layout.event_id, id, s, `K-${String(s).padStart(2, '0')}`, s, s)
+              );
+            }
+          } else if (roomCapacity < existing.capacity) {
+            batchStatements.push(
+              db.prepare('DELETE FROM cbt_semester_seats WHERE room_id = ? AND seat_number > ?')
+                .bind(id, roomCapacity)
+            );
+          }
+
+          await db.batch(batchStatements);
+          return { success: true, data: null, message: 'Ruangan dan denah logis berhasil diperbarui' };
+        }
+      }
+    } catch (err: any) {
+      if (!err?.message?.includes('no such table')) {
+        throw err;
+      }
     }
   }
 

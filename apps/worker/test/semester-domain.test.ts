@@ -153,6 +153,7 @@ function createMockCbtDb() {
       gender TEXT CHECK (gender IN ('L', 'P')),
       room_id TEXT REFERENCES cbt_rooms(id) ON DELETE SET NULL,
       nomor_peserta TEXT,
+      is_room_locked INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       UNIQUE (event_id, student_id)
@@ -188,9 +189,146 @@ function createMockCbtDb() {
       exam_id TEXT NOT NULL REFERENCES cbt_exams(id) ON DELETE CASCADE,
       slot_id TEXT NOT NULL REFERENCES cbt_semester_slots(id) ON DELETE CASCADE,
       event_id TEXT NOT NULL REFERENCES cbt_events(id) ON DELETE CASCADE,
+      is_locked INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       UNIQUE (event_id, exam_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS cbt_semester_generation_controls (
+      id TEXT PRIMARY KEY,
+      event_id TEXT NOT NULL,
+      stage TEXT NOT NULL,
+      active_batch_id TEXT,
+      status TEXT NOT NULL DEFAULT 'idle',
+      started_at TEXT,
+      actor_id TEXT,
+      revision INTEGER NOT NULL DEFAULT 1,
+      UNIQUE(event_id, stage)
+    );
+
+    CREATE TABLE IF NOT EXISTS cbt_semester_room_layouts (
+      id TEXT PRIMARY KEY,
+      event_id TEXT NOT NULL,
+      room_id TEXT NOT NULL,
+      layout_type TEXT NOT NULL,
+      total_seats INTEGER NOT NULL,
+      rows_count INTEGER,
+      cols_count INTEGER,
+      desk_group_count INTEGER,
+      is_irregular INTEGER NOT NULL DEFAULT 0,
+      required_invigilators INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(event_id, room_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS cbt_semester_seats (
+      id TEXT PRIMARY KEY,
+      event_id TEXT NOT NULL,
+      room_id TEXT NOT NULL,
+      seat_number INTEGER NOT NULL,
+      seat_label TEXT NOT NULL,
+      row_num INTEGER NOT NULL DEFAULT 1,
+      col_num INTEGER NOT NULL DEFAULT 1,
+      desk_group INTEGER,
+      sequence_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(event_id, room_id, seat_number)
+    );
+
+    CREATE TABLE IF NOT EXISTS cbt_semester_seat_assignments (
+      id TEXT PRIMARY KEY,
+      event_id TEXT NOT NULL,
+      participant_id TEXT NOT NULL,
+      room_id TEXT NOT NULL,
+      seat_id TEXT NOT NULL,
+      is_locked INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(event_id, participant_id),
+      UNIQUE(event_id, seat_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS cbt_semester_rooms_staging (
+      batch_id TEXT NOT NULL,
+      event_id TEXT NOT NULL,
+      participant_id TEXT NOT NULL,
+      room_id TEXT NOT NULL,
+      is_locked INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (batch_id, participant_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS cbt_semester_seat_assignments_staging (
+      batch_id TEXT NOT NULL,
+      event_id TEXT NOT NULL,
+      participant_id TEXT NOT NULL,
+      room_id TEXT NOT NULL,
+      seat_id TEXT NOT NULL,
+      is_locked INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (batch_id, participant_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS cbt_semester_invig_staging (
+      batch_id TEXT NOT NULL,
+      event_id TEXT NOT NULL,
+      slot_id TEXT NOT NULL,
+      room_id TEXT NOT NULL,
+      invigilator_order INTEGER NOT NULL,
+      staff_id TEXT NOT NULL,
+      staff_name TEXT NOT NULL,
+      mansatas_user_id TEXT,
+      is_locked INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (batch_id, slot_id, room_id, invigilator_order)
+    );
+
+    CREATE TABLE IF NOT EXISTS cbt_semester_invigilator_pool (
+      id TEXT PRIMARY KEY,
+      event_id TEXT NOT NULL,
+      staff_id TEXT NOT NULL,
+      is_eligible INTEGER NOT NULL DEFAULT 1,
+      notes TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(event_id, staff_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS cbt_semester_staff_blackouts (
+      id TEXT PRIMARY KEY,
+      event_id TEXT NOT NULL,
+      staff_id TEXT NOT NULL,
+      slot_id TEXT,
+      blackout_date TEXT,
+      reason TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS cbt_semester_invigilator_assignments (
+      id TEXT PRIMARY KEY,
+      event_id TEXT NOT NULL,
+      slot_id TEXT NOT NULL,
+      room_id TEXT NOT NULL,
+      invigilator_order INTEGER NOT NULL DEFAULT 1,
+      staff_id TEXT NOT NULL,
+      staff_name TEXT NOT NULL,
+      mansatas_user_id TEXT,
+      is_locked INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(event_id, slot_id, staff_id),
+      UNIQUE(event_id, slot_id, room_id, invigilator_order)
+    );
+
+    CREATE TABLE IF NOT EXISTS cbt_semester_generation_logs (
+      id TEXT PRIMARY KEY,
+      event_id TEXT NOT NULL,
+      stage TEXT NOT NULL,
+      actor_id TEXT NOT NULL,
+      seed INTEGER,
+      configuration TEXT NOT NULL,
+      status TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now'))
     );
 
     CREATE TABLE cbt_exam_roster (

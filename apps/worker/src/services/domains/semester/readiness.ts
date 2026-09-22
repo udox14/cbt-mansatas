@@ -350,6 +350,86 @@ export async function checkSemesterEventReadiness(
     tokensCategory.message = 'Seluruh target ujian-ruangan-sesi telah memiliki token aktif.';
   }
 
+  // 9. Seating Category
+  const seatingCategory = {
+    name: 'Distribusi Tempat Duduk / Nomor Kursi',
+    status: 'passed' as 'passed' | 'failed' | 'warning',
+    message: '',
+    details: {} as any,
+  };
+
+  const unseatedStats = await db
+    .prepare(
+      `SELECT COUNT(*) as unseated
+       FROM cbt_semester_participants p
+       WHERE p.event_id = ? AND p.room_id IS NOT NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM cbt_semester_seat_assignments sa
+           WHERE sa.participant_id = p.id AND sa.event_id = p.event_id
+         )`
+    )
+    .bind(eventId)
+    .first<{ unseated: number }>();
+
+  const unseatedCount = unseatedStats?.unseated || 0;
+  seatingCategory.details = { unseated: unseatedCount };
+
+  if (unseatedCount > 0) {
+    seatingCategory.status = 'failed';
+    seatingCategory.message = `Terdapat ${unseatedCount} peserta dengan ruangan yang belum memiliki penetapan nomor kursi.`;
+    blockers.push(`Terdapat ${unseatedCount} peserta yang belum memiliki penetapan tempat duduk (seating).`);
+  } else {
+    seatingCategory.message = 'Seluruh peserta beruangan telah memperoleh alokasi tempat duduk.';
+  }
+
+  // 10. Invigilators Category
+  const invigilatorsCategory = {
+    name: 'Penugasan Pengawas Ruangan',
+    status: 'passed' as 'passed' | 'failed' | 'warning',
+    message: '',
+    details: {} as any,
+  };
+
+  const { results: missingInvigilators } = await db
+    .prepare(
+      `SELECT
+         s.slot_id,
+         p.room_id,
+         sl.slot_label,
+         r.room_name,
+         COALESCE(rl.required_invigilators, 1) as required_count,
+         COUNT(a.id) as assigned_count
+       FROM cbt_semester_schedules s
+       JOIN cbt_semester_slots sl ON sl.id = s.slot_id
+       JOIN cbt_semester_exam_classes sec ON sec.exam_id = s.exam_id
+       JOIN cbt_semester_participants p ON p.class_id = sec.class_id AND p.event_id = s.event_id
+       JOIN cbt_rooms r ON r.id = p.room_id
+       LEFT JOIN cbt_semester_room_layouts rl ON rl.room_id = p.room_id AND rl.event_id = s.event_id
+       LEFT JOIN cbt_semester_invigilator_assignments a
+         ON a.event_id = s.event_id AND a.slot_id = s.slot_id AND a.room_id = p.room_id
+       WHERE s.event_id = ? AND p.room_id IS NOT NULL
+       GROUP BY s.slot_id, p.room_id
+       HAVING assigned_count < required_count`
+    )
+    .bind(eventId)
+    .all<{
+      slot_id: string;
+      room_id: string;
+      slot_label: string;
+      room_name: string;
+      required_count: number;
+      assigned_count: number;
+    }>();
+
+  if (missingInvigilators && missingInvigilators.length > 0) {
+    invigilatorsCategory.status = 'failed';
+    invigilatorsCategory.message = `Terdapat ${missingInvigilators.length} ruangan-sesi yang kekurangan pengawas (contoh: ${missingInvigilators[0].room_name} pada ${missingInvigilators[0].slot_label}).`;
+    invigilatorsCategory.details = missingInvigilators;
+    blockers.push(`Terdapat ${missingInvigilators.length} jadwal ruangan-sesi yang belum memiliki pengawas lengkap.`);
+  } else {
+    invigilatorsCategory.message = 'Seluruh ruangan operasional pada setiap sesi telah memiliki pengawas lengkap.';
+  }
+
   const eligible = blockers.length === 0;
 
   return {
@@ -367,6 +447,8 @@ export async function checkSemesterEventReadiness(
       rooms: roomsCategory,
       schedules: schedulesCategory,
       tokens: tokensCategory,
+      seating: seatingCategory,
+      invigilators: invigilatorsCategory,
     },
     blockers,
   };

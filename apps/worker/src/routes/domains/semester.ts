@@ -89,6 +89,8 @@ import {
 import { getExamQuestionAnalytics } from '../../services/exam-engine/analytics.ts';
 import { recomputeMissingExamResults } from '../../services/exam-engine/scoring.ts';
 import { listRooms, createRoom } from '../../services/exam-engine/rooms.ts';
+import automationRoutes from './semester-automation.ts';
+import proctorRoutes from './semester-proctor.ts';
 
 const semester = new Hono<{ Bindings: Env }>();
 
@@ -105,6 +107,10 @@ semester.use('*', async (c, next) => {
   }
   await next();
 });
+
+// ── Mount Phase 7 Sub-Routers ────────────────────────────────
+semester.route('/', automationRoutes);
+semester.route('/proctor', proctorRoutes);
 
 function handleDomainError(e: any, c: any) {
   if (e instanceof DomainMismatchError) {
