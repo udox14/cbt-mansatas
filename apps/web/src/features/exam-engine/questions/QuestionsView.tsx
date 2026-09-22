@@ -6,9 +6,10 @@ import RichEditor from '@/components/admin/RichEditor';
 import BulkImport from '@/components/admin/BulkImport';
 import MathContent from '@/components/content/MathContent';
 import { isFullArabic } from '@/lib/rtl';
-import { Plus, Pencil, Trash2, Upload, Image, Volume2, X } from 'lucide-react';
+import { Plus, Pencil, Trash2, Upload, Image, Volume2, X, Sparkles } from 'lucide-react';
 import type { Question, QOption } from '../types';
 import { C } from '../components/theme';
+import { AiQuestionGenerator } from './AiQuestionGenerator';
 
 export function QuestionsView({ examId, apiPrefix = '/api/admin' }: { examId: string; apiPrefix?: string }) {
   const { toast } = useToast();
@@ -18,7 +19,9 @@ export function QuestionsView({ examId, apiPrefix = '/api/admin' }: { examId: st
   const [saving, setSaving] = useState(false);
   const [delTarget, setDelTarget] = useState<string | null>(null);
   const [showImport, setShowImport] = useState(false);
+  const [showAiGen, setShowAiGen] = useState(false);
   const [uploading, setUploading] = useState('');
+
   const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 
   const fetchQ = useCallback(async () => {
@@ -66,6 +69,7 @@ export function QuestionsView({ examId, apiPrefix = '/api/admin' }: { examId: st
         <span style={{ color: C.textMid, fontSize: '11px', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>{questions.length} Soal</span>
         <div className="flex gap-2">
           <Button variant="secondary" size="sm" onClick={() => setShowImport(true)}><Upload size={13} /> Import</Button>
+          <Button variant="secondary" size="sm" onClick={() => setShowAiGen(true)}><Sparkles size={13} /> Buat dengan AI</Button>
           <Button size="sm" onClick={newQ}><Plus size={13} /> Tambah Soal</Button>
         </div>
       </div>
@@ -148,6 +152,16 @@ export function QuestionsView({ examId, apiPrefix = '/api/admin' }: { examId: st
         onConfirm={async () => { if (!delTarget) return; await DEL(`${apiPrefix}/questions/${delTarget}`); setDelTarget(null); fetchQ(); }}
         title="Hapus Soal?" message="Soal yang dihapus tidak dapat dikembalikan." />
       <BulkImport type="questions" examId={examId} apiPrefix={apiPrefix} open={showImport} onClose={() => setShowImport(false)} onSuccess={() => { setShowImport(false); fetchQ(); }} />
+      <AiQuestionGenerator
+        examId={examId}
+        apiPrefix={apiPrefix}
+        open={showAiGen}
+        onClose={() => setShowAiGen(false)}
+        onSuccess={() => {
+          setShowAiGen(false);
+          fetchQ();
+        }}
+      />
     </div>
   );
 }

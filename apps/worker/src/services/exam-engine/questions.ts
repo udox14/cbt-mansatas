@@ -35,32 +35,52 @@ export async function getQuestionById(db: D1Database, id: string) {
   return { ...q, options: options || [] };
 }
 
-export async function createQuestion(db: D1Database, examId: string, b: any) {
+/**
+ * Prepares the atomic D1PreparedStatement list for creating a canonical question
+ * and its options. Reusable by createQuestion, bulkCreateQuestions, and acceptAiDrafts
+ * to guarantee identical canonical invariants and transactional atomicity.
+ */
+export function prepareCanonicalQuestionStatements(
+  db: D1Database,
+  examId: string,
+  b: any,
+  explicitQId?: string
+): { qId: string; statements: D1PreparedStatement[] } {
   const type = b?.question_type || 'multiple_choice';
-  const qId = newId();
+  const qId = explicitQId || newId();
   const points = Number.isFinite(Number(b.points)) && Number(b.points) > 0 ? Number(b.points) : 1;
 
-  await db.prepare(
-    `INSERT INTO cbt_questions (id, exam_id, question_text, question_type, question_order, image_url, audio_url, points)
-     VALUES (?,?,?,?,?,?,?,?)`
-  ).bind(
-    qId, examId, b?.question_text || '', type, Number(b?.question_order || 0),
-    b?.image_url || null, b?.audio_url || null, points
-  ).run();
+  const statements: D1PreparedStatement[] = [
+    db.prepare(
+      `INSERT INTO cbt_questions (id, exam_id, question_text, question_type, question_order, image_url, audio_url, points)
+       VALUES (?,?,?,?,?,?,?,?)`
+    ).bind(
+      qId, examId, b?.question_text || '', type, Number(b?.question_order || 0),
+      b?.image_url || null, b?.audio_url || null, points
+    )
+  ];
 
   if (type === 'multiple_choice' && Array.isArray(b?.options) && b?.options.length) {
-    const stmts = b.options.map((o: any, i: number) =>
-      db.prepare(
-        `INSERT INTO cbt_question_options (id, question_id, option_label, option_text, image_url, is_correct, option_order)
-         VALUES (?,?,?,?,?,?,?)`
-      ).bind(
-        newId(), qId, o.option_label || 'ABCDE'[i] || String(i + 1),
-        o.option_text || '', o.image_url || null, o.is_correct ? 1 : 0, i
-      )
-    );
-    await db.batch(stmts);
+    for (let i = 0; i < b.options.length; i++) {
+      const o = b.options[i];
+      statements.push(
+        db.prepare(
+          `INSERT INTO cbt_question_options (id, question_id, option_label, option_text, image_url, is_correct, option_order)
+           VALUES (?,?,?,?,?,?,?)`
+        ).bind(
+          newId(), qId, o.option_label || 'ABCDE'[i] || String(i + 1),
+          o.option_text || '', o.image_url || null, o.is_correct ? 1 : 0, i
+        )
+      );
+    }
   }
 
+  return { qId, statements };
+}
+
+export async function createQuestion(db: D1Database, examId: string, b: any) {
+  const { qId, statements } = prepareCanonicalQuestionStatements(db, examId, b);
+  await db.batch(statements);
   return { success: true, data: { id: qId }, message: 'Soal ditambahkan', status: 201 };
 }
 

@@ -99,6 +99,29 @@ export interface QOption {
   is_correct: number;
 }
 
+export interface AiDraftOption {
+  option_label: string;
+  option_text: string;
+  is_correct: number;
+}
+
+export interface AiDraft {
+  id: string;
+  run_id: string;
+  exam_id: string;
+  question_order: number;
+  question_text: string;
+  options: AiDraftOption[];
+  correct_index: number;
+  explanation?: string | null;
+  difficulty: 'easy' | 'balanced' | 'hard';
+  content_hash: string;
+  validation_status: 'valid' | 'invalid' | 'duplicate';
+  validation_errors?: string[];
+  status: 'draft' | 'accepted' | 'rejected';
+  canonical_question_id?: string | null;
+}
+
 export type Page = 'exams' | 'kegiatan' | 'peserta' | 'rooms' | 'pelaksana' | 'settings';
 export type ExamTab = 'soal' | 'token' | 'monitor' | 'hasil' | 'peserta' | 'analitik';
 

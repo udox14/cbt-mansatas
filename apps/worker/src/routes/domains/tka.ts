@@ -44,7 +44,6 @@ import {
 } from '../../services/domains/tka/exams.ts';
 import { checkTkaEventReadiness } from '../../services/domains/tka/readiness.ts';
 
-// Shared Engine Services
 import {
   listExamQuestions,
   createQuestion,
@@ -52,6 +51,15 @@ import {
   deleteQuestion,
   bulkCreateQuestions,
 } from '../../services/exam-engine/questions.ts';
+import {
+  generateAiQuestions,
+  listAiRuns,
+  listAiDrafts,
+  updateAiDraft,
+  deleteAiDraft,
+  acceptAiDrafts,
+} from '../../services/exam-engine/ai-authoring.ts';
+
 import {
   listExamTokens,
   generateExamTokens,
@@ -549,6 +557,96 @@ tka.delete('/questions/:qId', requirePermission('tka.event.manage'), async (c) =
     return handleDomainError(e, c);
   }
 });
+
+// ── AI Question Generator (TKA Event Scoped) ─────────────────
+
+tka.post('/exams/:id/ai/generate', requirePermission('tka.event.manage'), async (c) => {
+  const examId = c.req.param('id');
+  const user = c.get('user');
+  const actorStaffId = user?.staff_id || user?.sub;
+  const body = await c.req.json<any>();
+  try {
+    await assertTkaExam(c.env.DB, examId);
+    const result = await generateAiQuestions(c.env.DB, c.env, examId, actorStaffId, body);
+    if (!result.success) {
+      return c.json(err(result.error!, (result as any).data), (result.status as any) || 400);
+    }
+    return c.json(ok(result.data, result.message), 201);
+  } catch (e) {
+    return handleDomainError(e, c);
+  }
+});
+
+tka.get('/exams/:id/ai/runs', requirePermission('tka.access'), async (c) => {
+  const examId = c.req.param('id');
+  try {
+    await assertTkaExam(c.env.DB, examId);
+    const runs = await listAiRuns(c.env.DB, examId);
+    return c.json(ok(runs));
+  } catch (e) {
+    return handleDomainError(e, c);
+  }
+});
+
+tka.get('/exams/:id/ai/drafts', requirePermission('tka.access'), async (c) => {
+  const examId = c.req.param('id');
+  const runId = c.req.query('run_id');
+  try {
+    await assertTkaExam(c.env.DB, examId);
+    const drafts = await listAiDrafts(c.env.DB, examId, runId);
+    return c.json(ok(drafts));
+  } catch (e) {
+    return handleDomainError(e, c);
+  }
+});
+
+tka.put('/exams/:id/ai/drafts/:draftId', requirePermission('tka.event.manage'), async (c) => {
+  const examId = c.req.param('id');
+  const draftId = c.req.param('draftId');
+  const body = await c.req.json<any>();
+  try {
+    await assertTkaExam(c.env.DB, examId);
+    const result = await updateAiDraft(c.env.DB, examId, draftId, body);
+    if (!result.success) {
+      return c.json(err(result.error!), (result.status as any) || 400);
+    }
+    return c.json(ok(null, result.message));
+  } catch (e) {
+    return handleDomainError(e, c);
+  }
+});
+
+tka.delete('/exams/:id/ai/drafts/:draftId', requirePermission('tka.event.manage'), async (c) => {
+  const examId = c.req.param('id');
+  const draftId = c.req.param('draftId');
+  try {
+    await assertTkaExam(c.env.DB, examId);
+    const result = await deleteAiDraft(c.env.DB, examId, draftId);
+    if (!result.success) {
+      return c.json(err(result.error!), (result.status as any) || 400);
+    }
+    return c.json(ok(null, result.message));
+  } catch (e) {
+    return handleDomainError(e, c);
+  }
+});
+
+tka.post('/exams/:id/ai/drafts/accept', requirePermission('tka.event.manage'), async (c) => {
+  const examId = c.req.param('id');
+  const body = await c.req.json<{ draft_ids?: string[]; draftIds?: string[] }>();
+  const draftIds = body.draft_ids || body.draftIds || [];
+  try {
+    await assertTkaExam(c.env.DB, examId);
+    const result = await acceptAiDrafts(c.env.DB, examId, draftIds);
+    if (!result.success) {
+      return c.json(err(result.error!), (result.status as any) || 400);
+    }
+    return c.json(ok(result.data, result.message), 200);
+  } catch (e) {
+    return handleDomainError(e, c);
+  }
+});
+
 
 // ── Upload ──
 tka.post('/upload', requirePermission('tka.event.manage'), async (c) => {

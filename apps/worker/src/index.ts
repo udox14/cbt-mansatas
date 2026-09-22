@@ -16,6 +16,7 @@ import tkaRoutes from './routes/domains/tka';
 import semesterRoutes from './routes/domains/semester';
 import proctorRoutes from './routes/proctor';
 import studentRoutes from './routes/student';
+import { genericAiRoutes } from './routes/exam-engine/authoring';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -59,6 +60,7 @@ app.route('/api/tka', tkaRoutes);
 app.route('/api/semester', semesterRoutes);
 app.route('/api/proctor', proctorRoutes);
 app.route('/api/student', studentRoutes);
+app.route('/api', genericAiRoutes);
 
 // ── R2 Media Serve (Public read) ─────────────────────────────
 

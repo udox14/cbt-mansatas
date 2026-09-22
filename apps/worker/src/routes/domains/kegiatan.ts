@@ -30,6 +30,16 @@ import {
   removeStudentFromKegiatanRoster,
 } from '../../services/domains/kegiatan/participants.ts';
 import { createExam, listExams } from '../../services/exam-engine/exams.ts';
+import {
+  assertAiQuestionAuthoringAccess,
+  generateAiQuestions,
+  listAiRuns,
+  listAiDrafts,
+  updateAiDraft,
+  deleteAiDraft,
+  acceptAiDrafts,
+} from '../../services/exam-engine/ai-authoring.ts';
+
 
 const kegiatan = new Hono<{ Bindings: Env }>();
 
@@ -305,4 +315,185 @@ kegiatan.post('/events/:eventId/exams', requirePermission('kegiatan.exam.create'
   }
 });
 
+// ── AI Question Generator (Kegiatan Scoped) ──────────────────
+
+async function assertKegiatanAiAccess(c: any, examId: string, eventId?: string) {
+  const user = c.get('user');
+  const auth = await assertAiQuestionAuthoringAccess(c.env.DB, user, examId);
+  if (!auth.success) {
+    return { ok: false, response: c.json(err(auth.error!), (auth.status as any) || 403) };
+  }
+  const examMode = auth.exam?.mode || auth.exam?.event_mode;
+  if (examMode !== 'kegiatan') {
+    return { ok: false, response: c.json(err('Ujian bukan merupakan domain Kegiatan'), 400) };
+  }
+  if (eventId && auth.exam?.event_id !== eventId) {
+    return { ok: false, response: c.json(err('Ujian tidak cocok dengan kegiatan yang ditentukan'), 400) };
+  }
+  return { ok: true, exam: auth.exam, user };
+}
+
+// Flat route: /exams/:id/ai/generate
+kegiatan.post('/exams/:id/ai/generate', requirePermission('kegiatan.event.update'), async (c) => {
+  const examId = c.req.param('id');
+  const check = await assertKegiatanAiAccess(c, examId);
+  if (!check.ok) return check.response;
+
+  const actorStaffId = check.user?.staff_id || check.user?.sub;
+  const body = await c.req.json<any>();
+
+  const result = await generateAiQuestions(c.env.DB, c.env, examId, actorStaffId, body);
+  if (!result.success) {
+    return c.json(err(result.error!, (result as any).data), (result.status as any) || 400);
+  }
+  return c.json(ok(result.data, result.message), 201);
+});
+
+// Event-nested route: /events/:eventId/exams/:examId/ai/generate
+kegiatan.post('/events/:eventId/exams/:examId/ai/generate', requirePermission('kegiatan.event.update'), async (c) => {
+  const eventId = c.req.param('eventId');
+  const examId = c.req.param('examId');
+  const check = await assertKegiatanAiAccess(c, examId, eventId);
+  if (!check.ok) return check.response;
+
+  const actorStaffId = check.user?.staff_id || check.user?.sub;
+  const body = await c.req.json<any>();
+
+  const result = await generateAiQuestions(c.env.DB, c.env, examId, actorStaffId, body);
+  if (!result.success) {
+    return c.json(err(result.error!, (result as any).data), (result.status as any) || 400);
+  }
+  return c.json(ok(result.data, result.message), 201);
+});
+
+kegiatan.get('/exams/:id/ai/runs', requirePermission('kegiatan.event.read'), async (c) => {
+  const examId = c.req.param('id');
+  const check = await assertKegiatanAiAccess(c, examId);
+  if (!check.ok) return check.response;
+
+  const runs = await listAiRuns(c.env.DB, examId);
+  return c.json(ok(runs));
+});
+
+kegiatan.get('/events/:eventId/exams/:examId/ai/runs', requirePermission('kegiatan.event.read'), async (c) => {
+  const eventId = c.req.param('eventId');
+  const examId = c.req.param('examId');
+  const check = await assertKegiatanAiAccess(c, examId, eventId);
+  if (!check.ok) return check.response;
+
+  const runs = await listAiRuns(c.env.DB, examId);
+  return c.json(ok(runs));
+});
+
+kegiatan.get('/exams/:id/ai/drafts', requirePermission('kegiatan.event.read'), async (c) => {
+  const examId = c.req.param('id');
+  const check = await assertKegiatanAiAccess(c, examId);
+  if (!check.ok) return check.response;
+
+  const runId = c.req.query('run_id');
+  const drafts = await listAiDrafts(c.env.DB, examId, runId);
+  return c.json(ok(drafts));
+});
+
+kegiatan.get('/events/:eventId/exams/:examId/ai/drafts', requirePermission('kegiatan.event.read'), async (c) => {
+  const eventId = c.req.param('eventId');
+  const examId = c.req.param('examId');
+  const check = await assertKegiatanAiAccess(c, examId, eventId);
+  if (!check.ok) return check.response;
+
+  const runId = c.req.query('run_id');
+  const drafts = await listAiDrafts(c.env.DB, examId, runId);
+  return c.json(ok(drafts));
+});
+
+kegiatan.put('/exams/:id/ai/drafts/:draftId', requirePermission('kegiatan.event.update'), async (c) => {
+  const examId = c.req.param('id');
+  const check = await assertKegiatanAiAccess(c, examId);
+  if (!check.ok) return check.response;
+
+  const draftId = c.req.param('draftId');
+  const body = await c.req.json<any>();
+
+  const result = await updateAiDraft(c.env.DB, examId, draftId, body);
+  if (!result.success) {
+    return c.json(err(result.error!), (result.status as any) || 400);
+  }
+  return c.json(ok(null, result.message));
+});
+
+kegiatan.put('/events/:eventId/exams/:examId/ai/drafts/:draftId', requirePermission('kegiatan.event.update'), async (c) => {
+  const eventId = c.req.param('eventId');
+  const examId = c.req.param('examId');
+  const check = await assertKegiatanAiAccess(c, examId, eventId);
+  if (!check.ok) return check.response;
+
+  const draftId = c.req.param('draftId');
+  const body = await c.req.json<any>();
+
+  const result = await updateAiDraft(c.env.DB, examId, draftId, body);
+  if (!result.success) {
+    return c.json(err(result.error!), (result.status as any) || 400);
+  }
+  return c.json(ok(null, result.message));
+});
+
+kegiatan.delete('/exams/:id/ai/drafts/:draftId', requirePermission('kegiatan.event.update'), async (c) => {
+  const examId = c.req.param('id');
+  const check = await assertKegiatanAiAccess(c, examId);
+  if (!check.ok) return check.response;
+
+  const draftId = c.req.param('draftId');
+  const result = await deleteAiDraft(c.env.DB, examId, draftId);
+  if (!result.success) {
+    return c.json(err(result.error!), (result.status as any) || 400);
+  }
+  return c.json(ok(null, result.message));
+});
+
+kegiatan.delete('/events/:eventId/exams/:examId/ai/drafts/:draftId', requirePermission('kegiatan.event.update'), async (c) => {
+  const eventId = c.req.param('eventId');
+  const examId = c.req.param('examId');
+  const check = await assertKegiatanAiAccess(c, examId, eventId);
+  if (!check.ok) return check.response;
+
+  const draftId = c.req.param('draftId');
+  const result = await deleteAiDraft(c.env.DB, examId, draftId);
+  if (!result.success) {
+    return c.json(err(result.error!), (result.status as any) || 400);
+  }
+  return c.json(ok(null, result.message));
+});
+
+kegiatan.post('/exams/:id/ai/drafts/accept', requirePermission('kegiatan.event.update'), async (c) => {
+  const examId = c.req.param('id');
+  const check = await assertKegiatanAiAccess(c, examId);
+  if (!check.ok) return check.response;
+
+  const body = await c.req.json<{ draft_ids?: string[]; draftIds?: string[] }>();
+  const draftIds = body.draft_ids || body.draftIds || [];
+
+  const result = await acceptAiDrafts(c.env.DB, examId, draftIds);
+  if (!result.success) {
+    return c.json(err(result.error!), (result.status as any) || 400);
+  }
+  return c.json(ok(result.data, result.message), 200);
+});
+
+kegiatan.post('/events/:eventId/exams/:examId/ai/drafts/accept', requirePermission('kegiatan.event.update'), async (c) => {
+  const eventId = c.req.param('eventId');
+  const examId = c.req.param('examId');
+  const check = await assertKegiatanAiAccess(c, examId, eventId);
+  if (!check.ok) return check.response;
+
+  const body = await c.req.json<{ draft_ids?: string[]; draftIds?: string[] }>();
+  const draftIds = body.draft_ids || body.draftIds || [];
+
+  const result = await acceptAiDrafts(c.env.DB, examId, draftIds);
+  if (!result.success) {
+    return c.json(err(result.error!), (result.status as any) || 400);
+  }
+  return c.json(ok(result.data, result.message), 200);
+});
+
 export default kegiatan;
+

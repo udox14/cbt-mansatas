@@ -15,7 +15,16 @@ import {
   updateQuestion,
   deleteQuestion,
 } from '../../services/exam-engine/questions.ts';
-
+import { authMiddleware } from '../../middleware/auth.ts';
+import {
+  generateAiQuestions,
+  listAiRuns,
+  listAiDrafts,
+  updateAiDraft,
+  deleteAiDraft,
+  acceptAiDrafts,
+  assertAiQuestionAuthoringAccess,
+} from '../../services/exam-engine/ai-authoring.ts';
 
 export const authoringRoutes = new Hono<{ Bindings: Env }>();
 
@@ -96,3 +105,105 @@ authoringRoutes.delete('/questions/:id', async (c) => {
   const result = await deleteQuestion(c.env.DB, c.req.param('id'));
   return c.json(ok(result.data, result.message));
 });
+
+// ── AI QUESTION GENERATOR ────────────────────────────────────
+
+export const genericAiRoutes = new Hono<{ Bindings: Env }>();
+genericAiRoutes.use('/exams/:examId/ai/*', authMiddleware);
+
+genericAiRoutes.post('/exams/:examId/ai/generate', async (c) => {
+  const examId = c.req.param('examId');
+  const user = c.get('user' as any);
+  const auth = await assertAiQuestionAuthoringAccess(c.env.DB, user, examId);
+  if (!auth.success) {
+    return c.json(err(auth.error!), (auth.status as any) || 403);
+  }
+
+  const actorStaffId = user?.staff_id || user?.sub || 'admin';
+  const body = await c.req.json<any>();
+
+  const result = await generateAiQuestions(c.env.DB, c.env, examId, actorStaffId, body);
+  if (!result.success) {
+    return c.json(err(result.error!, (result as any).data), (result.status as any) || 400);
+  }
+  return c.json(ok(result.data, result.message), 201);
+});
+
+genericAiRoutes.get('/exams/:examId/ai/runs', async (c) => {
+  const examId = c.req.param('examId');
+  const user = c.get('user' as any);
+  const auth = await assertAiQuestionAuthoringAccess(c.env.DB, user, examId);
+  if (!auth.success) {
+    return c.json(err(auth.error!), (auth.status as any) || 403);
+  }
+
+  const runs = await listAiRuns(c.env.DB, examId);
+  return c.json(ok(runs));
+});
+
+genericAiRoutes.get('/exams/:examId/ai/drafts', async (c) => {
+  const examId = c.req.param('examId');
+  const user = c.get('user' as any);
+  const auth = await assertAiQuestionAuthoringAccess(c.env.DB, user, examId);
+  if (!auth.success) {
+    return c.json(err(auth.error!), (auth.status as any) || 403);
+  }
+
+  const runId = c.req.query('run_id');
+  const drafts = await listAiDrafts(c.env.DB, examId, runId);
+  return c.json(ok(drafts));
+});
+
+genericAiRoutes.put('/exams/:examId/ai/drafts/:draftId', async (c) => {
+  const examId = c.req.param('examId');
+  const draftId = c.req.param('draftId');
+  const user = c.get('user' as any);
+  const auth = await assertAiQuestionAuthoringAccess(c.env.DB, user, examId);
+  if (!auth.success) {
+    return c.json(err(auth.error!), (auth.status as any) || 403);
+  }
+
+  const body = await c.req.json<any>();
+  const result = await updateAiDraft(c.env.DB, examId, draftId, body);
+  if (!result.success) {
+    return c.json(err(result.error!), (result.status as any) || 400);
+  }
+  return c.json(ok(null, result.message));
+});
+
+genericAiRoutes.delete('/exams/:examId/ai/drafts/:draftId', async (c) => {
+  const examId = c.req.param('examId');
+  const draftId = c.req.param('draftId');
+  const user = c.get('user' as any);
+  const auth = await assertAiQuestionAuthoringAccess(c.env.DB, user, examId);
+  if (!auth.success) {
+    return c.json(err(auth.error!), (auth.status as any) || 403);
+  }
+
+  const result = await deleteAiDraft(c.env.DB, examId, draftId);
+  if (!result.success) {
+    return c.json(err(result.error!), (result.status as any) || 400);
+  }
+  return c.json(ok(null, result.message));
+});
+
+genericAiRoutes.post('/exams/:examId/ai/drafts/accept', async (c) => {
+  const examId = c.req.param('examId');
+  const user = c.get('user' as any);
+  const auth = await assertAiQuestionAuthoringAccess(c.env.DB, user, examId);
+  if (!auth.success) {
+    return c.json(err(auth.error!), (auth.status as any) || 403);
+  }
+
+  const body = await c.req.json<{ draft_ids?: string[]; draftIds?: string[] }>();
+  const draftIds = body.draft_ids || body.draftIds || [];
+
+  const result = await acceptAiDrafts(c.env.DB, examId, draftIds);
+  if (!result.success) {
+    return c.json(err(result.error!), (result.status as any) || 400);
+  }
+  return c.json(ok(result.data, result.message), 200);
+});
+
+authoringRoutes.route('/', genericAiRoutes);
+
