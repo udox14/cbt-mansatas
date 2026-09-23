@@ -1,5 +1,6 @@
 // ============================================================
 // AI Question Generator — Types & Contracts
+// Interaction Pattern: Proven MANSATAS RPPM Generator
 // ============================================================
 
 import type { AiDifficultyMode, AiVariationLevel } from '../../types.ts';
@@ -28,27 +29,6 @@ export interface RawGeneratedQuestion {
   correctIndex: number;
   explanation?: string;
   difficulty?: AiDifficultyMode;
-}
-
-export interface ProviderGenerationResult {
-  success: boolean;
-  questions?: RawGeneratedQuestion[];
-  rawResponse?: string;
-  error?: {
-    code: string;
-    message: string;
-    status?: number;
-    isRetryable?: boolean;
-  };
-  provider: string;
-  model: string;
-  promptVersion: string;
-}
-
-export interface QuestionGenerationProvider {
-  name: string;
-  model: string;
-  generateQuestions(input: GenerationInput): Promise<ProviderGenerationResult>;
 }
 
 export interface DifficultyDistribution {

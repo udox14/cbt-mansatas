@@ -38,6 +38,10 @@ import {
   updateAiDraft,
   deleteAiDraft,
   acceptAiDrafts,
+  buildExamAiPrompt,
+  validatePastedAiQuestions,
+  revalidateEditedAiQuestion,
+  importReviewedAiQuestions,
 } from '../../services/exam-engine/ai-authoring.ts';
 import {
   getExamResults,
@@ -341,6 +345,60 @@ async function assertKegiatanAiAccess(c: any, examId: string, eventId?: string) 
   }
   return { ok: true, exam: auth.exam, user };
 }
+
+// RPPM AI Question Generator Endpoints
+kegiatan.post('/exams/:id/ai/prompt', requirePermission('kegiatan.event.update'), async (c) => {
+  const examId = c.req.param('id');
+  const check = await assertKegiatanAiAccess(c, examId);
+  if (!check.ok) return check.response;
+
+  const body = await c.req.json<any>();
+  const result = await buildExamAiPrompt(c.env.DB, examId, body);
+  if (!result.success) {
+    return c.json(err(result.error!), (result.status as any) || 400);
+  }
+  return c.json(ok(result.data));
+});
+
+kegiatan.post('/exams/:id/ai/validate', requirePermission('kegiatan.event.update'), async (c) => {
+  const examId = c.req.param('id');
+  const check = await assertKegiatanAiAccess(c, examId);
+  if (!check.ok) return check.response;
+
+  const body = await c.req.json<any>();
+  const result = await validatePastedAiQuestions(c.env.DB, examId, body);
+  if (!result.success) {
+    return c.json(err(result.error!), (result.status as any) || 400);
+  }
+  return c.json(ok(result.data));
+});
+
+kegiatan.post('/exams/:id/ai/revalidate', requirePermission('kegiatan.event.update'), async (c) => {
+  const examId = c.req.param('id');
+  const check = await assertKegiatanAiAccess(c, examId);
+  if (!check.ok) return check.response;
+
+  const body = await c.req.json<any>();
+  const result = await revalidateEditedAiQuestion(c.env.DB, examId, body);
+  if (!result.success) {
+    return c.json(err(result.error!), (result.status as any) || 400);
+  }
+  return c.json(ok(result.data));
+});
+
+kegiatan.post('/exams/:id/ai/import', requirePermission('kegiatan.event.update'), async (c) => {
+  const examId = c.req.param('id');
+  const check = await assertKegiatanAiAccess(c, examId);
+  if (!check.ok) return check.response;
+
+  const body = await c.req.json<{ questions: any[] }>();
+  const questions = body.questions || [];
+  const result = await importReviewedAiQuestions(c.env.DB, examId, questions);
+  if (!result.success) {
+    return c.json(err(result.error!), (result.status as any) || 400);
+  }
+  return c.json(ok(result.data, result.message), 201);
+});
 
 // Flat route: /exams/:id/ai/generate
 kegiatan.post('/exams/:id/ai/generate', requirePermission('kegiatan.event.update'), async (c) => {

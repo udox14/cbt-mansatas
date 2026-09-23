@@ -60,6 +60,11 @@ CREATE TABLE _backup_student_answers AS SELECT * FROM cbt_student_answers;
 CREATE TABLE _backup_exam_results AS SELECT * FROM cbt_exam_results;
 CREATE TABLE _backup_cheat_logs AS SELECT * FROM cbt_cheat_logs;
 
+-- Temporarily clear child rows referencing cbt_exam_sessions so DROP TABLE succeeds in D1 with foreign keys enabled
+DELETE FROM cbt_student_answers;
+DELETE FROM cbt_exam_results;
+DELETE FROM cbt_cheat_logs;
+
 DROP INDEX IF EXISTS idx_cbt_sessions_exam;
 DROP INDEX IF EXISTS idx_cbt_sessions_room;
 DROP TABLE IF EXISTS cbt_exam_sessions_phase4;

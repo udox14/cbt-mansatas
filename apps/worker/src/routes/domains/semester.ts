@@ -75,6 +75,10 @@ import {
   updateAiDraft,
   deleteAiDraft,
   acceptAiDrafts,
+  buildExamAiPrompt,
+  validatePastedAiQuestions,
+  revalidateEditedAiQuestion,
+  importReviewedAiQuestions,
 } from '../../services/exam-engine/ai-authoring.ts';
 
 import {
@@ -682,7 +686,68 @@ semester.delete('/questions/:qId', requirePermission('semester.event.manage'), a
   }
 });
 
-// ── AI Question Generator (Semester Event Scoped) ────────────
+// ── AI Question Generator (Semester Event Scoped — RPPM Pattern) ────────────
+
+semester.post('/exams/:id/ai/prompt', requirePermission('semester.event.manage'), async (c) => {
+  const examId = c.req.param('id');
+  const body = await c.req.json<any>();
+  try {
+    await assertExamInSemesterEvent(c.env.DB, examId);
+    const result = await buildExamAiPrompt(c.env.DB, examId, body);
+    if (!result.success) {
+      return c.json(err(result.error!), (result.status as any) || 400);
+    }
+    return c.json(ok(result.data));
+  } catch (e: any) {
+    return handleDomainError(e, c);
+  }
+});
+
+semester.post('/exams/:id/ai/validate', requirePermission('semester.event.manage'), async (c) => {
+  const examId = c.req.param('id');
+  const body = await c.req.json<any>();
+  try {
+    await assertExamInSemesterEvent(c.env.DB, examId);
+    const result = await validatePastedAiQuestions(c.env.DB, examId, body);
+    if (!result.success) {
+      return c.json(err(result.error!), (result.status as any) || 400);
+    }
+    return c.json(ok(result.data));
+  } catch (e: any) {
+    return handleDomainError(e, c);
+  }
+});
+
+semester.post('/exams/:id/ai/revalidate', requirePermission('semester.event.manage'), async (c) => {
+  const examId = c.req.param('id');
+  const body = await c.req.json<any>();
+  try {
+    await assertExamInSemesterEvent(c.env.DB, examId);
+    const result = await revalidateEditedAiQuestion(c.env.DB, examId, body);
+    if (!result.success) {
+      return c.json(err(result.error!), (result.status as any) || 400);
+    }
+    return c.json(ok(result.data));
+  } catch (e: any) {
+    return handleDomainError(e, c);
+  }
+});
+
+semester.post('/exams/:id/ai/import', requirePermission('semester.event.manage'), async (c) => {
+  const examId = c.req.param('id');
+  const body = await c.req.json<{ questions: any[] }>();
+  const questions = body.questions || [];
+  try {
+    await assertExamInSemesterEvent(c.env.DB, examId);
+    const result = await importReviewedAiQuestions(c.env.DB, examId, questions);
+    if (!result.success) {
+      return c.json(err(result.error!), (result.status as any) || 400);
+    }
+    return c.json(ok(result.data, result.message), 201);
+  } catch (e: any) {
+    return handleDomainError(e, c);
+  }
+});
 
 semester.post('/exams/:id/ai/generate', requirePermission('semester.event.manage'), async (c) => {
   const examId = c.req.param('id');

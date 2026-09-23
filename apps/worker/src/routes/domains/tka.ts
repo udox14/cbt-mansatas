@@ -58,6 +58,10 @@ import {
   updateAiDraft,
   deleteAiDraft,
   acceptAiDrafts,
+  buildExamAiPrompt,
+  validatePastedAiQuestions,
+  revalidateEditedAiQuestion,
+  importReviewedAiQuestions,
 } from '../../services/exam-engine/ai-authoring.ts';
 
 import {
@@ -558,7 +562,68 @@ tka.delete('/questions/:qId', requirePermission('tka.event.manage'), async (c) =
   }
 });
 
-// ── AI Question Generator (TKA Event Scoped) ─────────────────
+// ── AI Question Generator (TKA Event Scoped — RPPM Pattern) ─────────────────
+
+tka.post('/exams/:id/ai/prompt', requirePermission('tka.event.manage'), async (c) => {
+  const examId = c.req.param('id');
+  const body = await c.req.json<any>();
+  try {
+    await assertTkaExam(c.env.DB, examId);
+    const result = await buildExamAiPrompt(c.env.DB, examId, body);
+    if (!result.success) {
+      return c.json(err(result.error!), (result.status as any) || 400);
+    }
+    return c.json(ok(result.data));
+  } catch (e) {
+    return handleDomainError(e, c);
+  }
+});
+
+tka.post('/exams/:id/ai/validate', requirePermission('tka.event.manage'), async (c) => {
+  const examId = c.req.param('id');
+  const body = await c.req.json<any>();
+  try {
+    await assertTkaExam(c.env.DB, examId);
+    const result = await validatePastedAiQuestions(c.env.DB, examId, body);
+    if (!result.success) {
+      return c.json(err(result.error!), (result.status as any) || 400);
+    }
+    return c.json(ok(result.data));
+  } catch (e) {
+    return handleDomainError(e, c);
+  }
+});
+
+tka.post('/exams/:id/ai/revalidate', requirePermission('tka.event.manage'), async (c) => {
+  const examId = c.req.param('id');
+  const body = await c.req.json<any>();
+  try {
+    await assertTkaExam(c.env.DB, examId);
+    const result = await revalidateEditedAiQuestion(c.env.DB, examId, body);
+    if (!result.success) {
+      return c.json(err(result.error!), (result.status as any) || 400);
+    }
+    return c.json(ok(result.data));
+  } catch (e) {
+    return handleDomainError(e, c);
+  }
+});
+
+tka.post('/exams/:id/ai/import', requirePermission('tka.event.manage'), async (c) => {
+  const examId = c.req.param('id');
+  const body = await c.req.json<{ questions: any[] }>();
+  const questions = body.questions || [];
+  try {
+    await assertTkaExam(c.env.DB, examId);
+    const result = await importReviewedAiQuestions(c.env.DB, examId, questions);
+    if (!result.success) {
+      return c.json(err(result.error!), (result.status as any) || 400);
+    }
+    return c.json(ok(result.data, result.message), 201);
+  } catch (e) {
+    return handleDomainError(e, c);
+  }
+});
 
 tka.post('/exams/:id/ai/generate', requirePermission('tka.event.manage'), async (c) => {
   const examId = c.req.param('id');

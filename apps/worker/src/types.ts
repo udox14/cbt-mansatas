@@ -33,13 +33,6 @@ export interface Env {
   MANSATAS_DB_CLASS_GRADE_COLUMN?: string;
   MANSATAS_DB_CLASS_NUMBER_COLUMN?: string;
   MANSATAS_DB_CLASS_GROUP_COLUMN?: string;
-
-  // Phase 8: AI Question Generator server-side bindings & config
-  AI_PROVIDER?: string;
-  AI_API_KEY?: string;
-  AI_MODEL?: string;
-  AI_BASE_URL?: string;
-  MAX_AI_QUESTIONS_PER_RUN?: number | string;
 }
 
 export type AiDifficultyMode = 'easy' | 'balanced' | 'hard';

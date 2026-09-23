@@ -52,6 +52,10 @@ import {
   updateAiDraft,
   deleteAiDraft,
   acceptAiDrafts,
+  buildExamAiPrompt,
+  validatePastedAiQuestions,
+  revalidateEditedAiQuestion,
+  importReviewedAiQuestions,
 } from '../../services/exam-engine/ai-authoring.ts';
 
 import {
@@ -427,7 +431,72 @@ ulangan.delete('/exams/:id/questions/:questionId', requirePermission('ulangan.ex
   }
 });
 
-// ── 4B. AI Question Generator (Teacher Owned) ────────────────
+// ── 4B. AI Question Generator (Teacher Owned — RPPM Pattern) ────────────────
+
+ulangan.post('/exams/:id/ai/prompt', requirePermission('ulangan.exam.manage_own'), async (c) => {
+  const examId = c.req.param('id');
+  const user = c.get('user');
+  const body = await c.req.json<any>();
+  try {
+    await assertUlanganOwnership(c.env.DB, examId, user);
+    const result = await buildExamAiPrompt(c.env.DB, examId, body);
+    if (!result.success) {
+      return c.json(err(result.error!), (result.status as any) || 400);
+    }
+    return c.json(ok(result.data));
+  } catch (e) {
+    return handleDomainError(e, c);
+  }
+});
+
+ulangan.post('/exams/:id/ai/validate', requirePermission('ulangan.exam.manage_own'), async (c) => {
+  const examId = c.req.param('id');
+  const user = c.get('user');
+  const body = await c.req.json<any>();
+  try {
+    await assertUlanganOwnership(c.env.DB, examId, user);
+    const result = await validatePastedAiQuestions(c.env.DB, examId, body);
+    if (!result.success) {
+      return c.json(err(result.error!), (result.status as any) || 400);
+    }
+    return c.json(ok(result.data));
+  } catch (e) {
+    return handleDomainError(e, c);
+  }
+});
+
+ulangan.post('/exams/:id/ai/revalidate', requirePermission('ulangan.exam.manage_own'), async (c) => {
+  const examId = c.req.param('id');
+  const user = c.get('user');
+  const body = await c.req.json<any>();
+  try {
+    await assertUlanganOwnership(c.env.DB, examId, user);
+    const result = await revalidateEditedAiQuestion(c.env.DB, examId, body);
+    if (!result.success) {
+      return c.json(err(result.error!), (result.status as any) || 400);
+    }
+    return c.json(ok(result.data));
+  } catch (e) {
+    return handleDomainError(e, c);
+  }
+});
+
+ulangan.post('/exams/:id/ai/import', requirePermission('ulangan.exam.manage_own'), async (c) => {
+  const examId = c.req.param('id');
+  const user = c.get('user');
+  const body = await c.req.json<{ questions: any[] }>();
+  const questions = body.questions || [];
+  try {
+    await assertUlanganOwnership(c.env.DB, examId, user);
+    const result = await importReviewedAiQuestions(c.env.DB, examId, questions);
+    if (!result.success) {
+      return c.json(err(result.error!), (result.status as any) || 400);
+    }
+    return c.json(ok(result.data, result.message), 201);
+  } catch (e) {
+    return handleDomainError(e, c);
+  }
+});
 
 ulangan.post('/exams/:id/ai/generate', requirePermission('ulangan.exam.manage_own'), async (c) => {
   const examId = c.req.param('id');

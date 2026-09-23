@@ -24,6 +24,10 @@ import {
   deleteAiDraft,
   acceptAiDrafts,
   assertAiQuestionAuthoringAccess,
+  buildExamAiPrompt,
+  validatePastedAiQuestions,
+  revalidateEditedAiQuestion,
+  importReviewedAiQuestions,
 } from '../../services/exam-engine/ai-authoring.ts';
 
 export const authoringRoutes = new Hono<{ Bindings: Env }>();
@@ -110,6 +114,71 @@ authoringRoutes.delete('/questions/:id', async (c) => {
 
 export const genericAiRoutes = new Hono<{ Bindings: Env }>();
 genericAiRoutes.use('/exams/:examId/ai/*', authMiddleware);
+
+genericAiRoutes.post('/exams/:examId/ai/prompt', async (c) => {
+  const examId = c.req.param('examId');
+  const user = c.get('user' as any);
+  const auth = await assertAiQuestionAuthoringAccess(c.env.DB, user, examId);
+  if (!auth.success) {
+    return c.json(err(auth.error!), (auth.status as any) || 403);
+  }
+
+  const body = await c.req.json<any>();
+  const result = await buildExamAiPrompt(c.env.DB, examId, body);
+  if (!result.success) {
+    return c.json(err(result.error!), (result.status as any) || 400);
+  }
+  return c.json(ok(result.data));
+});
+
+genericAiRoutes.post('/exams/:examId/ai/validate', async (c) => {
+  const examId = c.req.param('examId');
+  const user = c.get('user' as any);
+  const auth = await assertAiQuestionAuthoringAccess(c.env.DB, user, examId);
+  if (!auth.success) {
+    return c.json(err(auth.error!), (auth.status as any) || 403);
+  }
+
+  const body = await c.req.json<any>();
+  const result = await validatePastedAiQuestions(c.env.DB, examId, body);
+  if (!result.success) {
+    return c.json(err(result.error!), (result.status as any) || 400);
+  }
+  return c.json(ok(result.data));
+});
+
+genericAiRoutes.post('/exams/:examId/ai/revalidate', async (c) => {
+  const examId = c.req.param('examId');
+  const user = c.get('user' as any);
+  const auth = await assertAiQuestionAuthoringAccess(c.env.DB, user, examId);
+  if (!auth.success) {
+    return c.json(err(auth.error!), (auth.status as any) || 403);
+  }
+
+  const body = await c.req.json<any>();
+  const result = await revalidateEditedAiQuestion(c.env.DB, examId, body);
+  if (!result.success) {
+    return c.json(err(result.error!), (result.status as any) || 400);
+  }
+  return c.json(ok(result.data));
+});
+
+genericAiRoutes.post('/exams/:examId/ai/import', async (c) => {
+  const examId = c.req.param('examId');
+  const user = c.get('user' as any);
+  const auth = await assertAiQuestionAuthoringAccess(c.env.DB, user, examId);
+  if (!auth.success) {
+    return c.json(err(auth.error!), (auth.status as any) || 403);
+  }
+
+  const body = await c.req.json<{ questions: any[] }>();
+  const questions = body.questions || [];
+  const result = await importReviewedAiQuestions(c.env.DB, examId, questions);
+  if (!result.success) {
+    return c.json(err(result.error!), (result.status as any) || 400);
+  }
+  return c.json(ok(result.data, result.message), 201);
+});
 
 genericAiRoutes.post('/exams/:examId/ai/generate', async (c) => {
   const examId = c.req.param('examId');
