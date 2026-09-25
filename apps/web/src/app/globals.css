@@ -21,6 +21,63 @@ body {
 
 .exam-text { font-size: var(--exam-font-size, 1rem); line-height: 1.75; }
 
+/* CBT Structured Stimulus & Dialogue Styling */
+.cbt-dialogue {
+  background-color: #f8fafc;
+  border-left: 3.5px solid #10b981;
+  padding: 12px 16px;
+  margin: 12px 0;
+  border-radius: 0 8px 8px 0;
+  font-size: 0.95em;
+}
+.cbt-dialogue p {
+  margin: 6px 0;
+  line-height: 1.65;
+}
+.cbt-dialogue strong {
+  color: #0f172a;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.cbt-dialogue-direction {
+  color: #64748b;
+  font-style: italic;
+  font-size: 0.9em;
+}
+.cbt-dialogue-scene {
+  color: #334155;
+  font-size: 0.85em;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 4px;
+}
+
+/* CBT Poem / Sajak Box Styling */
+.cbt-poem {
+  background-color: #fcfbf9;
+  border-left: 3.5px solid #f59e0b;
+  padding: 12px 18px;
+  margin: 12px 0;
+  border-radius: 0 8px 8px 0;
+  font-style: italic;
+  line-height: 1.7;
+}
+
+/* CBT Stimulus Box Styling */
+.cbt-stimulus-box {
+  background-color: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin: 12px 0;
+  line-height: 1.7;
+}
+.cbt-stimulus-title {
+  font-weight: 700;
+  color: #1e293b;
+  margin-bottom: 6px;
+}
+
 /* Teks Arab (RTL) memakai Scheherazade New; huruf Latin di baris yang sama
    tetap jatuh ke Plus Jakarta Sans sebagai fallback. */
 .arabic,

@@ -50,6 +50,8 @@ import {
   updateQuestion,
   deleteQuestion,
   bulkCreateQuestions,
+  deleteAllExamQuestions,
+  deleteQuestionsBatch,
 } from '../../services/exam-engine/questions.ts';
 import {
   generateAiQuestions,
@@ -523,6 +525,42 @@ tka.post('/exams/:id/questions/bulk', requirePermission('tka.event.manage'), asy
       return c.json(err(result.error || 'Gagal mengimpor soal'), (result.status as any) || 400);
     }
     return c.json(ok(result.data, result.message));
+  } catch (e) {
+    return handleDomainError(e, c);
+  }
+});
+
+tka.delete('/exams/:id/questions', requirePermission('tka.event.manage'), async (c) => {
+  const examId = c.req.param('id');
+  try {
+    await assertTkaExam(c.env.DB, examId);
+    const result = await deleteAllExamQuestions(c.env.DB, examId);
+    if (!result.success) {
+      return c.json(err(result.error!), (result.status as any) || 400);
+    }
+    return c.json(ok({ deleted_count: result.count }, result.message));
+  } catch (e) {
+    return handleDomainError(e, c);
+  }
+});
+
+tka.post('/exams/:id/questions/delete-batch', requirePermission('tka.event.manage'), async (c) => {
+  const examId = c.req.param('id');
+  const body = await c.req.json<{ all?: boolean; question_ids?: string[] }>();
+  try {
+    await assertTkaExam(c.env.DB, examId);
+    if (body?.all) {
+      const result = await deleteAllExamQuestions(c.env.DB, examId);
+      if (!result.success) {
+        return c.json(err(result.error!), (result.status as any) || 400);
+      }
+      return c.json(ok({ deleted_count: result.count }, result.message));
+    }
+    const result = await deleteQuestionsBatch(c.env.DB, examId, body?.question_ids || []);
+    if (!result.success) {
+      return c.json(err(result.error!), (result.status as any) || 400);
+    }
+    return c.json(ok({ deleted_count: result.count }, result.message));
   } catch (e) {
     return handleDomainError(e, c);
   }

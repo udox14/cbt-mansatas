@@ -67,6 +67,8 @@ import {
   updateQuestion,
   deleteQuestion,
   bulkCreateQuestions,
+  deleteAllExamQuestions,
+  deleteQuestionsBatch,
 } from '../../services/exam-engine/questions.ts';
 import {
   generateAiQuestions,
@@ -641,6 +643,42 @@ semester.delete('/exams/:id/questions/:qId', requirePermission('semester.event.m
     await assertExamInSemesterEvent(c.env.DB, c.req.param('id'));
     await deleteQuestion(c.env.DB, c.req.param('qId'));
     return c.json(ok({ deleted: true }, 'Soal berhasil dihapus'));
+  } catch (e: any) {
+    return handleDomainError(e, c);
+  }
+});
+
+semester.delete('/exams/:id/questions', requirePermission('semester.event.manage'), async (c) => {
+  const examId = c.req.param('id');
+  try {
+    await assertExamInSemesterEvent(c.env.DB, examId);
+    const result = await deleteAllExamQuestions(c.env.DB, examId);
+    if (!result.success) {
+      return c.json(err(result.error!), (result.status as any) || 400);
+    }
+    return c.json(ok({ deleted_count: result.count }, result.message));
+  } catch (e: any) {
+    return handleDomainError(e, c);
+  }
+});
+
+semester.post('/exams/:id/questions/delete-batch', requirePermission('semester.event.manage'), async (c) => {
+  const examId = c.req.param('id');
+  const body = await c.req.json<{ all?: boolean; question_ids?: string[] }>();
+  try {
+    await assertExamInSemesterEvent(c.env.DB, examId);
+    if (body?.all) {
+      const result = await deleteAllExamQuestions(c.env.DB, examId);
+      if (!result.success) {
+        return c.json(err(result.error!), (result.status as any) || 400);
+      }
+      return c.json(ok({ deleted_count: result.count }, result.message));
+    }
+    const result = await deleteQuestionsBatch(c.env.DB, examId, body?.question_ids || []);
+    if (!result.success) {
+      return c.json(err(result.error!), (result.status as any) || 400);
+    }
+    return c.json(ok({ deleted_count: result.count }, result.message));
   } catch (e: any) {
     return handleDomainError(e, c);
   }

@@ -311,8 +311,8 @@ export function AiQuestionGenerator({
                 <Sparkles size={14} className="text-emerald-700" /> Alur Kerja Generator AI MANSATAS:
               </p>
               <p className="mt-1 text-emerald-800 leading-relaxed">
-                Tentukan spesifikasi materi, salin prompt berkualitas tinggi ke AI pilihan Anda (ChatGPT, Gemini,
-                Claude, dll.), lalu tempel kembali hasil JSON untuk ditelaah sebelum diimpor ke bank soal ujian.
+                Tentukan spesifikasi materi, salin prompt berstandar anti-monotoni ke AI pilihan Anda (ChatGPT, Gemini,
+                Claude, dll.), lalu tempel kembali hasil JSON. Format percakapan/dialog dan puisi akan tertata rapi secara otomatis.
               </p>
             </div>
 
@@ -322,7 +322,7 @@ export function AiQuestionGenerator({
               </label>
               <input
                 type="text"
-                placeholder="Contoh: Hukum Newton tentang Gerak / Struktur Kalimat Idhafah"
+                placeholder="Contoh: Reading Comprehension & Dialogue / Teks Naratif / Hukum Newton"
                 value={topic}
                 onChange={(e) => setTopic(e.target.value)}
                 className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
@@ -769,13 +769,22 @@ export function AiQuestionGenerator({
           <Modal open={true} onClose={() => setEditItem(null)} title="Edit & Telaah Soal" size="md">
             <div className="space-y-3">
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">Teks Pokok Soal</label>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">Teks Pokok Soal (Stem)</label>
                 <textarea
-                  rows={3}
+                  rows={5}
                   value={editItem.stem}
                   onChange={(e) => setEditItem({ ...editItem, stem: e.target.value })}
-                  className="w-full px-3 py-2 text-xs border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
+                  className="w-full px-3 py-2 text-xs border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 font-mono"
+                  placeholder="Ketik pokok soal atau dialog..."
                 />
+                {editItem.stem && (
+                  <div className="mt-1.5 p-2.5 bg-slate-50 border border-slate-200 rounded-lg">
+                    <span className="text-[10px] text-slate-500 font-bold uppercase block mb-1">Pratinjau Tampilan Soal:</span>
+                    <div className="text-xs text-slate-800 leading-relaxed">
+                      <MathContent html={editItem.stem} />
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="space-y-2">

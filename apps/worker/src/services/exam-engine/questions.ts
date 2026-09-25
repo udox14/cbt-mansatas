@@ -169,6 +169,156 @@ export async function updateQuestion(db: D1Database, id: string, b: any) {
 }
 
 export async function deleteQuestion(db: D1Database, id: string) {
-  await db.prepare('DELETE FROM cbt_questions WHERE id=?').bind(id).run();
+  await db.batch([
+    db.prepare('DELETE FROM cbt_question_options WHERE question_id=?').bind(id),
+    db.prepare('DELETE FROM cbt_questions WHERE id=?').bind(id),
+  ]);
   return { success: true, data: null, message: 'Soal dihapus' };
+}
+
+/**
+ * Safely deletes ALL questions and options for an exam in a single-parameter atomic batch.
+ * Guarantees zero SQLite variable overflow regardless of question count.
+ */
+export async function deleteAllExamQuestions(db: D1Database, examId: string) {
+  // 1. Verify exam existence & lifecycle
+  const exam = await db
+    .prepare('SELECT id, active_status, is_frozen FROM cbt_exams WHERE id = ?')
+    .bind(examId)
+    .first<any>();
+  if (!exam) return { success: false, error: 'Ujian tidak ditemukan', status: 404 };
+
+  if (
+    exam.is_frozen === 1 ||
+    ['ready', 'active', 'completed', 'archived', 'finished'].includes(exam.active_status)
+  ) {
+    return {
+      success: false,
+      error: `Ujian dalam status '${exam.active_status}'. Penghapusan soal hanya dapat dilakukan pada status Draft/Konfigurasi.`,
+      status: 409,
+    };
+  }
+
+  // 2. Prevent deletion if student exam sessions exist
+  const sessionRow = await db
+    .prepare('SELECT COUNT(*) as cnt FROM cbt_exam_sessions WHERE exam_id = ?')
+    .bind(examId)
+    .first<any>();
+  if (Number(sessionRow?.cnt || 0) > 0) {
+    return {
+      success: false,
+      error: 'Tidak dapat menghapus soal karena sudah terdapat sesi ujian peserta untuk ujian ini.',
+      status: 409,
+    };
+  }
+
+  // 3. Count questions to report deleted count
+  const countRow = await db
+    .prepare('SELECT COUNT(*) as cnt FROM cbt_questions WHERE exam_id = ?')
+    .bind(examId)
+    .first<any>();
+  const count = Number(countRow?.cnt || 0);
+  if (count === 0) {
+    return { success: true, count: 0, message: 'Tidak ada soal untuk dihapus' };
+  }
+
+  // 4. Safe single-parameter atomic batch execution
+  await db.batch([
+    db
+      .prepare(
+        'DELETE FROM cbt_question_options WHERE question_id IN (SELECT id FROM cbt_questions WHERE exam_id = ?)'
+      )
+      .bind(examId),
+    db.prepare('DELETE FROM cbt_questions WHERE exam_id = ?').bind(examId),
+  ]);
+
+  return { success: true, count, message: `${count} butir soal berhasil dihapus` };
+}
+
+/**
+ * Safely deletes selected questions for an exam in chunks of 50.
+ * Guarantees zero SQLite variable overflow even for large question selections.
+ */
+export async function deleteQuestionsBatch(
+  db: D1Database,
+  examId: string,
+  questionIds: string[]
+) {
+  if (!Array.isArray(questionIds) || questionIds.length === 0) {
+    return { success: false, error: 'Pilih setidaknya satu butir soal untuk dihapus', status: 400 };
+  }
+
+  // 1. Verify exam existence & lifecycle
+  const exam = await db
+    .prepare('SELECT id, active_status, is_frozen FROM cbt_exams WHERE id = ?')
+    .bind(examId)
+    .first<any>();
+  if (!exam) return { success: false, error: 'Ujian tidak ditemukan', status: 404 };
+
+  if (
+    exam.is_frozen === 1 ||
+    ['ready', 'active', 'completed', 'archived', 'finished'].includes(exam.active_status)
+  ) {
+    return {
+      success: false,
+      error: `Ujian dalam status '${exam.active_status}'. Penghapusan soal hanya dapat dilakukan pada status Draft/Konfigurasi.`,
+      status: 409,
+    };
+  }
+
+  // 2. Prevent deletion if student exam sessions exist
+  const sessionRow = await db
+    .prepare('SELECT COUNT(*) as cnt FROM cbt_exam_sessions WHERE exam_id = ?')
+    .bind(examId)
+    .first<any>();
+  if (Number(sessionRow?.cnt || 0) > 0) {
+    return {
+      success: false,
+      error: 'Tidak dapat menghapus soal karena sudah terdapat sesi ujian peserta untuk ujian ini.',
+      status: 409,
+    };
+  }
+
+  // 3. Chunk IDs to guarantee safe parameter counts (<= 50 per statement)
+  const CHUNK_SIZE = 50;
+  let deletedCount = 0;
+
+  for (let i = 0; i < questionIds.length; i += CHUNK_SIZE) {
+    const chunk = questionIds.slice(i, i + CHUNK_SIZE);
+    const placeholders = chunk.map(() => '?').join(',');
+
+    await db.batch([
+      db
+        .prepare(`DELETE FROM cbt_question_options WHERE question_id IN (${placeholders})`)
+        .bind(...chunk),
+      db
+        .prepare(`DELETE FROM cbt_questions WHERE id IN (${placeholders}) AND exam_id = ?`)
+        .bind(...chunk, examId),
+    ]);
+    deletedCount += chunk.length;
+  }
+
+  // 4. Re-sequence question_order of remaining questions
+  const remaining = await db
+    .prepare(
+      'SELECT id FROM cbt_questions WHERE exam_id = ? ORDER BY question_order ASC, created_at ASC'
+    )
+    .bind(examId)
+    .all<any>();
+
+  const remainingRows = (remaining.results || []) as any[];
+  if (remainingRows.length > 0) {
+    const reorderStmts = remainingRows.map((row, idx) =>
+      db.prepare('UPDATE cbt_questions SET question_order = ? WHERE id = ?').bind(idx + 1, row.id)
+    );
+    for (let i = 0; i < reorderStmts.length; i += 50) {
+      await db.batch(reorderStmts.slice(i, i + 50));
+    }
+  }
+
+  return {
+    success: true,
+    count: deletedCount,
+    message: `${deletedCount} butir soal berhasil dihapus`,
+  };
 }

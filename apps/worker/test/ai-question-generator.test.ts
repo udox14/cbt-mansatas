@@ -31,6 +31,9 @@ import {
   parseRawQuestionsJson,
   normalizeAndValidatePastedQuestions,
   revalidateSingleQuestion,
+  formatQuestionStemHtml,
+  detectRepetitiveStemPrefixes,
+  BOILERPLATE_PREFIX_REGEX,
 } from '../src/services/ai/validator.ts';
 import {
   buildExamAiPrompt,
@@ -41,7 +44,11 @@ import {
   assertExamMutableForAi,
   loadExistingExamQuestionHashes,
 } from '../src/services/exam-engine/ai-authoring.ts';
-import { listExamQuestions } from '../src/services/exam-engine/questions.ts';
+import {
+  listExamQuestions,
+  deleteAllExamQuestions,
+  deleteQuestionsBatch,
+} from '../src/services/exam-engine/questions.ts';
 import ulanganRoutes from '../src/routes/domains/ulangan.ts';
 import tkaRoutes from '../src/routes/domains/tka.ts';
 import semesterRoutes from '../src/routes/domains/semester.ts';
@@ -589,6 +596,39 @@ describe('Phase 8 Product Correction — RPPM-Style AI Question Generator', () =
       assert.equal(resNeg.success, false);
       assert.match(resNeg.error || '', /antara 1 hingga 50 butir/i);
     });
+
+    it('1.20 Prompt builder includes strict anti-boilerplate opening directives and stem diversity requirements', () => {
+      const prompt = buildQuestionGeneratorPrompt(
+        { topic: 'English Reading Comprehension & Dialogue', questionCount: 10, difficultyMode: 'balanced', variationLevel: 'varied' },
+        { examTitle: 'English Exam', subjectName: 'Bahasa Inggris' }
+      );
+      assert.ok(prompt.includes('ANTI-MONOTONI'));
+      assert.ok(prompt.includes('ANTI-BOILERPLATE'));
+      assert.ok(prompt.includes('DILARANG KERAS mengulang-ulang kalimat pembuka klise'));
+      assert.ok(prompt.includes('Pertanyaan Langsung (Direct Question)'));
+      assert.ok(prompt.includes('Kalimat Rumpang Kontekstual'));
+    });
+
+    it('1.21 Prompt builder includes HTML semantic formatting rules for dialogues (cbt-dialogue) and poems (cbt-poem)', () => {
+      const prompt = buildQuestionGeneratorPrompt(
+        { topic: 'Drama and Poetry Analysis', questionCount: 5, difficultyMode: 'balanced', variationLevel: 'standard' },
+        { examTitle: 'Literature Exam', subjectName: 'Bahasa Indonesia' }
+      );
+      assert.ok(prompt.includes('cbt-dialogue'));
+      assert.ok(prompt.includes('cbt-poem'));
+      assert.ok(prompt.includes('DILARANG KERAS menggabungkan seluruh dialog ke dalam satu paragraf panjang'));
+      assert.ok(prompt.includes('<strong>Nama Tokoh:</strong>'));
+    });
+
+    it('1.22 Prompt builder includes stimulus distribution rules forbidding monolithic passage duplication', () => {
+      const prompt = buildQuestionGeneratorPrompt(
+        { topic: 'Teks Argumentasi', questionCount: 20, difficultyMode: 'balanced', variationLevel: 'high_variation' },
+        { examTitle: 'Bahasa Indonesia' }
+      );
+      assert.ok(prompt.includes('ATURAN DISTRIBUSI STIMULUS & KERAGAMAN MATERI'));
+      assert.ok(prompt.includes('DILARANG menyalin 1 teks stimulus panjang yang sama persis'));
+      assert.ok(prompt.includes('maksimal 2–3 soal per teks pendek'));
+    });
   });
 
   // ══════════════════════════════════════════════════════════════
@@ -967,6 +1007,126 @@ describe('Phase 8 Product Correction — RPPM-Style AI Question Generator', () =
       assert.equal(valRes.success, false);
       assert.equal(valRes.status, 400);
       assert.match(valRes.error || '', /melebihi batas maksimal 50 butir/i);
+    });
+
+    it('3.19 Formats raw plain-text dialogue with speaker turns into structured cbt-dialogue HTML', () => {
+      const rawDialogueStem = [
+        'SCENE ONE',
+        '(A small kitchen. MAYA is packing a suitcase.)',
+        'RUDI: Where are you going?',
+        'MAYA: I need some time alone.',
+        'What is the conflict between Maya and Rudi?',
+      ].join('\n');
+
+      const v = validateRawQuestion({
+        stem: rawDialogueStem,
+        options: [
+          { label: 'A', text: 'Rudi wants to travel' },
+          { label: 'B', text: 'Maya wants some space' },
+          { label: 'C', text: 'They both want to move' },
+          { label: 'D', text: 'No conflict exists' },
+        ],
+        correctIndex: 1,
+      });
+
+      assert.equal(v.isValid, true);
+      const stem = v.normalized?.stem || '';
+      assert.ok(stem.includes('class="cbt-dialogue"'), 'Should wrap dialogue in cbt-dialogue container');
+      assert.ok(stem.includes('<p><strong>RUDI:</strong> Where are you going?</p>'), 'RUDI turn should be bold with <p>');
+      assert.ok(stem.includes('<p><strong>MAYA:</strong> I need some time alone.</p>'), 'MAYA turn should be bold with <p>');
+      assert.ok(stem.includes('<p>What is the conflict between Maya and Rudi?</p>'), 'Question prompt should be in separate <p>');
+    });
+
+    it('3.20 Strips repetitive boilerplate opening prefix from raw stem while preserving substantive question', () => {
+      const boilerplateStem = 'Read the following passage carefully, then answer the question below. What is the central thesis of the author?';
+      const v = validateRawQuestion({
+        stem: boilerplateStem,
+        options: [
+          { label: 'A', text: 'Opsi 1' },
+          { label: 'B', text: 'Opsi 2' },
+          { label: 'C', text: 'Opsi 3' },
+          { label: 'D', text: 'Opsi 4' },
+        ],
+        correctIndex: 0,
+      });
+
+      assert.equal(v.isValid, true);
+      assert.equal(v.normalized?.stem, 'What is the central thesis of the author?');
+      assert.ok(!v.normalized?.stem.includes('Read the following passage carefully'));
+    });
+
+    it('3.21 Formats multi-line poetry into cbt-poem HTML structure with line breaks', () => {
+      const rawPoemStem = [
+        'The old lighthouse stands so still and grey,',
+        'Its lamp long dark, its light away.',
+        'The waves crash wild upon the shore.',
+        'What mood does the poem evoke?',
+      ].join('\n');
+
+      const v = validateRawQuestion({
+        stem: rawPoemStem,
+        options: [
+          { label: 'A', text: 'Joy and celebration' },
+          { label: 'B', text: 'Solitude and gloom' },
+          { label: 'C', text: 'Excitement and adventure' },
+          { label: 'D', text: 'Confusion' },
+        ],
+        correctIndex: 1,
+      });
+
+      assert.equal(v.isValid, true);
+      const stem = v.normalized?.stem || '';
+      assert.ok(stem.includes('class="cbt-poem"'), 'Should wrap poem in cbt-poem container');
+      assert.ok(stem.includes('<br/>'), 'Poem lines should be separated with <br/>');
+      assert.ok(stem.includes('<p>What mood does the poem evoke?</p>'), 'Question should follow poem in <p>');
+    });
+
+    it('3.22 detectRepetitiveStemPrefixes flags 3 or more questions starting with identical opening phrases', async () => {
+      const batchWithRepetitivePrefix = [
+        {
+          stem: 'Berdasarkan kutipan teks wacana berikut, manakah faktor penyebab migrasi?',
+          options: [{ label: 'A', text: '1' }, { label: 'B', text: '2' }, { label: 'C', text: '3' }],
+          correctIndex: 0,
+        },
+        {
+          stem: 'Berdasarkan kutipan teks wacana berikut, bagaimana peran tokoh utama?',
+          options: [{ label: 'A', text: '1' }, { label: 'B', text: '2' }, { label: 'C', text: '3' }],
+          correctIndex: 1,
+        },
+        {
+          stem: 'Berdasarkan kutipan teks wacana berikut, apa simpulan paragraf kedua?',
+          options: [{ label: 'A', text: '1' }, { label: 'B', text: '2' }, { label: 'C', text: '3' }],
+          correctIndex: 2,
+        },
+        {
+          stem: 'Manakah kesimpulan yang paling tepat dari keseluruhan paragraf?',
+          options: [{ label: 'A', text: '1' }, { label: 'B', text: '2' }, { label: 'C', text: '3' }],
+          correctIndex: 0,
+        },
+      ];
+
+      const res = await normalizeAndValidatePastedQuestions(batchWithRepetitivePrefix);
+      assert.equal(res.stats.valid, 4);
+
+      // Questions 0, 1, 2 should receive repetitive prefix quality warning
+      assert.ok(res.questions[0].validation_errors.some(e => e.includes('Peringatan Variasi')));
+      assert.ok(res.questions[1].validation_errors.some(e => e.includes('Peringatan Variasi')));
+      assert.ok(res.questions[2].validation_errors.some(e => e.includes('Peringatan Variasi')));
+
+      // Question 3 does NOT have repetitive prefix
+      assert.equal(res.questions[3].validation_errors.length, 0);
+    });
+
+    it('3.23 Preserves existing valid HTML tags in stem without destructive mutation', () => {
+      const existingHtml = '<div class="cbt-dialogue"><p><strong>A:</strong> Halo</p><p><strong>B:</strong> Hai</p></div><p>Apa isi percakapan?</p>';
+      const v = validateRawQuestion({
+        stem: existingHtml,
+        options: [{ label: 'A', text: '1' }, { label: 'B', text: '2' }, { label: 'C', text: '3' }],
+        correctIndex: 0,
+      });
+
+      assert.equal(v.isValid, true);
+      assert.equal(v.normalized?.stem, existingHtml);
     });
   });
 
@@ -1993,6 +2153,160 @@ describe('Phase 8 Product Correction — RPPM-Style AI Question Generator', () =
       // d. Foreign key integrity check returns 0 violations
       const fkViolations = sqlite.prepare('PRAGMA foreign_key_check').all();
       assert.equal(fkViolations.length, 0, 'Foreign key violations found after rollback');
+    });
+  });
+
+  describe('9. Bank Soal Bulk and Batch Deletion Tests (Zero SQLite Error & Lifecycle Safety)', () => {
+    it('9.1 deleteAllExamQuestions removes 150 questions and 600 options atomically with zero SQLite error and leaves other exams intact', async () => {
+      const { d1, sqlite } = createTestD1();
+
+      // Seed exam A with 150 questions and 600 options
+      await d1.prepare("INSERT INTO cbt_exams (id, title, mode, active_status) VALUES ('exam-del-all', 'Ujian Hapus Semua', 'ulangan', 'draft')").run();
+      await d1.prepare("INSERT INTO cbt_exams (id, title, mode, active_status) VALUES ('exam-other', 'Ujian Lain Tetap Aman', 'ulangan', 'draft')").run();
+
+      // Other exam's question
+      await d1.prepare("INSERT INTO cbt_questions (id, exam_id, question_order, question_text, question_type, points) VALUES ('other-q1', 'exam-other', 1, 'Soal Aman', 'multiple_choice', 1)").run();
+      await d1.prepare("INSERT INTO cbt_question_options (id, question_id, option_label, option_text, is_correct, option_order) VALUES ('other-opt1', 'other-q1', 'A', 'Tetap Ada', 1, 0)").run();
+
+      // Seed 150 questions in exam A
+      for (let i = 1; i <= 150; i++) {
+        const qId = `del-all-q-${i}`;
+        await d1.prepare("INSERT INTO cbt_questions (id, exam_id, question_order, question_text, question_type, points) VALUES (?, 'exam-del-all', ?, ?, 'multiple_choice', 1)").bind(qId, i, `Soal ${i}`).run();
+        for (let j = 0; j < 4; j++) {
+          await d1.prepare("INSERT INTO cbt_question_options (id, question_id, option_label, option_text, is_correct, option_order) VALUES (?, ?, ?, ?, ?, ?)").bind(`del-all-opt-${i}-${j}`, qId, 'ABCD'[j], `Opsi ${j + 1}`, j === 0 ? 1 : 0, j).run();
+        }
+      }
+
+      const countBeforeQ = sqlite.prepare("SELECT COUNT(*) as cnt FROM cbt_questions WHERE exam_id = 'exam-del-all'").get() as any;
+      const countBeforeOpt = sqlite.prepare("SELECT COUNT(*) as cnt FROM cbt_question_options WHERE question_id LIKE 'del-all-q-%'").get() as any;
+      assert.equal(countBeforeQ.cnt, 150);
+      assert.equal(countBeforeOpt.cnt, 600);
+
+      // Execute deleteAllExamQuestions
+      const result = await deleteAllExamQuestions(d1, 'exam-del-all');
+      assert.equal(result.success, true);
+      assert.equal(result.count, 150);
+
+      // Verify exam-del-all has 0 questions and 0 options
+      const countAfterQ = sqlite.prepare("SELECT COUNT(*) as cnt FROM cbt_questions WHERE exam_id = 'exam-del-all'").get() as any;
+      const countAfterOpt = sqlite.prepare("SELECT COUNT(*) as cnt FROM cbt_question_options WHERE question_id LIKE 'del-all-q-%'").get() as any;
+      assert.equal(countAfterQ.cnt, 0);
+      assert.equal(countAfterOpt.cnt, 0);
+
+      // Verify exam-other is completely intact
+      const otherQ = sqlite.prepare("SELECT COUNT(*) as cnt FROM cbt_questions WHERE exam_id = 'exam-other'").get() as any;
+      const otherOpt = sqlite.prepare("SELECT COUNT(*) as cnt FROM cbt_question_options WHERE question_id = 'other-q1'").get() as any;
+      assert.equal(otherQ.cnt, 1);
+      assert.equal(otherOpt.cnt, 1);
+
+      // Verify foreign keys
+      const fkViolations = sqlite.prepare('PRAGMA foreign_key_check').all();
+      assert.equal(fkViolations.length, 0);
+    });
+
+    it('9.2 deleteQuestionsBatch chunks large selection (75/120 questions) into safe parameter batches and re-sequences question_order without gaps', async () => {
+      const { d1, sqlite } = createTestD1();
+
+      await d1.prepare("INSERT INTO cbt_exams (id, title, mode, active_status) VALUES ('exam-del-batch', 'Ujian Hapus Batch', 'ulangan', 'draft')").run();
+
+      // Seed 120 questions
+      for (let i = 1; i <= 120; i++) {
+        const qId = `batch-q-${i}`;
+        await d1.prepare("INSERT INTO cbt_questions (id, exam_id, question_order, question_text, question_type, points) VALUES (?, 'exam-del-batch', ?, ?, 'multiple_choice', 1)").bind(qId, i, `Soal Batch ${i}`).run();
+        for (let j = 0; j < 4; j++) {
+          await d1.prepare("INSERT INTO cbt_question_options (id, question_id, option_label, option_text, is_correct, option_order) VALUES (?, ?, ?, ?, ?, ?)").bind(`batch-opt-${i}-${j}`, qId, 'ABCD'[j], `Opsi ${j + 1}`, j === 0 ? 1 : 0, j).run();
+        }
+      }
+
+      // Select 75 questions (e.g. questions 1 through 75)
+      const toDelete = Array.from({ length: 75 }, (_, i) => `batch-q-${i + 1}`);
+      const result = await deleteQuestionsBatch(d1, 'exam-del-batch', toDelete);
+      assert.equal(result.success, true);
+      assert.equal(result.count, 75);
+
+      // Remaining should be exactly 45 questions
+      const remainingQ = sqlite.prepare("SELECT id, question_order FROM cbt_questions WHERE exam_id = 'exam-del-batch' ORDER BY question_order ASC").all() as any[];
+      assert.equal(remainingQ.length, 45);
+
+      // Verify re-sequenced question_order is strictly 1..45 without gaps
+      for (let idx = 0; idx < remainingQ.length; idx++) {
+        assert.equal(remainingQ[idx].question_order, idx + 1);
+      }
+
+      // Verify options for deleted questions are gone
+      const deletedOptions = sqlite.prepare("SELECT COUNT(*) as cnt FROM cbt_question_options WHERE question_id IN ('batch-q-1', 'batch-q-50', 'batch-q-75')").get() as any;
+      assert.equal(deletedOptions.cnt, 0);
+
+      // Verify foreign keys
+      const fkViolations = sqlite.prepare('PRAGMA foreign_key_check').all();
+      assert.equal(fkViolations.length, 0);
+    });
+
+    it('9.3 Protects against deletion when exam has active student sessions or is frozen', async () => {
+      const { d1 } = createTestD1();
+
+      await d1.prepare("INSERT INTO cbt_exams (id, title, mode, active_status, is_frozen) VALUES ('exam-with-sessions', 'Ujian Berisi Sesi', 'ulangan', 'draft', 0)").run();
+      await d1.prepare("INSERT INTO cbt_questions (id, exam_id, question_order, question_text, question_type) VALUES ('q-sess-1', 'exam-with-sessions', 1, 'Soal Sesi', 'multiple_choice')").run();
+
+      // Seed student session
+      await d1.prepare(`
+        INSERT INTO cbt_exam_sessions (id, exam_id, user_id, user_type, status)
+        VALUES ('sess-1', 'exam-with-sessions', 'part-1', 'student', 'active')
+      `).run();
+
+      // Attempt deleteAllExamQuestions -> conflict 409
+      const delAllRes = await deleteAllExamQuestions(d1, 'exam-with-sessions');
+      assert.equal(delAllRes.success, false);
+      assert.equal(delAllRes.status, 409);
+      assert.match(delAllRes.error || '', /sudah terdapat sesi ujian peserta/i);
+
+      // Attempt deleteQuestionsBatch -> conflict 409
+      const delBatchRes = await deleteQuestionsBatch(d1, 'exam-with-sessions', ['q-sess-1']);
+      assert.equal(delBatchRes.success, false);
+      assert.equal(delBatchRes.status, 409);
+      assert.match(delBatchRes.error || '', /sudah terdapat sesi ujian peserta/i);
+
+      // Test frozen exam
+      await d1.prepare("INSERT INTO cbt_exams (id, title, mode, active_status, is_frozen) VALUES ('exam-frozen', 'Ujian Beku', 'ulangan', 'draft', 1)").run();
+      await d1.prepare("INSERT INTO cbt_questions (id, exam_id, question_order, question_text, question_type) VALUES ('q-froz-1', 'exam-frozen', 1, 'Soal Beku', 'multiple_choice')").run();
+
+      const frozenRes = await deleteAllExamQuestions(d1, 'exam-frozen');
+      assert.equal(frozenRes.success, false);
+      assert.equal(frozenRes.status, 409);
+    });
+
+    it('9.4 authoringRoutes DELETE /exams/:examId/questions and POST delete-batch work via HTTP routing', async () => {
+      const { d1 } = createTestD1();
+
+      await d1.prepare("INSERT INTO cbt_exams (id, title, mode, active_status) VALUES ('exam-route-test', 'Ujian Rute Authoring', 'ulangan', 'draft')").run();
+      for (let i = 1; i <= 10; i++) {
+        await d1.prepare("INSERT INTO cbt_questions (id, exam_id, question_order, question_text, question_type) VALUES (?, 'exam-route-test', ?, 'Soal Rute', 'multiple_choice')").bind(`route-q-${i}`, i).run();
+      }
+
+      const app = new Hono<{ Bindings: any }>();
+      app.route('/', authoringRoutes);
+
+      // Test batch delete of 3 questions via POST /exams/:examId/questions/delete-batch
+      const batchRes = await app.request('/exams/exam-route-test/questions/delete-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question_ids: ['route-q-1', 'route-q-2', 'route-q-3'] }),
+      }, { DB: d1 });
+
+      assert.equal(batchRes.status, 200);
+      const batchJson = await batchRes.json() as any;
+      assert.equal(batchJson.success, true);
+      assert.equal(batchJson.data.deleted_count, 3);
+
+      // Test delete all via DELETE /exams/:examId/questions
+      const delAllRes = await app.request('/exams/exam-route-test/questions', {
+        method: 'DELETE',
+      }, { DB: d1 });
+
+      assert.equal(delAllRes.status, 200);
+      const delAllJson = await delAllRes.json() as any;
+      assert.equal(delAllJson.success, true);
+      assert.equal(delAllJson.data.deleted_count, 7);
     });
   });
 });

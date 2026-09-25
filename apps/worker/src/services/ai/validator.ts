@@ -128,6 +128,174 @@ export function parseRawQuestionsJson(raw: string): {
 }
 
 /**
+ * Boilerplate lead-in phrases that LLMs commonly generate for reading/dialogue questions.
+ * Stripping or transforming these prevents monotonous, repetitive opening sentences across questions.
+ */
+export const BOILERPLATE_PREFIX_REGEX = /^\s*(?:Read the following (?:passage|poem|dialogue|text|conversation|story|excerpt) carefully,?\s*(?:then|and)?\s*answer the questions?\s*(?:below|that follow)?\.?\s*|Bacalah (?:teks|paragraf|wacana|kutipan|dialog|puisi|bacaan) berikut (?:ini )?(?:dengan (?:saksama|seksama|teliti))?,?\s*(?:kemudian|lalu)?\s*(?:jawablah|jawab)?\s*(?:pertanyaan|soal)?\s*(?:di bawah ini|berikut)?(?: nomor \d+)?[\.:]?\s*|Perhatikan (?:teks|paragraf|wacana|kutipan|dialog|puisi|pernyataan|tabel|potongan dialog) berikut (?:ini)?[\.:]?\s*)/i;
+
+/**
+ * Normalizes question stem text into clean, structured semantic HTML.
+ * Handles dialogues, poems, multi-paragraph text, and strips repetitive boilerplate lead-ins.
+ * Preserves LaTeX formulas, Arabic scripts, and existing valid HTML structures.
+ */
+export function formatQuestionStemHtml(rawStem: string): string {
+  if (!rawStem || typeof rawStem !== 'string') return '';
+  let text = rawStem.trim();
+
+  // 1. If text has a repetitive boilerplate lead-in, remove it if something substantive remains
+  const cleanLead = text.replace(BOILERPLATE_PREFIX_REGEX, '').trim();
+  if (cleanLead.length > 5) {
+    text = cleanLead;
+  }
+
+  // 2. If already rich HTML with dialogue, poem, or block containers, return trimmed text
+  if (
+    text.includes('class="cbt-dialogue"') ||
+    text.includes('class="cbt-poem"') ||
+    text.includes('class="cbt-stimulus-box"')
+  ) {
+    return text;
+  }
+
+  // If text already contains block tags like <p>, <div>, <table>, <ul>, don't re-wrap paragraphs
+  const hasBlockHtml = /<(?:p|div|table|ul|ol|blockquote)\b/i.test(text);
+
+  // 3. Check for dialogue structure: lines matching Speaker: Speech
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const speakerRegex = /^([A-Z\u0600-\u06FF][A-Za-z\u0600-\u06FF0-9\s'.-]{0,25}):\s*(.+)$/;
+
+  const dialogueLineIndices: number[] = [];
+  lines.forEach((line, idx) => {
+    if (speakerRegex.test(line)) {
+      dialogueLineIndices.push(idx);
+    }
+  });
+
+  // If there are 2 or more speaker turns, structure as dialogue
+  if (dialogueLineIndices.length >= 2) {
+    const firstDiagIdx = dialogueLineIndices[0];
+    const lastDiagIdx = dialogueLineIndices[dialogueLineIndices.length - 1];
+
+    // Any stage directions or scene headers immediately preceding the dialogue
+    let preDialogueStart = firstDiagIdx;
+    while (preDialogueStart > 0) {
+      const prevLine = lines[preDialogueStart - 1];
+      if (
+        /^(?:scene|babak|adegan|latar)\b/i.test(prevLine) ||
+        /^\(.*\)$/.test(prevLine) ||
+        /^\[.*\]$/.test(prevLine)
+      ) {
+        preDialogueStart--;
+      } else {
+        break;
+      }
+    }
+
+    const preDialogue = lines.slice(0, preDialogueStart);
+    const dialogueSection = lines.slice(preDialogueStart, lastDiagIdx + 1);
+    const postDialogue = lines.slice(lastDiagIdx + 1);
+
+    const dialogueHtmlLines: string[] = [];
+    for (const dLine of dialogueSection) {
+      const match = dLine.match(speakerRegex);
+      if (match) {
+        dialogueHtmlLines.push(`<p><strong>${match[1]}:</strong> ${match[2]}</p>`);
+      } else if (/^\(.*\)$/.test(dLine) || /^\[.*\]$/.test(dLine)) {
+        dialogueHtmlLines.push(`<p class="cbt-dialogue-direction"><em>${dLine}</em></p>`);
+      } else if (/^(?:scene|babak|adegan)\b/i.test(dLine)) {
+        dialogueHtmlLines.push(`<p class="cbt-dialogue-scene"><strong>${dLine}</strong></p>`);
+      } else {
+        dialogueHtmlLines.push(`<p>${dLine}</p>`);
+      }
+    }
+
+    const parts: string[] = [];
+    if (preDialogue.length > 0) {
+      parts.push(preDialogue.map((l) => `<p>${l}</p>`).join(''));
+    }
+    parts.push(`<div class="cbt-dialogue">${dialogueHtmlLines.join('')}</div>`);
+    if (postDialogue.length > 0) {
+      parts.push(postDialogue.map((l) => `<p>${l}</p>`).join(''));
+    }
+
+    return parts.join('');
+  }
+
+  // If already has block HTML and wasn't a plain-text dialogue, return text
+  if (hasBlockHtml) {
+    return text;
+  }
+
+  // 4. Check for poetry structure: 3+ consecutive short lines (< 80 chars) ending without ?
+  if (lines.length >= 4) {
+    const lastLineIsQuestion = lines[lines.length - 1].endsWith('?');
+    const poemCandidateLines = lastLineIsQuestion ? lines.slice(0, -1) : lines;
+    const allShort = poemCandidateLines.every((l) => l.length < 80);
+
+    if (allShort && poemCandidateLines.length >= 3) {
+      const poemBody = `<div class="cbt-poem"><p>${poemCandidateLines.join('<br/>')}</p></div>`;
+      if (lastLineIsQuestion) {
+        return `${poemBody}<p>${lines[lines.length - 1]}</p>`;
+      }
+      return poemBody;
+    }
+  }
+
+  // 5. If plain text with newlines (\n\n or \n), convert to clean paragraphs
+  if (text.includes('\n')) {
+    const paragraphs = text.split(/\r?\n\s*\r?\n/).map((p) => p.trim()).filter(Boolean);
+    if (paragraphs.length > 1) {
+      return paragraphs.map((p) => `<p>${p.replace(/\r?\n/g, '<br/>')}</p>`).join('');
+    }
+    return `<p>${text.replace(/\r?\n/g, '<br/>')}</p>`;
+  }
+
+  // Single line / simple question: return trimmed as is
+  return text;
+}
+
+/**
+ * Detects whether 3 or more questions in a batch start with the exact same prefix words.
+ * Returns map of question index to descriptive quality warning message.
+ */
+export function detectRepetitiveStemPrefixes(stems: string[]): Map<number, string> {
+  const warnings = new Map<number, string>();
+  if (stems.length < 3) return warnings;
+
+  // Extract first 4 significant words of each stem
+  const prefixMap = new Map<string, number[]>();
+
+  stems.forEach((rawStem, idx) => {
+    const plain = rawStem
+      .normalize('NFKC')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/[^\w\s\u0600-\u06FF]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+
+    const words = plain.split(' ').slice(0, 4).join(' ');
+    if (words.length >= 10) {
+      if (!prefixMap.has(words)) {
+        prefixMap.set(words, []);
+      }
+      prefixMap.get(words)!.push(idx);
+    }
+  });
+
+  for (const [prefix, indices] of prefixMap.entries()) {
+    if (indices.length >= 3) {
+      const msg = `Peringatan Variasi: Soal ini memiliki kalimat pembuka yang seragam dengan ${indices.length - 1} butir soal lain ("${prefix}..."). Disarankan menyunting pokok soal agar lebih bervariasi.`;
+      for (const idx of indices) {
+        warnings.set(idx, msg);
+      }
+    }
+  }
+
+  return warnings;
+}
+
+/**
  * Validates a single question object against strict CBT rules.
  */
 export function validateRawQuestion(q: any, index = 0): QuestionValidationResult {
@@ -138,17 +306,19 @@ export function validateRawQuestion(q: any, index = 0): QuestionValidationResult
   }
 
   // 1. Stem validation
-  const stem = typeof q.stem === 'string'
+  const rawStem = typeof q.stem === 'string'
     ? q.stem.trim()
     : typeof q.question_text === 'string'
     ? q.question_text.trim()
     : '';
 
-  if (!stem) {
+  if (!rawStem) {
     errors.push(`Soal #${index + 1}: Teks pokok soal (stem) tidak boleh kosong`);
-  } else if (stem.length > 10000) {
+  } else if (rawStem.length > 10000) {
     errors.push(`Soal #${index + 1}: Teks pokok soal melebihi batas 10.000 karakter`);
   }
+
+  const stem = formatQuestionStemHtml(rawStem);
 
   // 2. Options array validation
   const rawOptions = Array.isArray(q.options) ? q.options : null;
@@ -348,6 +518,14 @@ export async function normalizeAndValidatePastedQuestions(
       validation_status: valStatus,
       validation_errors: errors,
     });
+  }
+
+  // Detect repetitive boilerplate stem prefixes across the batch
+  const prefixWarnings = detectRepetitiveStemPrefixes(items.map((it) => it.stem));
+  for (const [idx, warningMsg] of prefixWarnings.entries()) {
+    if (items[idx] && items[idx].validation_status === 'valid') {
+      items[idx].validation_errors.push(warningMsg);
+    }
   }
 
   return {

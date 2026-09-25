@@ -7,7 +7,7 @@
 import type { AiDifficultyMode, AiVariationLevel } from '../../types.ts';
 import type { DifficultyDistribution } from './types.ts';
 
-export const PROMPT_VERSION = 'ai-question-rppm-v1';
+export const PROMPT_VERSION = 'ai-question-rppm-v2';
 
 export interface PromptExamContext {
   examTitle: string;
@@ -256,12 +256,44 @@ export function buildQuestionGeneratorPrompt(
     'Catatan Penting: Soal sulit (HOTS) adalah soal yang menuntut kedalaman penalaran dan analisis siswa, BUKAN sekadar membuat kalimat menjadi panjang atau memakai kosakata asing yang tidak perlu.'
   );
 
-  // 5. ATURAN VARIASI
+  // 5. ATURAN VARIASI & ANTI-MONOTONI
   sections.push(
     '',
-    '### ATURAN VARIASI SOAL:',
+    '### ATURAN VARIASI SOAL & ANTI-MONOTONI (SANGAT PENTING):',
     `- Mode Variasi: ${config.variationLevel.toUpperCase()}`,
-    `- Panduan: ${variationDesc}`
+    `- Panduan Umum: ${variationDesc}`,
+    '',
+    'ATURAN KETAT VARIASI PEMBUKA KALIMAT (ANTI-BOILERPLATE):',
+    '1. DILARANG KERAS mengulang-ulang kalimat pembuka klise/template yang seragam di awal setiap butir soal, seperti:',
+    '   - "Read the following [passage/poem/dialogue] carefully, then answer the question below."',
+    '   - "Bacalah teks/paragraf/kutipan berikut untuk menjawab soal nomor..."',
+    '   - "Perhatikan teks/pernyataan/tabel berikut di bawah ini..."',
+    '   - "Berdasarkan wacana di atas..."',
+    '2. Setiap butir soal WAJIB memiliki konstruksi kalimat pembuka yang BERBEDA-BEDA dan bervariasi. Padukan berbagai pola berikut di seluruh paket soal:',
+    '   * Pertanyaan Langsung (Direct Question): langsung fokus menanyakan inti masalah atau konsep. (Contoh: "Mengapa tokoh Maya memutuskan untuk pergi meninggalkan ruangan?", "Faktor utama apa yang melatarbelakangi penyerapan kosakata asing tersebut?")',
+    '   * Kalimat Rumpang Kontekstual (Sentence Completion): (Contoh: "Makna kata \'loanwords\' pada konteks kalimat pertama mengindikasikan bahwa...")',
+    '   * Analisis Komparatif / Relasional: (Contoh: "Perbedaan sikap yang mencolok antara Rudi dan Maya terlihat ketika...")',
+    '   * Evaluasi Inferensi / Bukti Tekstual: (Contoh: "Pernyataan yang paling didukung oleh bukti pada kutipan tersebut adalah...")',
+    '   * Analisis Sudut Pandang / Gaya / Fungsi Bahasa: (Contoh: "Penggunaan ungkapan sarkastik oleh tokoh pada dialog kedua bertujuan untuk...")',
+    '',
+    'ATURAN DISTRIBUSI STIMULUS & KERAGAMAN MATERI:',
+    '1. DILARANG menyalin 1 teks stimulus panjang yang sama persis ke dalam banyak butir soal secara repetitif.',
+    '2. Untuk paket soal yang meminta banyak butir, berikan stimulus mandiri (micro-stimulus/dialogue/kasus mini) yang berbeda-beda konteks pada tiap butir atau tiap kelompok kecil (maksimal 2–3 soal per teks pendek).',
+    '3. Pastikan setiap butir menguji indikator kompetensi atau dimensi kognitif yang berbeda (ide pokok, makna tersirat, kosakata kontekstual, analisis relasi antar-gagasan, nada/sikap penulis), bukan sekadar menanyakan hal yang sama berulang-ulang.',
+    '',
+    'FORMAT SEMANTIK TEKS STIMULUS (DIALOG, PUISI, DAN WACANA):',
+    '1. Jika soal memuat dialog percakapan antar-tokoh: DILARANG KERAS menggabungkan seluruh dialog ke dalam satu paragraf panjang! WAJIB diformat rapi per pergantian penutur menggunakan tag HTML semantik:',
+    '   <div class="cbt-dialogue">',
+    '     <p><strong>Nama Tokoh:</strong> Kalimat percakapan...</p>',
+    '     <p><strong>Nama Tokoh Lain:</strong> Kalimat tanggapan...</p>',
+    '   </div>',
+    '   <p>Pertanyaan pokok soal?</p>',
+    '2. Jika soal memuat sajak / puisi: WAJIB diformat per bait menggunakan <p> dan baris sajak menggunakan <br/>:',
+    '   <div class="cbt-poem">',
+    '     <p>Baris pertama sajak<br/>Baris kedua sajak<br/>Baris ketiga sajak</p>',
+    '   </div>',
+    '   <p>Pertanyaan pokok soal?</p>',
+    '3. Jika soal memuat kutipan wacana bacaan: pisahkan antar-paragraf menggunakan tag <p>...</p> yang rapi di dalam <div class="cbt-stimulus-box">.'
   );
 
   // 6. ADAPTASI MATA PELAJARAN
@@ -359,7 +391,7 @@ export function buildQuestionGeneratorPrompt(
       {
         questions: [
           {
-            stem: 'Teks pokok soal lengkap dan jelas',
+            stem: 'Teks pokok soal langsung menguji indikator kompetensi tanpa kalimat pembuka klise.',
             options: [
               { label: 'A', text: 'Pilihan jawaban A' },
               { label: 'B', text: 'Pilihan jawaban B' },
@@ -369,6 +401,18 @@ export function buildQuestionGeneratorPrompt(
             correctIndex: 0,
             explanation: 'Penjelasan singkat mengapa kunci jawaban ini tepat.',
             difficulty: 'balanced',
+          },
+          {
+            stem: '<div class="cbt-dialogue"><p><strong>Maya:</strong> Where are you going?</p><p><strong>Rudi:</strong> I need to catch the early train to Bandung.</p></div><p>What is Rudi planning to do based on the dialogue?</p>',
+            options: [
+              { label: 'A', text: 'Stay at home with Maya' },
+              { label: 'B', text: 'Travel by train in the morning' },
+              { label: 'C', text: 'Wait for the evening bus' },
+              { label: 'D', text: 'Cancel his upcoming trip' },
+            ],
+            correctIndex: 1,
+            explanation: 'Rudi secara eksplisit menyatakan "catch the early train to Bandung".',
+            difficulty: 'easy',
           },
         ],
       },

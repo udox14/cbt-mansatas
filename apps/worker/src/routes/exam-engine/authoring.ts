@@ -14,6 +14,8 @@ import {
   bulkCreateQuestions,
   updateQuestion,
   deleteQuestion,
+  deleteAllExamQuestions,
+  deleteQuestionsBatch,
 } from '../../services/exam-engine/questions.ts';
 import { authMiddleware } from '../../middleware/auth.ts';
 import {
@@ -108,6 +110,31 @@ authoringRoutes.put('/questions/:id', async (c) => {
 authoringRoutes.delete('/questions/:id', async (c) => {
   const result = await deleteQuestion(c.env.DB, c.req.param('id'));
   return c.json(ok(result.data, result.message));
+});
+
+authoringRoutes.delete('/exams/:examId/questions', async (c) => {
+  const result = await deleteAllExamQuestions(c.env.DB, c.req.param('examId'));
+  if (!result.success) {
+    return c.json(err(result.error!), (result.status as any) || 400);
+  }
+  return c.json(ok({ deleted_count: result.count }, result.message));
+});
+
+authoringRoutes.post('/exams/:examId/questions/delete-batch', async (c) => {
+  const examId = c.req.param('examId');
+  const body = await c.req.json<{ all?: boolean; question_ids?: string[] }>();
+  if (body?.all) {
+    const result = await deleteAllExamQuestions(c.env.DB, examId);
+    if (!result.success) {
+      return c.json(err(result.error!), (result.status as any) || 400);
+    }
+    return c.json(ok({ deleted_count: result.count }, result.message));
+  }
+  const result = await deleteQuestionsBatch(c.env.DB, examId, body?.question_ids || []);
+  if (!result.success) {
+    return c.json(err(result.error!), (result.status as any) || 400);
+  }
+  return c.json(ok({ deleted_count: result.count }, result.message));
 });
 
 // ── AI QUESTION GENERATOR ────────────────────────────────────

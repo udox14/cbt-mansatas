@@ -44,6 +44,8 @@ import {
   bulkCreateQuestions,
   updateQuestion,
   deleteQuestion,
+  deleteAllExamQuestions,
+  deleteQuestionsBatch,
 } from '../../services/exam-engine/questions.ts';
 import {
   generateAiQuestions,
@@ -426,6 +428,44 @@ ulangan.delete('/exams/:id/questions/:questionId', requirePermission('ulangan.ex
     await assertUlanganOwnership(c.env.DB, examId, user);
     const result = await deleteQuestion(c.env.DB, questionId);
     return c.json(ok(result.data, result.message));
+  } catch (e) {
+    return handleDomainError(e, c);
+  }
+});
+
+ulangan.delete('/exams/:id/questions', requirePermission('ulangan.exam.manage_own'), async (c) => {
+  const examId = c.req.param('id');
+  const user = c.get('user');
+  try {
+    await assertUlanganOwnership(c.env.DB, examId, user);
+    const result = await deleteAllExamQuestions(c.env.DB, examId);
+    if (!result.success) {
+      return c.json(err(result.error!), (result.status as any) || 400);
+    }
+    return c.json(ok({ deleted_count: result.count }, result.message));
+  } catch (e) {
+    return handleDomainError(e, c);
+  }
+});
+
+ulangan.post('/exams/:id/questions/delete-batch', requirePermission('ulangan.exam.manage_own'), async (c) => {
+  const examId = c.req.param('id');
+  const user = c.get('user');
+  const body = await c.req.json<{ all?: boolean; question_ids?: string[] }>();
+  try {
+    await assertUlanganOwnership(c.env.DB, examId, user);
+    if (body?.all) {
+      const result = await deleteAllExamQuestions(c.env.DB, examId);
+      if (!result.success) {
+        return c.json(err(result.error!), (result.status as any) || 400);
+      }
+      return c.json(ok({ deleted_count: result.count }, result.message));
+    }
+    const result = await deleteQuestionsBatch(c.env.DB, examId, body?.question_ids || []);
+    if (!result.success) {
+      return c.json(err(result.error!), (result.status as any) || 400);
+    }
+    return c.json(ok({ deleted_count: result.count }, result.message));
   } catch (e) {
     return handleDomainError(e, c);
   }
